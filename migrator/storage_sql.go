@@ -22,7 +22,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/engine"
 	_ "github.com/go-sql-driver/mysql"
 )
 

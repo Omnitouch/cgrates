@@ -21,8 +21,8 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) ChargerSv1GetChargersForEvent(ctx *context.Context, args *utils.CGREvent, reply *engine.ChargerProfiles) (err error) {

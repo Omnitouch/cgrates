@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // go test -bench RedisGetKeysForPrefix -run=^# -count 3 -benchtime=10s

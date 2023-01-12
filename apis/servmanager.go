@@ -20,7 +20,7 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/servmanager"
+	"github.com/Omnitouch/cgrates/servmanager"
 )
 
 func NewServiceManagerV1(sm *servmanager.ServiceManager) *ServiceManagerV1 {

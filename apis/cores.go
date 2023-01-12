@@ -19,8 +19,8 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/cores"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/cores"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewCoreSv1(cS *cores.CoreS) *CoreSv1 {

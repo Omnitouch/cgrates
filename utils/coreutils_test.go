@@ -1289,8 +1289,8 @@ func TestGetPathIndex(t *testing.T) {
 func TestIsURL(t *testing.T) {
 	urls := map[string]bool{
 		"/etc/usr/":                           false,
-		"https://github.com/cgrates/cgrates/": true,
-		"http://github.com/cgrates/cgrates/i": true,
+		"https://github.com/Omnitouch/cgrates/": true,
+		"http://github.com/Omnitouch/cgrates/i": true,
 	}
 	for url, expected := range urls {
 		if rply := IsURL(url); rply != expected {

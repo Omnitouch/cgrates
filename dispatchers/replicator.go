@@ -21,8 +21,8 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) ReplicatorSv1GetAccount(ctx *context.Context, args *utils.TenantIDWithAPIOpts, reply *utils.Account) (err error) {

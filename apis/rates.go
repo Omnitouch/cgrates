@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/rates"
+	"github.com/Omnitouch/cgrates/rates"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // GetRateProfile returns a Rate Profile based on tenant and id

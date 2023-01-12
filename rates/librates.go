@@ -25,7 +25,7 @@ import (
 
 	"github.com/ericlagergren/decimal"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 type rpWithWeight struct {

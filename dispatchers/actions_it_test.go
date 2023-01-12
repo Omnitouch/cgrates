@@ -24,7 +24,7 @@ package dispatchers
 import (
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var sTestsDspActPrf = []func(t *testing.T){

@@ -22,10 +22,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 )
 
 func TestConfigNewConfigSv1(t *testing.T) {

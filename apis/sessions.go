@@ -20,8 +20,8 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewSessionSv1(sS *sessions.SessionS) *SessionSv1 {

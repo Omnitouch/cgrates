@@ -21,7 +21,7 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) ActionSv1ExecuteActions(ctx *context.Context, args *utils.CGREvent, reply *string) (err error) {

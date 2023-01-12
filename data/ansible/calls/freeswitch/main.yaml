@@ -29,7 +29,7 @@
     golang_redis_filename: 'go{{ golang_version }}.linux-amd64.tar.gz'
     ###############################################################
     # CGRateS location
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
 
     rootUser : root
 

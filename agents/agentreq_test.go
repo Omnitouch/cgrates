@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/radigo"
 	"github.com/Omnitouch/go-diameter/v4/diam"
 	"github.com/Omnitouch/go-diameter/v4/diam/avp"
@@ -2343,12 +2343,12 @@ func TestAgReqRoundingDecimals(t *testing.T) {
 $go test -bench=.  -run=^$ -benchtime=10s -count=3
 goos: linux
 goarch: amd64
-pkg: github.com/cgrates/cgrates/agents
+pkg: github.com/Omnitouch/cgrates/agents
 BenchmarkAgReqSetField-16    	  990145	     12012 ns/op
 BenchmarkAgReqSetField-16    	 1000000	     12478 ns/op
 BenchmarkAgReqSetField-16    	  904732	     13250 ns/op
 PASS
-ok  	github.com/cgrates/cgrates/agents	36.788s
+ok  	github.com/Omnitouch/cgrates/agents	36.788s
 */
 func BenchmarkAgReqSetField(b *testing.B) {
 	cfg := config.NewDefaultCGRConfig()

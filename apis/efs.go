@@ -20,8 +20,8 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/efs"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/efs"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewEfSv1(efSv1 *efs.EfS) *EfSv1 {

@@ -8,172 +8,172 @@ if [ "$#" -ne 0 ]; then
 # to run the integration tests for gob only add `-rpc=*gob` as argument to this script
 # to run for a single dbtype add `-dbtype=*mysql` as argument
 # ./integaration_tes.sh -dbtype=*mysql -rpc=*gob
-echo "go test github.com/cgrates/cgrates/apis  -tags=integration $@"
-go test github.com/cgrates/cgrates/apis -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/apis  -tags=integration $@"
+go test github.com/Omnitouch/cgrates/apis -tags=integration $@
 results+=($?)
-echo "go test github.com/cgrates/cgrates/engine  -tags=integration $@"
-go test github.com/cgrates/cgrates/engine -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/engine  -tags=integration $@"
+go test github.com/Omnitouch/cgrates/engine -tags=integration $@
 results+=($?)
-# echo "go test github.com/cgrates/cgrates/ers -tags=integration $@"
-# go test github.com/cgrates/cgrates/ers -tags=integration $@
+# echo "go test github.com/Omnitouch/cgrates/ers -tags=integration $@"
+# go test github.com/Omnitouch/cgrates/ers -tags=integration $@
 # results+=($?)
-echo "go test github.com/cgrates/cgrates/loaders -tags=integration $@"
-go test github.com/cgrates/cgrates/loaders -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/loaders -tags=integration $@"
+go test github.com/Omnitouch/cgrates/loaders -tags=integration $@
 results+=($?)
-echo "go test github.com/cgrates/cgrates/general_tests -tags=integration $@"
-go test github.com/cgrates/cgrates/general_tests -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/general_tests -tags=integration $@"
+go test github.com/Omnitouch/cgrates/general_tests -tags=integration $@
 results+=($?)
-# echo "go test github.com/cgrates/cgrates/agents -tags=integration $@"
-# go test github.com/cgrates/cgrates/agents -tags=integration $@
+# echo "go test github.com/Omnitouch/cgrates/agents -tags=integration $@"
+# go test github.com/Omnitouch/cgrates/agents -tags=integration $@
 # results+=($?)
-# echo "go test github.com/cgrates/cgrates/sessions -tags=integration $@"
-# go test github.com/cgrates/cgrates/sessions -tags=integration $@
+# echo "go test github.com/Omnitouch/cgrates/sessions -tags=integration $@"
+# go test github.com/Omnitouch/cgrates/sessions -tags=integration $@
 # results+=($?)
-echo "go test github.com/cgrates/cgrates/dispatchers -tags=integration $@"
-go test github.com/cgrates/cgrates/dispatchers -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/dispatchers -tags=integration $@"
+go test github.com/Omnitouch/cgrates/dispatchers -tags=integration $@
 results+=($?)
-echo "go test github.com/cgrates/cgrates/registrarc -tags=integration $@"
-go test github.com/cgrates/cgrates/registrarc -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/registrarc -tags=integration $@"
+go test github.com/Omnitouch/cgrates/registrarc -tags=integration $@
 results+=($?)
-echo "go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration $@"
-go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration $@
+echo "go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration $@"
+go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration $@
 results+=($?)
 else
 # Internal
-echo 'go test github.com/cgrates/cgrates/engine  -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/engine -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/engine  -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/engine -tags=integration -dbtype=*internal
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*internal
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*internal
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*internal
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*internal
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*internal
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*internal'
-go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*internal
+echo 'go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*internal'
+go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*internal
 results+=($?)
-echo "go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*internal"
-go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*internal
+echo "go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*internal"
+go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*internal
 results+=($?)
-echo "go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*internal"
-go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*internal
+echo "go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*internal"
+go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*internal
 results+=($?)
 # SQL
-echo 'go test github.com/cgrates/cgrates/engine  -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/engine -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/engine  -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/engine -tags=integration -dbtype=*mysql
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*mysql
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*mysql
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*mysql
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*mysql
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*mysql
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*mysql'
-go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*mysql
+echo 'go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*mysql'
+go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*mysql
 results+=($?)
-echo "go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*mysql"
-go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*mysql
+echo "go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*mysql"
+go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*mysql
 results+=($?)
-echo "go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mysql"
-go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mysql
+echo "go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mysql"
+go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mysql
 results+=($?)
 # Mongo
-echo 'go test github.com/cgrates/cgrates/engine  -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/engine -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/engine  -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/engine -tags=integration -dbtype=*mongo
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*mongo
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*mongo
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*mongo
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*mongo
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*mongo
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*mongo'
-go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*mongo
+echo 'go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*mongo'
+go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*mongo
 results+=($?)
-echo "go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*mongo"
-go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*mongo
+echo "go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*mongo"
+go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*mongo
 results+=($?)
-echo "go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mongo"
-go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mongo
+echo "go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mongo"
+go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*mongo
 results+=($?)
 # Postgres
-echo 'go test github.com/cgrates/cgrates/engine  -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/engine -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/engine  -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/engine -tags=integration -dbtype=*postgres
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/ers -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/ers -tags=integration -dbtype=*postgres
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/loaders -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/loaders -tags=integration -dbtype=*postgres
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*postgres
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/agents -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/agents -tags=integration -dbtype=*postgres
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/sessions -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/sessions -tags=integration -dbtype=*postgres
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*postgres'
-go test github.com/cgrates/cgrates/dispatchers -tags=integration -dbtype=*postgres
+echo 'go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*postgres'
+go test github.com/Omnitouch/cgrates/dispatchers -tags=integration -dbtype=*postgres
 results+=($?)
-echo "go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*postgres"
-go test github.com/cgrates/cgrates/registrarc -tags=integration -dbtype=*postgres
+echo "go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*postgres"
+go test github.com/Omnitouch/cgrates/registrarc -tags=integration -dbtype=*postgres
 results+=($?)
-echo "go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*postgres"
-go test github.com/cgrates/cgrates/cmd/cgr-loader -tags=integration -dbtype=*postgres
+echo "go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*postgres"
+go test github.com/Omnitouch/cgrates/cmd/cgr-loader -tags=integration -dbtype=*postgres
 results+=($?)
 
 fi
 
-echo "go test github.com/cgrates/cgrates/analyzers -tags=integration"
-go test github.com/cgrates/cgrates/analyzers -tags=integration
+echo "go test github.com/Omnitouch/cgrates/analyzers -tags=integration"
+go test github.com/Omnitouch/cgrates/analyzers -tags=integration
 results+=($?)
-echo "go test github.com/cgrates/cgrates/ees -tags=integration"
-go test github.com/cgrates/cgrates/ees -tags=integration
+echo "go test github.com/Omnitouch/cgrates/ees -tags=integration"
+go test github.com/Omnitouch/cgrates/ees -tags=integration
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/config -tags=integration'
-go test github.com/cgrates/cgrates/config -tags=integration
+echo 'go test github.com/Omnitouch/cgrates/config -tags=integration'
+go test github.com/Omnitouch/cgrates/config -tags=integration
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/utils -tags=integration'
-go test github.com/cgrates/cgrates/utils -tags=integration
+echo 'go test github.com/Omnitouch/cgrates/utils -tags=integration'
+go test github.com/Omnitouch/cgrates/utils -tags=integration
 results+=($?)
-echo 'go test github.com/cgrates/cgrates/cores -tags=integration'
-go test github.com/cgrates/cgrates/cores -tags=integration
+echo 'go test github.com/Omnitouch/cgrates/cores -tags=integration'
+go test github.com/Omnitouch/cgrates/cores -tags=integration
 results+=($?)
-# echo 'go test github.com/cgrates/cgrates/migrator -tags=integration'
-# go test github.com/cgrates/cgrates/migrator -tags=integration
+# echo 'go test github.com/Omnitouch/cgrates/migrator -tags=integration'
+# go test github.com/Omnitouch/cgrates/migrator -tags=integration
 # results+=($?)
-# echo 'go test github.com/cgrates/cgrates/services -tags=integration'
-# go test github.com/cgrates/cgrates/services -tags=integration
+# echo 'go test github.com/Omnitouch/cgrates/services -tags=integration'
+# go test github.com/Omnitouch/cgrates/services -tags=integration
 # results+=($?)
 
 

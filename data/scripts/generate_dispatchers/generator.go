@@ -33,21 +33,21 @@ import (
 	"strconv"
 	"unicode"
 
-	"github.com/cgrates/cgrates/accounts"
-	"github.com/cgrates/cgrates/actions"
-	"github.com/cgrates/cgrates/analyzers"
-	"github.com/cgrates/cgrates/apis"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/cores"
-	"github.com/cgrates/cgrates/ees"
-	"github.com/cgrates/cgrates/efs"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/guardian"
-	"github.com/cgrates/cgrates/loaders"
-	"github.com/cgrates/cgrates/rates"
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/tpes"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/accounts"
+	"github.com/Omnitouch/cgrates/actions"
+	"github.com/Omnitouch/cgrates/analyzers"
+	"github.com/Omnitouch/cgrates/apis"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/cores"
+	"github.com/Omnitouch/cgrates/ees"
+	"github.com/Omnitouch/cgrates/efs"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/guardian"
+	"github.com/Omnitouch/cgrates/loaders"
+	"github.com/Omnitouch/cgrates/rates"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/tpes"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func main() {
@@ -131,7 +131,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 func generateService(subsystem string, srvs engine.IntService) *ast.File {
 	imports := utils.NewStringSet([]string{
-		"github.com/cgrates/cgrates/utils",
+		"github.com/Omnitouch/cgrates/utils",
 		"github.com/cgrates/birpc/context",
 	})
 	decl := make([]ast.Decl, 0)

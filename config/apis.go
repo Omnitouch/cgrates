@@ -25,7 +25,7 @@ import (
 	"fmt"
 
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // getSectionAsMap returns a section from config as a map[string]interface

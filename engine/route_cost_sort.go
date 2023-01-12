@@ -24,8 +24,8 @@ import (
 	"github.com/cgrates/birpc/context"
 	"github.com/ericlagergren/decimal"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func populateCostForRoutes(ctx *context.Context, cfg *config.CGRConfig, connMgr *ConnManager,

@@ -20,7 +20,7 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 )
 
 // NewConfigSv1 returns a new ConfigSv1

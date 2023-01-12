@@ -22,9 +22,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/loaders"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/loaders"
 )
 
 func TestLoadersNewLoaderSv1(t *testing.T) {

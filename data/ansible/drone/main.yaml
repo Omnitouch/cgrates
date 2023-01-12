@@ -20,7 +20,7 @@
     golang_redis_filename: 'go{{ golang_version }}.linux-amd64.tar.gz'
 
     #################################################################
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
     #################################################################
     drone_dir: "/home/{{ user }}/go/src/github.com/drone/drone"
 
@@ -158,7 +158,7 @@
 
     - name: git clone cgrates
       git:
-        repo: https://github.com/cgrates/cgrates.git
+        repo: https://github.com/Omnitouch/cgrates.git
         dest: '{{ cgrates_dir }}'
         update: yes
         force: yes

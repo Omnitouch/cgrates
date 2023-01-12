@@ -20,7 +20,7 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/loaders"
+	"github.com/Omnitouch/cgrates/loaders"
 )
 
 func NewLoaderSv1(ldrS *loaders.LoaderS) *LoaderSv1 {

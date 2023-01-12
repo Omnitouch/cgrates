@@ -21,9 +21,9 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/apis"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/apis"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) AdminSv1ComputeFilterIndexIDs(ctx *context.Context, args *utils.ArgsComputeFilterIndexIDs, reply *string) (err error) {

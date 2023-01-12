@@ -20,8 +20,8 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/ees"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/ees"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewEeSv1(eesV1 *ees.EeS) *EeSv1 {

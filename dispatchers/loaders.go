@@ -21,8 +21,8 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/loaders"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/loaders"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) LoaderSv1ImportZip(ctx *context.Context, args *loaders.ArgsProcessZip, reply *string) (err error) {

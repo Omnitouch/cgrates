@@ -24,7 +24,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // use provides a cleaner interface for chaining middleware for single routes.

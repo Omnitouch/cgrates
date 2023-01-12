@@ -23,8 +23,8 @@ import (
 
 	amqpv1 "github.com/Azure/go-amqp"
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // NewAMQPv1EE creates a poster for amqpv1

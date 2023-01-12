@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestAPIBanCfgloadFromJsonCfg(t *testing.T) {

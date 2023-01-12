@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/accounts"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/accounts"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // GetAccount returns an Account

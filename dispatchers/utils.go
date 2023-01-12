@@ -21,7 +21,7 @@ package dispatchers
 import (
 	"strings"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func ParseStringSet(s string) utils.StringSet {

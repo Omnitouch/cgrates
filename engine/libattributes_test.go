@@ -23,8 +23,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestConvertExternalToProfile(t *testing.T) {

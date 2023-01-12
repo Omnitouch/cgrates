@@ -22,11 +22,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/cgrates/ers"
+	"github.com/Omnitouch/cgrates/ers"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // TestEventReaderSCoverage for cover testing

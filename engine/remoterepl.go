@@ -20,7 +20,7 @@ package engine
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // UpdateReplicationFilters will set the connID in cache

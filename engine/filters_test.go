@@ -26,8 +26,8 @@ import (
 
 	"github.com/cgrates/baningo"
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestRatesCostFiltering(t *testing.T) {

@@ -34,9 +34,9 @@ import (
 
 	"github.com/cgrates/birpc"
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 /*
@@ -52,7 +52,7 @@ import (
  *         	`./redis-trib.rb create --replicas 1 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005 127.0.0.1:7006`
  *
  * To run the tests you need to specify the `redisCluster` flag and have the redis stopped:
- *    	`go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*mysql -run=TestRedisCluster -redisCluster  -v`
+ *    	`go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*mysql -run=TestRedisCluster -redisCluster  -v`
  *
  * The configuration of the cluster is the following:
  *		- node1 127.0.0.1:7001 master

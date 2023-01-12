@@ -20,7 +20,7 @@ package config
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // ListenCfg is the listen config section

@@ -23,9 +23,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 )
 
 func TestNewJSONFileER(t *testing.T) {

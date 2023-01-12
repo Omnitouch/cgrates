@@ -21,7 +21,7 @@ package engine
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // NewMapEvent makes sure the content is not nil

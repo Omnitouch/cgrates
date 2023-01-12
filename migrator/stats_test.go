@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/engine"
 )
 
 /*

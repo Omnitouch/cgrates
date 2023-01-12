@@ -21,7 +21,7 @@
 
     ###############################################################
     # CGRateS vars
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
     cgrates_branch: "1.0"
     cgrates_distribution: "nightly"
     ###############################################################
@@ -114,7 +114,7 @@
 
     - name: git clone cgrates
       git:
-        repo: https://github.com/cgrates/cgrates.git
+        repo: https://github.com/Omnitouch/cgrates.git
         dest: '{{ cgrates_dir }}'
         update: yes
         force: yes

@@ -21,8 +21,8 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) SessionSv1ActivateSessions(ctx *context.Context, args *utils.SessionIDsWithAPIOpts, reply *string) (err error) {

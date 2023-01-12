@@ -29,7 +29,7 @@ import (
 /*
 goos: linux
 goarch: amd64
-pkg: github.com/cgrates/cgrates/utils
+pkg: github.com/Omnitouch/cgrates/utils
 cpu: Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz
 BenchmarkCompilePathRegex
 BenchmarkCompilePathRegex      	 3744520	      3252 ns/op	     416 B/op	       9 allocs/op
@@ -40,7 +40,7 @@ BenchmarkCompilePathSliceRegex 	 2804264	      4358 ns/op	    1088 B/op	      14
 BenchmarkCompilePathSlice
 BenchmarkCompilePathSlice      	24116252	       501.2 ns/op	     224 B/op	       3 allocs/op
 PASS
-ok  	github.com/cgrates/cgrates/utils	57.174s
+ok  	github.com/Omnitouch/cgrates/utils	57.174s
 
 */
 const pathBnch = "Field1[*raw][0].Field2[0].Field3[*new].Field5"

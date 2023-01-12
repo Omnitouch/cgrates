@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // NewFWVProvider constructs a utils.DataProvider

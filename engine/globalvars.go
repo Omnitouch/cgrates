@@ -21,7 +21,7 @@ package engine
 import (
 	"net/http"
 
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 )
 
 // this file will contain all the global variable that are used by other subsystems

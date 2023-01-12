@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestDispatcherHCfgloadFromJsonCfg(t *testing.T) {

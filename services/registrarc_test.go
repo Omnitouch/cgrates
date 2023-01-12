@@ -23,11 +23,11 @@ import (
 	"testing"
 
 	"github.com/cgrates/birpc"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/cores"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/registrarc"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/cores"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/registrarc"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // TestDispatcherCoverage for cover testing

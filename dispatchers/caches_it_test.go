@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 

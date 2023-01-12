@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 )
 
 var (

@@ -30,12 +30,12 @@ import (
 
 	"github.com/cgrates/birpc"
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/cores"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/ers"
-	"github.com/cgrates/cgrates/servmanager"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/cores"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/ers"
+	"github.com/Omnitouch/cgrates/servmanager"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestEventReaderSReload(t *testing.T) {

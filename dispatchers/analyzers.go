@@ -21,8 +21,8 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/analyzers"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/analyzers"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) AnalyzerSv1Ping(ctx *context.Context, args *utils.CGREvent, reply *string) (err error) {

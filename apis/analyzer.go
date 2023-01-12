@@ -20,7 +20,7 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/analyzers"
+	"github.com/Omnitouch/cgrates/analyzers"
 )
 
 func NewAnalyzerSv1(aS *analyzers.AnalyzerS) *AnalyzerSv1 {

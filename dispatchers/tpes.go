@@ -21,8 +21,8 @@ package dispatchers
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/tpes"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/tpes"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) TPeSv1ExportTariffPlan(ctx *context.Context, args *tpes.ArgsExportTP, reply *[]uint8) (err error) {

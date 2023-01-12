@@ -25,7 +25,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 )
 
 func writeDefaultConfig(fileName string) error {

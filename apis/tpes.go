@@ -20,7 +20,7 @@ package apis
 
 import (
 	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/cgrates/tpes"
+	"github.com/Omnitouch/cgrates/tpes"
 )
 
 func NewTPeSv1(tpes *tpes.TPeS) *TPeSv1 {

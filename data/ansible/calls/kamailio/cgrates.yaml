@@ -11,7 +11,7 @@
 
 - name: git clone cgrates
   git:
-    repo: https://github.com/cgrates/cgrates.git
+    repo: https://github.com/Omnitouch/cgrates.git
     dest: '{{ cgrates_dir }}'
     update: yes
     force: yes

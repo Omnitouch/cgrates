@@ -21,7 +21,7 @@
 
     ###############################################################
     # CGRateS location
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
     cgrates_branch: "1.0"
     cgrates_distribution: "nightly"
     ###############################################################
@@ -159,7 +159,7 @@
 
     - name: git clone cgrates
       git:
-        repo: https://github.com/cgrates/cgrates.git
+        repo: https://github.com/Omnitouch/cgrates.git
         dest: '{{ cgrates_dir }}'
         update: yes
         force: yes
@@ -244,7 +244,7 @@
     - name: Download the tar.gz for the last commit
       become: yes
       get_url:
-        url: https://github.com/cgrates/cgrates/archive/{{ cgrates_branch }}/{{ gitVersion.stdout_lines[0] }}.tar.gz
+        url: https://github.com/Omnitouch/cgrates/archive/{{ cgrates_branch }}/{{ gitVersion.stdout_lines[0] }}.tar.gz
         dest: cgr_build/SOURCES/{{ gitVersion.stdout_lines[0] }}.tar.gz
      
     - name: Add cgrates.spec in SPECS

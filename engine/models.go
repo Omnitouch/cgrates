@@ -21,7 +21,7 @@ package engine
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // Structs here are one to one mapping of the tables and fields
