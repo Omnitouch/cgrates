@@ -1,6 +1,8 @@
-module github.com/Omnitouch/cgrates
+module github.com/omnitouch/cgrates
 
 go 1.18
+
+// replace github.com/omnitouch/cgrates => ~/go/src/cgrates
 
 // replace github.com/cgrates/radigo => ../radigo
 
