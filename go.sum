@@ -61,8 +61,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/Masterminds/semver/v3 v3.1.1 h1:hLg3sBzpNErnxhQtUy/mmLR2I9foDujNK030IGemrRc=
 github.com/Masterminds/semver/v3 v3.1.1/go.mod h1:VPu/7SZ7ePZ3QOrcuXROw5FAcLl4a0cBrbBpGY/8hQs=
-github.com/Omnitouch/go-diameter/v4 v4.0.4 h1:/hnf2U5KiOrB9EFW4957TRIWZJr5HTD/Jh5oondnyhE=
-github.com/Omnitouch/go-diameter/v4 v4.0.4/go.mod h1:+PBj7asA9icnokj8UizOAzoMmztEerYVN8eunQGi3YQ=
+github.com/Omnitouch/go-diameter/v4 v4.0.5 h1:Lkdo7igK3XxFf4WfgBhnbWMwaf7+UxQUo6If+ORgptg=
+github.com/Omnitouch/go-diameter/v4 v4.0.5/go.mod h1:+PBj7asA9icnokj8UizOAzoMmztEerYVN8eunQGi3YQ=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/RoaringBitmap/roaring v0.4.23/go.mod h1:D0gp8kJQgE1A4LQ5wFLggQEyvDi06Mq5mKs52e1TwOo=
 github.com/RoaringBitmap/roaring v1.2.1 h1:58/LJlg/81wfEHd5L9qsHduznOIhyv4qb1yWcSvVq9A=

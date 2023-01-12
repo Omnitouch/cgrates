@@ -10,6 +10,7 @@ go 1.18
 
 require (
 	github.com/Azure/go-amqp v0.17.5
+	github.com/Omnitouch/go-diameter/v4 v4.0.5
 	github.com/antchfx/xmlquery v1.3.11
 	github.com/aws/aws-sdk-go v1.44.43
 	github.com/blevesearch/bleve v1.0.14
@@ -29,7 +30,6 @@ require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elastic/go-elasticsearch v0.0.0
 	github.com/ericlagergren/decimal v0.0.0-20211103172832-aca2edc11f73
-	github.com/Omnitouch/go-diameter/v4 v4.0.5
 	github.com/fsnotify/fsnotify v1.5.4
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/mediocregopher/radix/v3 v3.8.0
