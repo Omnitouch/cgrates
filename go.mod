@@ -27,7 +27,7 @@ require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elastic/go-elasticsearch v0.0.0
 	github.com/ericlagergren/decimal v0.0.0-20211103172832-aca2edc11f73
-	github.com/fiorix/go-diameter/v4 v4.0.4
+	github.com/Omnitouch/go-diameter/v4 v4.0.4
 	github.com/fsnotify/fsnotify v1.5.4
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/mediocregopher/radix/v3 v3.8.0
