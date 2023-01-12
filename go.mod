@@ -1,4 +1,4 @@
-module github.com/Omnitouch/cgrates
+module github.com/omnitouch/cgrates
 
 go 1.18
 
