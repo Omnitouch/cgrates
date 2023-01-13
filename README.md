@@ -1,3 +1,6 @@
+## Omnitouch Build:
+## Ensure git repo is located in /usr/src/cgrates
+
 ## Real-time Online/Offline Charging System (OCS) for Telecom & ISP environments ##
 
 [![Build Status](https://secure.travis-ci.org/cgrates/cgrates.png)](http://travis-ci.org/cgrates/cgrates)
