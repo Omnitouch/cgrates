@@ -19,6 +19,19 @@
 	"db_type": "*internal",	
 },
 
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+"rals": {
+	"enabled": true,
+},
+
+"schedulers": {
+	"enabled": true,
+},
+
 "cdrs": {
 	"enabled": true,
 },
@@ -32,15 +45,12 @@
 	"attributes_conns": ["*internal"],
 },
 
-"rates": {
-	"enabled": true,
-},
 
 "sessions": {
 	"enabled": true,
 	"attributes_conns": ["*localhost"],
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*localhost"],
+	"rals_conns": ["*localhost"],
 	"cdrs_conns": ["*localhost"],
 },
 
@@ -51,8 +61,9 @@
 	"forced_disconnect": "*asr",								// the request to send to diameter on DisconnectSession <*none|*asr|*rar>
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 }

@@ -19,101 +19,61 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package config
 
 import (
-	"time"
-
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
-	"github.com/ericlagergren/decimal"
-)
-
-var (
-	RoutesProfileCountDftOpt = utils.IntPointer(1)
-	RoutesUsageDftOpt        = decimal.New(int64(time.Minute), 0)
-)
-
-const (
-	RoutesContextDftOpt      = "*routes"
-	RoutesIgnoreErrorsDftOpt = false
-	RoutesMaxCostDftOpt      = utils.EmptyString
+	"github.com/cgrates/cgrates/utils"
 )
 
 type RoutesOpts struct {
-	Context      []*utils.DynamicStringOpt
-	IgnoreErrors []*utils.DynamicBoolOpt
-	MaxCost      []*utils.DynamicInterfaceOpt
-	Limit        []*utils.DynamicIntPointerOpt
-	Offset       []*utils.DynamicIntPointerOpt
-	MaxItems     []*utils.DynamicIntPointerOpt
-	ProfileCount []*utils.DynamicIntPointerOpt
-	Usage        []*utils.DynamicDecimalBigOpt
+	Context      string
+	IgnoreErrors bool
+	MaxCost      interface{}
+	Limit        *int
+	Offset       *int
+	ProfileCount *int
 }
 
 // RouteSCfg is the configuration of route service
 type RouteSCfg struct {
-	Enabled                bool
-	IndexedSelects         bool
-	StringIndexedFields    *[]string
-	PrefixIndexedFields    *[]string
-	SuffixIndexedFields    *[]string
-	ExistsIndexedFields    *[]string
-	NotExistsIndexedFields *[]string
-	NestedFields           bool
-	AttributeSConns        []string
-	ResourceSConns         []string
-	StatSConns             []string
-	RateSConns             []string
-	AccountSConns          []string
-	DefaultRatio           int
-	Opts                   *RoutesOpts
+	Enabled             bool
+	IndexedSelects      bool
+	StringIndexedFields *[]string
+	PrefixIndexedFields *[]string
+	SuffixIndexedFields *[]string
+	AttributeSConns     []string
+	ResourceSConns      []string
+	StatSConns          []string
+	RALsConns           []string
+	DefaultRatio        int
+	NestedFields        bool
+	Opts                *RoutesOpts
 }
 
-// loadRouteSCfg loads the RouteS section of the configuration
-func (rts *RouteSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnRouteSCfg := new(RouteSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, RouteSJSON, jsnRouteSCfg); err != nil {
-		return
-	}
-	return rts.loadFromJSONCfg(jsnRouteSCfg)
-}
-
-func (rtsOpts *RoutesOpts) loadFromJSONCfg(jsnCfg *RoutesOptsJson) (err error) {
+func (rtsOpts *RoutesOpts) loadFromJSONCfg(jsnCfg *RoutesOptsJson) {
 	if jsnCfg == nil {
 		return
 	}
 	if jsnCfg.Context != nil {
-		rtsOpts.Context = append(rtsOpts.Context, jsnCfg.Context...)
+		rtsOpts.Context = *jsnCfg.Context
 	}
 	if jsnCfg.IgnoreErrors != nil {
-		rtsOpts.IgnoreErrors = append(rtsOpts.IgnoreErrors, jsnCfg.IgnoreErrors...)
+		rtsOpts.IgnoreErrors = *jsnCfg.IgnoreErrors
 	}
 	if jsnCfg.MaxCost != nil {
-		rtsOpts.MaxCost = append(rtsOpts.MaxCost, jsnCfg.MaxCost...)
+		rtsOpts.MaxCost = jsnCfg.MaxCost
 	}
 	if jsnCfg.Limit != nil {
-		rtsOpts.Limit = append(rtsOpts.Limit, utils.IntToIntPointerDynamicOpts(jsnCfg.Limit)...)
+		rtsOpts.Limit = jsnCfg.Limit
 	}
 	if jsnCfg.Offset != nil {
-		rtsOpts.Offset = append(rtsOpts.Offset, utils.IntToIntPointerDynamicOpts(jsnCfg.Offset)...)
-	}
-	if jsnCfg.MaxItems != nil {
-		rtsOpts.MaxItems = append(rtsOpts.MaxItems, utils.IntToIntPointerDynamicOpts(jsnCfg.MaxItems)...)
+		rtsOpts.Offset = jsnCfg.Offset
 	}
 	if jsnCfg.ProfileCount != nil {
-		rtsOpts.ProfileCount = append(rtsOpts.ProfileCount, utils.IntToIntPointerDynamicOpts(jsnCfg.ProfileCount)...)
+		rtsOpts.ProfileCount = jsnCfg.ProfileCount
 	}
-	if jsnCfg.Usage != nil {
-		var usage []*utils.DynamicDecimalBigOpt
-		if usage, err = utils.StringToDecimalBigDynamicOpts(jsnCfg.Usage); err != nil {
-			return
-		}
-		rtsOpts.Usage = append(rtsOpts.Usage, usage...)
-	}
-	return
 }
 
 func (rts *RouteSCfg) loadFromJSONCfg(jsnCfg *RouteSJsonCfg) (err error) {
 	if jsnCfg == nil {
-		return
+		return nil
 	}
 	if jsnCfg.Enabled != nil {
 		rts.Enabled = *jsnCfg.Enabled
@@ -122,34 +82,65 @@ func (rts *RouteSCfg) loadFromJSONCfg(jsnCfg *RouteSJsonCfg) (err error) {
 		rts.IndexedSelects = *jsnCfg.Indexed_selects
 	}
 	if jsnCfg.String_indexed_fields != nil {
-		rts.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.String_indexed_fields))
+		sif := make([]string, len(*jsnCfg.String_indexed_fields))
+		for i, fID := range *jsnCfg.String_indexed_fields {
+			sif[i] = fID
+		}
+		rts.StringIndexedFields = &sif
 	}
 	if jsnCfg.Prefix_indexed_fields != nil {
-		rts.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Prefix_indexed_fields))
+		pif := make([]string, len(*jsnCfg.Prefix_indexed_fields))
+		for i, fID := range *jsnCfg.Prefix_indexed_fields {
+			pif[i] = fID
+		}
+		rts.PrefixIndexedFields = &pif
 	}
 	if jsnCfg.Suffix_indexed_fields != nil {
-		rts.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Suffix_indexed_fields))
-	}
-	if jsnCfg.Exists_indexed_fields != nil {
-		rts.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Exists_indexed_fields))
-	}
-	if jsnCfg.Notexists_indexed_fields != nil {
-		rts.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Notexists_indexed_fields))
+		sif := make([]string, len(*jsnCfg.Suffix_indexed_fields))
+		for i, fID := range *jsnCfg.Suffix_indexed_fields {
+			sif[i] = fID
+		}
+		rts.SuffixIndexedFields = &sif
 	}
 	if jsnCfg.Attributes_conns != nil {
-		rts.AttributeSConns = updateInternalConns(*jsnCfg.Attributes_conns, utils.MetaAttributes)
+		rts.AttributeSConns = make([]string, len(*jsnCfg.Attributes_conns))
+		for idx, conn := range *jsnCfg.Attributes_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			rts.AttributeSConns[idx] = conn
+			if conn == utils.MetaInternal {
+				rts.AttributeSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)
+			}
+		}
 	}
 	if jsnCfg.Resources_conns != nil {
-		rts.ResourceSConns = updateInternalConns(*jsnCfg.Resources_conns, utils.MetaResources)
+		rts.ResourceSConns = make([]string, len(*jsnCfg.Resources_conns))
+		for idx, conn := range *jsnCfg.Resources_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			rts.ResourceSConns[idx] = conn
+			if conn == utils.MetaInternal {
+				rts.ResourceSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources)
+			}
+		}
 	}
 	if jsnCfg.Stats_conns != nil {
-		rts.StatSConns = updateInternalConns(*jsnCfg.Stats_conns, utils.MetaStats)
+		rts.StatSConns = make([]string, len(*jsnCfg.Stats_conns))
+		for idx, conn := range *jsnCfg.Stats_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			rts.StatSConns[idx] = conn
+			if conn == utils.MetaInternal {
+				rts.StatSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats)
+			}
+		}
 	}
-	if jsnCfg.Rates_conns != nil {
-		rts.RateSConns = updateInternalConns(*jsnCfg.Rates_conns, utils.MetaRates)
-	}
-	if jsnCfg.Accounts_conns != nil {
-		rts.AccountSConns = updateInternalConns(*jsnCfg.Accounts_conns, utils.MetaAccounts)
+	if jsnCfg.Rals_conns != nil {
+		rts.RALsConns = make([]string, len(*jsnCfg.Rals_conns))
+		for idx, conn := range *jsnCfg.Rals_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			rts.RALsConns[idx] = conn
+			if conn == utils.MetaInternal {
+				rts.RALsConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)
+			}
+		}
 	}
 	if jsnCfg.Default_ratio != nil {
 		rts.DefaultRatio = *jsnCfg.Default_ratio
@@ -158,70 +149,30 @@ func (rts *RouteSCfg) loadFromJSONCfg(jsnCfg *RouteSJsonCfg) (err error) {
 		rts.NestedFields = *jsnCfg.Nested_fields
 	}
 	if jsnCfg.Opts != nil {
-		err = rts.Opts.loadFromJSONCfg(jsnCfg.Opts)
+		rts.Opts.loadFromJSONCfg(jsnCfg.Opts)
 	}
-	return
-}
-func (rts *RoutesOpts) Clone() (cln *RoutesOpts) {
-	var context []*utils.DynamicStringOpt
-	if rts.Context != nil {
-		context = utils.CloneDynamicStringOpt(rts.Context)
-	}
-	var ignoreErrors []*utils.DynamicBoolOpt
-	if rts.IgnoreErrors != nil {
-		ignoreErrors = utils.CloneDynamicBoolOpt(rts.IgnoreErrors)
-	}
-	var maxCost []*utils.DynamicInterfaceOpt
-	if rts.MaxCost != nil {
-		maxCost = utils.CloneDynamicInterfaceOpt(rts.MaxCost)
-	}
-	var profileCount []*utils.DynamicIntPointerOpt
-	if rts.ProfileCount != nil {
-		profileCount = utils.CloneDynamicIntPointerOpt(rts.ProfileCount)
-	}
-	var limit []*utils.DynamicIntPointerOpt
-	if rts.Limit != nil {
-		limit = utils.CloneDynamicIntPointerOpt(rts.Limit)
-	}
-	var offset []*utils.DynamicIntPointerOpt
-	if rts.Offset != nil {
-		offset = utils.CloneDynamicIntPointerOpt(rts.Offset)
-	}
-	var maxItems []*utils.DynamicIntPointerOpt
-	if rts.MaxItems != nil {
-		maxItems = utils.CloneDynamicIntPointerOpt(rts.MaxItems)
-	}
-	var usage []*utils.DynamicDecimalBigOpt
-	if rts.Usage != nil {
-		usage = utils.CloneDynamicDecimalBigOpt(rts.Usage)
-	}
-	cln = &RoutesOpts{
-		Context:      context,
-		IgnoreErrors: ignoreErrors,
-		MaxCost:      maxCost,
-		Limit:        limit,
-		Offset:       offset,
-		MaxItems:     maxItems,
-		ProfileCount: profileCount,
-		Usage:        usage,
-	}
-	return
+	return nil
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (rts RouteSCfg) AsMapInterface(string) interface{} {
+func (rts *RouteSCfg) AsMapInterface() (initialMP map[string]interface{}) {
 	opts := map[string]interface{}{
 		utils.OptsContext:         rts.Opts.Context,
-		utils.MetaProfileCountCfg: rts.Opts.ProfileCount,
 		utils.MetaIgnoreErrorsCfg: rts.Opts.IgnoreErrors,
-		utils.MetaMaxCostCfg:      rts.Opts.MaxCost,
-		utils.MetaLimitCfg:        rts.Opts.Limit,
-		utils.MetaOffsetCfg:       rts.Opts.Offset,
-		utils.MetaMaxItemsCfg:     rts.Opts.MaxItems,
-		utils.MetaUsage:           rts.Opts.Usage,
 	}
-
-	mp := map[string]interface{}{
+	if rts.Opts.MaxCost != nil {
+		opts[utils.MetaMaxCostCfg] = rts.Opts.MaxCost
+	}
+	if rts.Opts.Limit != nil {
+		opts[utils.MetaLimitCfg] = *rts.Opts.Limit
+	}
+	if rts.Opts.Offset != nil {
+		opts[utils.MetaOffsetCfg] = *rts.Opts.Offset
+	}
+	if rts.Opts.ProfileCount != nil {
+		opts[utils.MetaProfileCountCfg] = rts.Opts.ProfileCount
+	}
+	initialMP = map[string]interface{}{
 		utils.EnabledCfg:        rts.Enabled,
 		utils.IndexedSelectsCfg: rts.IndexedSelects,
 		utils.DefaultRatioCfg:   rts.DefaultRatio,
@@ -229,40 +180,86 @@ func (rts RouteSCfg) AsMapInterface(string) interface{} {
 		utils.OptsCfg:           opts,
 	}
 	if rts.StringIndexedFields != nil {
-		mp[utils.StringIndexedFieldsCfg] = utils.CloneStringSlice(*rts.StringIndexedFields)
+		stringIndexedFields := make([]string, len(*rts.StringIndexedFields))
+		for i, item := range *rts.StringIndexedFields {
+			stringIndexedFields[i] = item
+		}
+		initialMP[utils.StringIndexedFieldsCfg] = stringIndexedFields
 	}
 	if rts.PrefixIndexedFields != nil {
-		mp[utils.PrefixIndexedFieldsCfg] = utils.CloneStringSlice(*rts.PrefixIndexedFields)
+		prefixIndexedFields := make([]string, len(*rts.PrefixIndexedFields))
+		for i, item := range *rts.PrefixIndexedFields {
+			prefixIndexedFields[i] = item
+		}
+		initialMP[utils.PrefixIndexedFieldsCfg] = prefixIndexedFields
 	}
 	if rts.SuffixIndexedFields != nil {
-		mp[utils.SuffixIndexedFieldsCfg] = utils.CloneStringSlice(*rts.SuffixIndexedFields)
-	}
-	if rts.ExistsIndexedFields != nil {
-		mp[utils.ExistsIndexedFieldsCfg] = utils.CloneStringSlice(*rts.ExistsIndexedFields)
-	}
-	if rts.NotExistsIndexedFields != nil {
-		mp[utils.NotExistsIndexedFieldsCfg] = utils.CloneStringSlice(*rts.NotExistsIndexedFields)
+		suffixIndexedFieldsCfg := make([]string, len(*rts.SuffixIndexedFields))
+		for i, item := range *rts.SuffixIndexedFields {
+			suffixIndexedFieldsCfg[i] = item
+		}
+		initialMP[utils.SuffixIndexedFieldsCfg] = suffixIndexedFieldsCfg
 	}
 	if rts.AttributeSConns != nil {
-		mp[utils.AttributeSConnsCfg] = getInternalJSONConns(rts.AttributeSConns)
+		attributeSConns := make([]string, len(rts.AttributeSConns))
+		for i, item := range rts.AttributeSConns {
+			attributeSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes) {
+				attributeSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.AttributeSConnsCfg] = attributeSConns
+	}
+	if rts.RALsConns != nil {
+		ralSConns := make([]string, len(rts.RALsConns))
+		for i, item := range rts.RALsConns {
+			ralSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder) {
+				ralSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.RALsConnsCfg] = ralSConns
 	}
 	if rts.ResourceSConns != nil {
-		mp[utils.ResourceSConnsCfg] = getInternalJSONConns(rts.ResourceSConns)
+		resourceSConns := make([]string, len(rts.ResourceSConns))
+		for i, item := range rts.ResourceSConns {
+			resourceSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources) {
+				resourceSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ResourceSConnsCfg] = resourceSConns
 	}
 	if rts.StatSConns != nil {
-		mp[utils.StatSConnsCfg] = getInternalJSONConns(rts.StatSConns)
+		statSConns := make([]string, len(rts.StatSConns))
+		for i, item := range rts.StatSConns {
+			statSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats) {
+				statSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.StatSConnsCfg] = statSConns
 	}
-	if rts.RateSConns != nil {
-		mp[utils.RateSConnsCfg] = getInternalJSONConns(rts.RateSConns)
-	}
-	if rts.AccountSConns != nil {
-		mp[utils.AccountSConnsCfg] = getInternalJSONConns(rts.AccountSConns)
-	}
-	return mp
+	return
 }
 
-func (RouteSCfg) SName() string             { return RouteSJSON }
-func (rts RouteSCfg) CloneSection() Section { return rts.Clone() }
+func (rts *RoutesOpts) Clone() (cln *RoutesOpts) {
+	cln = &RoutesOpts{
+		Context:      rts.Context,
+		IgnoreErrors: rts.IgnoreErrors,
+		MaxCost:      rts.MaxCost,
+	}
+	if rts.ProfileCount != nil {
+		cln.ProfileCount = utils.IntPointer(*rts.ProfileCount)
+	}
+	if rts.Limit != nil {
+		cln.Limit = utils.IntPointer(*rts.Limit)
+	}
+	if rts.Offset != nil {
+		cln.Offset = utils.IntPointer(*rts.Offset)
+	}
+	return
+}
 
 // Clone returns a deep copy of RouteSCfg
 func (rts RouteSCfg) Clone() (cln *RouteSCfg) {
@@ -274,135 +271,49 @@ func (rts RouteSCfg) Clone() (cln *RouteSCfg) {
 		Opts:           rts.Opts.Clone(),
 	}
 	if rts.AttributeSConns != nil {
-		cln.AttributeSConns = utils.CloneStringSlice(rts.AttributeSConns)
+		cln.AttributeSConns = make([]string, len(rts.AttributeSConns))
+		for i, con := range rts.AttributeSConns {
+			cln.AttributeSConns[i] = con
+		}
 	}
 	if rts.ResourceSConns != nil {
-		cln.ResourceSConns = utils.CloneStringSlice(rts.ResourceSConns)
+		cln.ResourceSConns = make([]string, len(rts.ResourceSConns))
+		for i, con := range rts.ResourceSConns {
+			cln.ResourceSConns[i] = con
+		}
 	}
 	if rts.StatSConns != nil {
-		cln.StatSConns = utils.CloneStringSlice(rts.StatSConns)
+		cln.StatSConns = make([]string, len(rts.StatSConns))
+		for i, con := range rts.StatSConns {
+			cln.StatSConns[i] = con
+		}
 	}
-	if rts.RateSConns != nil {
-		cln.RateSConns = utils.CloneStringSlice(rts.RateSConns)
-	}
-	if rts.AccountSConns != nil {
-		cln.AccountSConns = utils.CloneStringSlice(rts.AccountSConns)
+	if rts.RALsConns != nil {
+		cln.RALsConns = make([]string, len(rts.RALsConns))
+		for i, con := range rts.RALsConns {
+			cln.RALsConns[i] = con
+		}
 	}
 	if rts.StringIndexedFields != nil {
-		cln.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*rts.StringIndexedFields))
+		idx := make([]string, len(*rts.StringIndexedFields))
+		for i, dx := range *rts.StringIndexedFields {
+			idx[i] = dx
+		}
+		cln.StringIndexedFields = &idx
 	}
 	if rts.PrefixIndexedFields != nil {
-		cln.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*rts.PrefixIndexedFields))
+		idx := make([]string, len(*rts.PrefixIndexedFields))
+		for i, dx := range *rts.PrefixIndexedFields {
+			idx[i] = dx
+		}
+		cln.PrefixIndexedFields = &idx
 	}
 	if rts.SuffixIndexedFields != nil {
-		cln.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*rts.SuffixIndexedFields))
-	}
-	if rts.ExistsIndexedFields != nil {
-		cln.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*rts.ExistsIndexedFields))
-	}
-	if rts.NotExistsIndexedFields != nil {
-		cln.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*rts.NotExistsIndexedFields))
+		idx := make([]string, len(*rts.SuffixIndexedFields))
+		for i, dx := range *rts.SuffixIndexedFields {
+			idx[i] = dx
+		}
+		cln.SuffixIndexedFields = &idx
 	}
 	return
-}
-
-type RoutesOptsJson struct {
-	Context      []*utils.DynamicStringOpt    `json:"*context"`
-	IgnoreErrors []*utils.DynamicBoolOpt      `json:"*ignoreErrors"`
-	MaxCost      []*utils.DynamicInterfaceOpt `json:"*maxCost"`
-	Limit        []*utils.DynamicIntOpt       `json:"*limit"`
-	Offset       []*utils.DynamicIntOpt       `json:"*offset"`
-	MaxItems     []*utils.DynamicIntOpt       `json:"*maxItems"`
-	ProfileCount []*utils.DynamicIntOpt       `json:"*profileCount"`
-	Usage        []*utils.DynamicStringOpt    `json:"*usage"`
-}
-
-// Route service config section
-type RouteSJsonCfg struct {
-	Enabled                  *bool
-	Indexed_selects          *bool
-	String_indexed_fields    *[]string
-	Prefix_indexed_fields    *[]string
-	Suffix_indexed_fields    *[]string
-	Exists_indexed_fields    *[]string
-	Notexists_indexed_fields *[]string
-	Nested_fields            *bool // applies when indexed fields is not defined
-	Attributes_conns         *[]string
-	Resources_conns          *[]string
-	Stats_conns              *[]string
-	Rates_conns              *[]string
-	Accounts_conns           *[]string
-	Default_ratio            *int
-	Opts                     *RoutesOptsJson
-}
-
-func diffRoutesOptsJsonCfg(d *RoutesOptsJson, v1, v2 *RoutesOpts) *RoutesOptsJson {
-	if d == nil {
-		d = new(RoutesOptsJson)
-	}
-	if !utils.DynamicStringOptEqual(v1.Context, v2.Context) {
-		d.Context = v2.Context
-	}
-	if !utils.DynamicIntPointerOptEqual(v1.Limit, v2.Limit) {
-		d.Limit = utils.IntPointerToIntDynamicOpts(v2.Limit)
-	}
-	if !utils.DynamicIntPointerOptEqual(v1.Offset, v2.Offset) {
-		d.Offset = utils.IntPointerToIntDynamicOpts(v2.Offset)
-	}
-	if !utils.DynamicIntPointerOptEqual(v1.MaxItems, v2.MaxItems) {
-		d.MaxItems = utils.IntPointerToIntDynamicOpts(v2.MaxItems)
-	}
-	if !utils.DynamicInterfaceOptEqual(v1.MaxCost, v2.MaxCost) {
-		d.MaxCost = v2.MaxCost
-	}
-	if !utils.DynamicBoolOptEqual(v1.IgnoreErrors, v2.IgnoreErrors) {
-		d.IgnoreErrors = v2.IgnoreErrors
-	}
-	if !utils.DynamicIntPointerOptEqual(v1.ProfileCount, v2.ProfileCount) {
-		d.ProfileCount = utils.IntPointerToIntDynamicOpts(v2.ProfileCount)
-	}
-	if !utils.DynamicDecimalBigOptEqual(v1.Usage, v2.Usage) {
-		d.Usage = utils.DecimalBigToStringDynamicOpts(v2.Usage)
-	}
-	return d
-}
-
-func diffRouteSJsonCfg(d *RouteSJsonCfg, v1, v2 *RouteSCfg) *RouteSJsonCfg {
-	if d == nil {
-		d = new(RouteSJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if v1.IndexedSelects != v2.IndexedSelects {
-		d.Indexed_selects = utils.BoolPointer(v2.IndexedSelects)
-	}
-	d.String_indexed_fields = diffIndexSlice(d.String_indexed_fields, v1.StringIndexedFields, v2.StringIndexedFields)
-	d.Prefix_indexed_fields = diffIndexSlice(d.Prefix_indexed_fields, v1.PrefixIndexedFields, v2.PrefixIndexedFields)
-	d.Suffix_indexed_fields = diffIndexSlice(d.Suffix_indexed_fields, v1.SuffixIndexedFields, v2.SuffixIndexedFields)
-	d.Exists_indexed_fields = diffIndexSlice(d.Exists_indexed_fields, v1.ExistsIndexedFields, v2.ExistsIndexedFields)
-	d.Notexists_indexed_fields = diffIndexSlice(d.Notexists_indexed_fields, v1.NotExistsIndexedFields, v2.NotExistsIndexedFields)
-	if v1.NestedFields != v2.NestedFields {
-		d.Nested_fields = utils.BoolPointer(v2.NestedFields)
-	}
-	if !utils.SliceStringEqual(v1.AttributeSConns, v2.AttributeSConns) {
-		d.Attributes_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AttributeSConns))
-	}
-	if !utils.SliceStringEqual(v1.ResourceSConns, v2.ResourceSConns) {
-		d.Resources_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ResourceSConns))
-	}
-	if !utils.SliceStringEqual(v1.StatSConns, v2.StatSConns) {
-		d.Stats_conns = utils.SliceStringPointer(getInternalJSONConns(v2.StatSConns))
-	}
-	if !utils.SliceStringEqual(v1.RateSConns, v2.RateSConns) {
-		d.Rates_conns = utils.SliceStringPointer(getInternalJSONConns(v2.RateSConns))
-	}
-	if !utils.SliceStringEqual(v1.AccountSConns, v2.AccountSConns) {
-		d.Accounts_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AccountSConns))
-	}
-	if v1.DefaultRatio != v2.DefaultRatio {
-		d.Default_ratio = utils.IntPointer(v2.DefaultRatio)
-	}
-	d.Opts = diffRoutesOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

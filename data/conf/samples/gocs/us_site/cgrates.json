@@ -1,27 +1,28 @@
 {
+
   "general": {
     "log_level": 7,
-    "node_id": "US_SITE"
+    "node_id": "US_SITE",
   },
 
   "listen": {
     "rpc_json": ":4012",
     "rpc_gob": ":4013",
-    "http": ":4080"
+    "http": ":4080",
   },
 
   "rpc_conns": {
     "conn1": {
       "strategy": "*first",
-      "conns": [{"address": "127.0.0.1:4012", "transport":"*json"}]
+      "conns": [{"address": "127.0.0.1:4012", "transport":"*json"}],
     },
     "rplConn": {
       "strategy": "*first",
-      "conns": [{"address": "127.0.0.1:3013", "transport":"*gob"}]
+      "conns": [{"address": "127.0.0.1:3013", "transport":"*gob"}],
     },
     "*internal": {
       "strategy": "*first",
-      "conns": [{"address": "*internal"}]
+      "conns": [{"address": "*internal"}],
     }
   },
 
@@ -32,6 +33,16 @@
     "replication_conns": ["rplConn"],
     "items":{
       "*accounts":{"replicate":true},
+      "*reverse_destinations": {"replicate":false},
+      "*destinations": {"replicate":false},
+      "*rating_plans": {"replicate":false},
+      "*rating_profiles":{"replicate":false},
+      "*actions":{"replicate":false},
+      "*action_plans": {"replicate":false},
+      "*account_action_plans":{"replicate":false},
+      "*action_triggers":{"replicate":false},
+      "*shared_groups":{"replicate":false},
+      "*timings": {"replicate":false},
       "*resource_profiles":{"replicate":false},
       "*resources":{"replicate":false},
       "*statqueue_profiles": {"replicate":false},
@@ -45,46 +56,60 @@
       "*dispatcher_profiles":{"replicate":false},
       "*dispatcher_hosts":{"replicate":false},
       "*load_ids":{"replicate":false},
-      "*indexes":{"replicate":false}
+      "*resource_filter_indexes" : {"replicate":false},
+		  "*stat_filter_indexes" : {"replicate":false},
+		  "*threshold_filter_indexes" : {"replicate":false},
+		  "*route_filter_indexes" : {"replicate":false},
+		  "*attribute_filter_indexes" : {"replicate":false},
+		  "*charger_filter_indexes" : {"replicate":false},
+		  "*dispatcher_filter_indexes" : {"replicate":false},
+		  "*reverse_filter_indexes" : {"replicate":false},
     }
   },
 
- 
+  "stor_db": {
+    "db_password": "CGRateS.org",
+  },
 
-  "rates": {
+
+  "rals": {
     "enabled": true,
-    "max_increments":3000000
+    "max_increments":3000000,
+  },
+
+
+  "schedulers": {
+    "enabled": true,
+    "cdrs_conns": ["conn1"],
   },
 
 
   "cdrs": {
     "enabled": true,
     "chargers_conns":["conn1"],
-    "rates_conns": ["*internal"]
+    "rals_conns": ["*internal"],
   },
 
 
   "chargers": {
-    "enabled": true
+    "enabled": true,
   },
 
 
   "sessions": {
     "enabled": true,
     "listen_bijson": ":4014",
-    "rates_conns": ["*internal"],
+    "rals_conns": ["*internal"],
     "cdrs_conns": ["*internal"],
-    "chargers_conns": ["*internal"]
+    "chargers_conns": ["*internal"],
   },
 
 
-  "admins": {
+  "apiers": {
     "enabled": true,
     "caches_conns":["conn1"],
+    "scheduler_conns": ["conn1"],
   },
 
-  "accounts": {
-    "enabled": true
-  }
 
 }

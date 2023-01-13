@@ -21,7 +21,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package ees
 
-/*
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
+)
+
 func TestWriteFldPosts(t *testing.T) {
 	// can't convert
 	var notanExportEvent string
@@ -30,7 +39,6 @@ func TestWriteFldPosts(t *testing.T) {
 	dir := "/tmp/engine/libcdre_test/"
 	exportEvent := &ExportEvents{
 		failedPostsDir: dir,
-		module:         "module",
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal("Error removing folder: ", dir, err)
@@ -41,7 +49,7 @@ func TestWriteFldPosts(t *testing.T) {
 	config.CgrConfig().GeneralCfg().FailedPostsDir = dir
 	writeFailedPosts("itmID", exportEvent)
 
-	if filename, err := filepath.Glob(filepath.Join(dir, "module|*.gob")); err != nil {
+	if filename, err := filepath.Glob(filepath.Join(dir, "EEs|*.gob")); err != nil {
 		t.Error(err)
 	} else if len(filename) == 0 {
 		t.Error("Expecting one file")
@@ -103,4 +111,3 @@ func TestWriteToFile(t *testing.T) {
 		t.Error(err)
 	}
 }
-*/

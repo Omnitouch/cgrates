@@ -18,12 +18,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import "github.com/Omnitouch/cgrates/utils"
+import "github.com/cgrates/cgrates/utils"
 
 func init() {
 	c := &CmdGetLoadHistory{
-		name: "load_history",
-		// rpcMethod: utils.APIerSv1GetLoadHistory,
+		name:      "load_history",
+		rpcMethod: utils.APIerSv1GetLoadHistory,
 		rpcParams: new(utils.Paginator),
 	}
 	commands[c.Name()] = c

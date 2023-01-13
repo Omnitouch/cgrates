@@ -24,12 +24,12 @@ package sessions
 import (
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cenkalti/rpc2"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -42,11 +42,12 @@ var (
 	sessionsTests        = []func(t *testing.T){
 		testSessionsBiRPCInitCfg,
 		testSessionsBiRPCResetDataDb,
+		testSessionsBiRPCResetStorDb,
 		testSessionsBiRPCStartEngine,
 		testSessionsBiRPCApierRpcConn,
-		// testSessionsBiRPCTPFromFolder,
-		//testSessionsBiRPCSessionAutomaticDisconnects,
-		//testSessionsBiRPCSessionOriginatorTerminate,
+		testSessionsBiRPCTPFromFolder,
+		testSessionsBiRPCSessionAutomaticDisconnects,
+		testSessionsBiRPCSessionOriginatorTerminate,
 		testSessionsBiRPCStopCgrEngine,
 	}
 )
@@ -80,7 +81,7 @@ func handleDisconnectSession(clnt *rpc2.Client,
 func testSessionsBiRPCInitCfg(t *testing.T) {
 	sessionsBiRPCCfgPath = path.Join(*dataDir, "conf", "samples", sessionsBiRPCCfgDIR)
 	// Init config first
-	sessionsBiRPCCfg, err = config.NewCGRConfigFromPath(context.Background(), sessionsBiRPCCfgPath)
+	sessionsBiRPCCfg, err = config.NewCGRConfigFromPath(sessionsBiRPCCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -88,7 +89,14 @@ func testSessionsBiRPCInitCfg(t *testing.T) {
 
 // Remove data in both rating and accounting db
 func testSessionsBiRPCResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(sessionsBiRPCCfg); err != nil {
+	if err := engine.InitDataDb(sessionsBiRPCCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testSessionsBiRPCResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(sessionsBiRPCCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -118,8 +126,6 @@ func testSessionsBiRPCApierRpcConn(t *testing.T) {
 	dummyClnt.Close() // close so we don't get EOF error when disconnecting server
 }
 
-/*
-
 // Load the tariff plan, creating accounts and their balances
 func testSessionsBiRPCTPFromFolder(t *testing.T) {
 	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "oldtutorial")}
@@ -147,7 +153,7 @@ func testSessionsBiRPCSessionAutomaticDisconnects(t *testing.T) {
 	} else if reply != utils.OK {
 		t.Errorf("Received: %s", reply)
 	}
-	var acnt *utils.Account
+	var acnt *engine.Account
 	attrGetAcnt := &utils.AttrGetAccount{
 		Tenant:  attrSetBalance.Tenant,
 		Account: attrSetBalance.Account,
@@ -373,8 +379,6 @@ func testSessionsBiRPCSessionOriginatorTerminate(t *testing.T) {
 		}
 	}
 }
-
-*/
 
 func testSessionsBiRPCStopCgrEngine(t *testing.T) {
 	if err := sessionsBiRPC.Close(); err != nil { // Close the connection so we don't get EOF warnings from client

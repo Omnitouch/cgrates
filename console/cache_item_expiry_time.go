@@ -21,7 +21,7 @@ package console
 import (
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {

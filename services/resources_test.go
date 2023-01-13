@@ -22,12 +22,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestResourceSCoverage for cover testing
@@ -36,12 +35,13 @@ func TestResourceSCoverage(t *testing.T) {
 	cfg.ThresholdSCfg().Enabled = true
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	db := NewDataDBService(cfg, nil, srvDep)
-	chS := NewCacheService(cfg, db, nil, server, make(chan context.ClientConnector, 1), anz, nil, srvDep)
-	reS := NewResourceService(cfg, db, chS, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep)
+	reS := NewResourceService(cfg, db, chS, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep)
 
 	if reS.IsRunning() {
 		t.Errorf("Expected service to be down")
@@ -52,11 +52,11 @@ func TestResourceSCoverage(t *testing.T) {
 		cacheS:      chS,
 		filterSChan: filterSChan,
 		server:      server,
-		connChan:    make(chan birpc.ClientConnector, 1),
+		connChan:    make(chan rpcclient.ClientConnector, 1),
 		connMgr:     nil,
 		anz:         anz,
 		srvDep:      srvDep,
-		reS:         &engine.ResourceS{},
+		reS:         &engine.ResourceService{},
 	}
 	if !reS2.IsRunning() {
 		t.Errorf("Expected service to be running")

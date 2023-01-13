@@ -23,21 +23,23 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewSliceDp(t *testing.T) {
-	record := []string{"cgrates.org", "ATTR_1", "*string:~*opts.*context:*sessions|*cdrs;*string:~*req.Account:1007", "10", "*req.Account", "*constant", "1001", "false"}
+	record := []string{"cgrates.org", "ATTR_1", "*sessions;*cdrs", "*string:~*req.Account:1007", "2014-01-14T00:00:00Z", "*req.Account", "*constant", "1001", "false", "10"}
 	index := map[string]int{
 		"Tenant":             1,
 		"ID":                 2,
-		"FilterIDs":          3,
-		"Weight":             4,
-		"AttributeFilterIDs": 5,
-		"Path":               6,
-		"Type":               7,
-		"Value":              8,
-		"Blocker":            9,
+		"Contexts":           3,
+		"FilterIDs":          4,
+		"ActivationInterval": 5,
+		"AttributeFilterIDs": 6,
+		"Path":               8,
+		"Type":               9,
+		"Value":              10,
+		"Blocker":            11,
+		"Weight":             12,
 	}
 	expected := &SliceDP{
 		req:    record,
@@ -53,13 +55,15 @@ func TestGetIndexValue(t *testing.T) {
 	index := map[string]int{
 		"Tenant":             1,
 		"ID":                 2,
-		"FilterIDs":          3,
-		"Weight":             4,
-		"AttributeFilterIDs": 5,
-		"Path":               6,
-		"Type":               7,
-		"Value":              8,
-		"Blocker":            9,
+		"Contexts":           3,
+		"FilterIDs":          4,
+		"ActivationInterval": 5,
+		"AttributeFilterIDs": 6,
+		"Path":               8,
+		"Type":               9,
+		"Value":              10,
+		"Blocker":            11,
+		"Weight":             12,
 	}
 	sliceDp := SliceDP{
 		idxAls: index,
@@ -76,13 +80,15 @@ func TestGetIndexValueKey(t *testing.T) {
 	index := map[string]int{
 		"Tenant":             1,
 		"ID":                 2,
-		"FilterIDs":          3,
-		"Weight":             4,
-		"AttributeFilterIDs": 5,
-		"Path":               6,
-		"Type":               7,
-		"Value":              8,
-		"Blocker":            9,
+		"Contexts":           3,
+		"FilterIDs":          4,
+		"ActivationInterval": 5,
+		"AttributeFilterIDs": 6,
+		"Path":               8,
+		"Type":               9,
+		"Value":              10,
+		"Blocker":            11,
+		"Weight":             12,
 	}
 	sliceDp := SliceDP{
 		idxAls: index,
@@ -134,7 +140,7 @@ func TestFieldAsInterfaceSliceDP(t *testing.T) {
 func TestFieldAsInterfaceMultiplePaths(t *testing.T) {
 	pth := []string{"Tenant", "ID"}
 	sliceDp := new(SliceDP)
-	expected := "Invalid fieldPath [Tenant ID] "
+	expected := "Invalid fieldPath [Tenant ID]"
 	if _, err := sliceDp.FieldAsInterface(pth); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
@@ -159,7 +165,7 @@ func TestFieldAsInterfaceIgnoringError(t *testing.T) {
 			"NotFound": 0,
 		},
 	}
-	expected := "Ignoring record: [cgrates.org] with error : strconv.Atoi: parsing \"Tenant\": invalid syntax "
+	expected := "Ignoring record: [cgrates.org] with error : strconv.Atoi: parsing \"Tenant\": invalid syntax"
 	if _, err := slicedp.FieldAsInterface(pth); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}

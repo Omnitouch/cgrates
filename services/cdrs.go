@@ -23,25 +23,27 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	v2 "github.com/cgrates/cgrates/apier/v2"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewCDRServer returns the CDR Server
 func NewCDRServer(cfg *config.CGRConfig, dm *DataDBService,
-	filterSChan chan *engine.FilterS,
-	server *cores.Server, internalCDRServerChan chan birpc.ClientConnector,
+	storDB *StorDBService, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalCDRServerChan chan rpcclient.ClientConnector,
 	connMgr *engine.ConnManager, anz *AnalyzerService,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &CDRServer{
 		connChan:    internalCDRServerChan,
 		cfg:         cfg,
 		dm:          dm,
+		storDB:      storDB,
 		filterSChan: filterSChan,
 		server:      server,
 		connMgr:     connMgr,
@@ -53,14 +55,16 @@ func NewCDRServer(cfg *config.CGRConfig, dm *DataDBService,
 // CDRServer implements Service interface
 type CDRServer struct {
 	sync.RWMutex
-	cfg *config.CGRConfig
-	dm  *DataDBService
-
+	cfg         *config.CGRConfig
+	dm          *DataDBService
+	storDB      *StorDBService
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
 
 	cdrS     *engine.CDRServer
-	connChan chan birpc.ClientConnector
+	rpcv1    *v1.CDRsV1
+	rpcv2    *v2.CDRsV2
+	connChan chan rpcclient.ClientConnector
 	connMgr  *engine.ConnManager
 
 	stopChan chan struct{}
@@ -69,45 +73,46 @@ type CDRServer struct {
 }
 
 // Start should handle the sercive start
-func (cdrService *CDRServer) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (cdrService *CDRServer) Start() (err error) {
 	if cdrService.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.CDRs))
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, cdrService.filterSChan); err != nil {
-		return
-	}
+	filterS := <-cdrService.filterSChan
+	cdrService.filterSChan <- filterS
+	dbchan := cdrService.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
-	var datadb *engine.DataManager
-	if datadb, err = cdrService.dm.WaitForDM(ctx); err != nil {
-		return
-	}
-
+	storDBChan := make(chan engine.StorDB, 1)
 	cdrService.stopChan = make(chan struct{})
+	cdrService.storDB.RegisterSyncChan(storDBChan)
 
 	cdrService.Lock()
 	defer cdrService.Unlock()
 
-	cdrService.cdrS = engine.NewCDRServer(cdrService.cfg, datadb, filterS, cdrService.connMgr)
+	cdrService.cdrS = engine.NewCDRServer(cdrService.cfg, storDBChan, datadb, filterS, cdrService.connMgr)
 	go cdrService.cdrS.ListenAndServe(cdrService.stopChan)
 	runtime.Gosched()
+	utils.Logger.Info("Registering CDRS HTTP Handlers.")
+	cdrService.cdrS.RegisterHandlersToServer(cdrService.server)
 	utils.Logger.Info("Registering CDRS RPC service.")
-	srv, _ := engine.NewServiceWithName(cdrService.cdrS, utils.CDRs, true)
-	// srv, _ := birpc.NewService(apis.NewCDRsV1(cdrService.cdrS), "", false)
+	cdrService.rpcv1 = v1.NewCDRsV1(cdrService.cdrS)
+	cdrService.rpcv2 = &v2.CDRsV2{CDRsV1: *cdrService.rpcv1}
 	if !cdrService.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			cdrService.server.RpcRegister(s)
-		}
+		cdrService.server.RpcRegister(cdrService.rpcv1)
+		cdrService.server.RpcRegister(cdrService.rpcv2)
+		// Make the cdr server available for internal communication
+		cdrService.server.RpcRegister(cdrService.cdrS) // register CdrServer for internal usage (TODO: refactor this)
 	}
-	cdrService.connChan <- cdrService.anz.GetInternalCodec(srv, utils.CDRServer) // Signal that cdrS is operational
+	cdrService.connChan <- cdrService.anz.GetInternalCodec(cdrService.cdrS, utils.CDRServer) // Signal that cdrS is operational
 	return
 }
 
 // Reload handles the change of config
-func (cdrService *CDRServer) Reload(*context.Context, context.CancelFunc) (err error) {
+func (cdrService *CDRServer) Reload() (err error) {
 	return
 }
 
@@ -116,9 +121,10 @@ func (cdrService *CDRServer) Shutdown() (err error) {
 	cdrService.Lock()
 	close(cdrService.stopChan)
 	cdrService.cdrS = nil
+	cdrService.rpcv1 = nil
+	cdrService.rpcv2 = nil
 	<-cdrService.connChan
 	cdrService.Unlock()
-	cdrService.server.RpcUnregisterName(utils.CDRsV1)
 	return
 }
 

@@ -20,35 +20,29 @@ package engine
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/cgrates/birpc/context"
-
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewLoadDistributionSorter .
-func NewLoadDistributionSorter(cfg *config.CGRConfig, connMgr *ConnManager) *LoadDistributionSorter {
-	return &LoadDistributionSorter{cfg: cfg, connMgr: connMgr}
+func NewLoadDistributionSorter(rS *RouteService) *LoadDistributionSorter {
+	return &LoadDistributionSorter{rS: rS,
+		sorting: utils.MetaLoad}
 }
 
 // LoadDistributionSorter orders suppliers based on their Resource Usage
 type LoadDistributionSorter struct {
-	cfg     *config.CGRConfig
-	connMgr *ConnManager
+	sorting string
+	rS      *RouteService
 }
 
 // SortRoutes .
-func (ws *LoadDistributionSorter) SortRoutes(ctx *context.Context, prflID string,
-	routes map[string]*RouteWithWeight, ev *utils.CGREvent, extraOpts *optsGetRoutes) (sortedRoutes *SortedRoutes, err error) {
-	if len(ws.cfg.RouteSCfg().StatSConns) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing("connIDs")
-	}
+func (ws *LoadDistributionSorter) SortRoutes(prflID string,
+	routes map[string]*Route, suplEv *utils.CGREvent, extraOpts *optsGetRoutes) (sortedRoutes *SortedRoutes, err error) {
 	sortedRoutes = &SortedRoutes{
 		ProfileID: prflID,
-		Sorting:   utils.MetaLoad,
-		Routes:    make([]*SortedRoute, 0, len(routes)),
+		Sorting:   ws.sorting,
+		Routes:    make([]*SortedRoute, 0),
 	}
 	for _, route := range routes {
 		// we should have at least 1 statID defined for counting CDR (a.k.a *sum:1)
@@ -58,91 +52,21 @@ func (ws *LoadDistributionSorter) SortRoutes(ctx *context.Context, prflID string
 					utils.RouteS, route.ID))
 			return nil, utils.NewErrMandatoryIeMissing("StatIDs")
 		}
-		srtRoute := &SortedRoute{
-			RouteID: route.ID,
-			SortingData: map[string]interface{}{
-				utils.Weight: route.Weight,
-			},
-			sortingDataDecimal: map[string]*utils.Decimal{
-				utils.Weight: utils.NewDecimalFromFloat64(route.Weight),
-			},
-			RouteParameters: route.RouteParameters,
-		}
-		if route.blocker {
-			srtRoute.SortingData[utils.Blocker] = true
-		}
-		var metricSum *utils.Decimal
-		if metricSum, err = populateStatsForLoadRoute(ctx, ws.cfg, ws.connMgr, route.StatIDs, ev.Tenant); err != nil { //create metric map for route
-			if extraOpts.ignoreErrors {
-				utils.Logger.Warning(
-					fmt.Sprintf("<%s> ignoring route with ID: %s, err: %s",
-						utils.RouteS, route.ID, err.Error()))
-				err = nil
-				continue
-			}
-			return
-		}
-		srtRoute.SortingData[utils.Load] = metricSum
-		srtRoute.sortingDataDecimal[utils.Load] = metricSum
-		var pass bool
-		if pass, err = routeLazyPass(ctx, route.lazyCheckRules, ev, srtRoute.SortingData,
-			ws.cfg.FilterSCfg().ResourceSConns,
-			ws.cfg.FilterSCfg().StatSConns,
-			ws.cfg.FilterSCfg().AccountSConns); err != nil {
-			return
-		} else if pass {
+		if srtSpl, pass, err := ws.rS.populateSortingData(suplEv, route, extraOpts); err != nil {
+			return nil, err
+		} else if pass && srtSpl != nil {
 			// Add the ratio in SortingData so we can used it later in SortLoadDistribution
-			floatRatio, err := utils.IfaceAsBig(route.cacheRoute[utils.MetaRatio])
+			floatRatio, err := utils.IfaceAsFloat64(route.cacheRoute[utils.MetaRatio])
 			if err != nil {
 				utils.Logger.Warning(
 					fmt.Sprintf("<%s> cannot convert ratio <%+v> to float64 supplier: <%s>",
 						utils.RouteS, route.cacheRoute[utils.MetaRatio], route.ID))
 			}
-			srtRoute.SortingData[utils.Ratio] = floatRatio
-			srtRoute.sortingDataDecimal[utils.Ratio] = &utils.Decimal{floatRatio}
-			sortedRoutes.Routes = append(sortedRoutes.Routes, srtRoute)
+			srtSpl.SortingData[utils.Ratio] = floatRatio
+			srtSpl.sortingDataF64[utils.Ratio] = floatRatio
+			sortedRoutes.Routes = append(sortedRoutes.Routes, srtSpl)
 		}
 	}
 	sortedRoutes.SortLoadDistribution()
-	return
-}
-
-// populateStatsForLoadRoute will query a list of statIDs and return the sum of metrics
-// first metric found is always returned
-func populateStatsForLoadRoute(ctx *context.Context, cfg *config.CGRConfig,
-	connMgr *ConnManager, statIDs []string, tenant string) (result *utils.Decimal, err error) {
-	result = utils.NewDecimalFromFloat64(0)
-	for _, statID := range statIDs {
-		// check if we get an ID in the following form (StatID:MetricID)
-		statWithMetric := strings.Split(statID, utils.InInFieldSep)
-		var metrics map[string]*utils.Decimal
-		if err = connMgr.Call(ctx,
-			cfg.RouteSCfg().StatSConns,
-			utils.StatSv1GetQueueDecimalMetrics,
-			&utils.TenantIDWithAPIOpts{
-				TenantID: &utils.TenantID{
-					Tenant: tenant, ID: statWithMetric[0]}},
-			&metrics); err != nil &&
-			err.Error() != utils.ErrNotFound.Error() {
-			utils.Logger.Warning(
-				fmt.Sprintf("<%s> error: %s getting statMetrics for stat : %s",
-					utils.RouteS, err.Error(), statWithMetric[0]))
-			continue
-		}
-		if len(statWithMetric) == 2 { // in case we have MetricID defined with StatID we consider only that metric
-			// check if statQueue have metric defined
-			metricVal, has := metrics[statWithMetric[1]]
-			if !has {
-				return nil, fmt.Errorf("<%s> error: %s metric %s for statID: %s",
-					utils.RouteS, utils.ErrNotFound, statWithMetric[1], statWithMetric[0])
-			}
-			result = utils.SumDecimal(result, metricVal)
-		} else { // otherwise we consider all metrics
-			for _, val := range metrics {
-				//add value of metric in a slice in case that we get the same metric from different stat
-				result = utils.SumDecimal(result, val)
-			}
-		}
-	}
 	return
 }

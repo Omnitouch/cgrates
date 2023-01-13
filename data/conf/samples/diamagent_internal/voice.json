@@ -396,7 +396,7 @@
 				{
 					"tag": "Usage",
 					"path": "*cgreq.Usage",
-					"type": "*ccUsage",
+					"type": "*cc_usage",
 					"mandatory": true, 
 					"value":  "~*req.CC-Request-Number;~*req.Used-Service-Unit.CC-Time:s/(.*)/${1}s/;5m"
 				},

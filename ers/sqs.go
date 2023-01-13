@@ -28,21 +28,19 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewSQSER return a new sqs event reader
 func NewSQSER(cfg *config.CGRConfig, cfgIdx int,
 	rdrEvents, partialEvents chan *erEvent, rdrErr chan error,
-	fltrS *engine.FilterS, rdrExit chan struct{}, connMgr *engine.ConnManager) (er EventReader, err error) {
+	fltrS *engine.FilterS, rdrExit chan struct{}) (er EventReader, err error) {
 
 	rdr := &SQSER{
-		connMgr:       connMgr,
 		cgrCfg:        cfg,
 		cfgIdx:        cfgIdx,
 		fltrS:         fltrS,
@@ -58,16 +56,16 @@ func NewSQSER(cfg *config.CGRConfig, cfgIdx int,
 		}
 	}
 	rdr.parseOpts(rdr.Config().Opts)
+	rdr.createPoster()
 	return rdr, nil
 }
 
 // SQSER implements EventReader interface for sqs message
 type SQSER struct {
 	// sync.RWMutex
-	cgrCfg  *config.CGRConfig
-	cfgIdx  int // index of config instance within ERsCfg.Readers
-	fltrS   *engine.FilterS
-	connMgr *engine.ConnManager
+	cgrCfg *config.CGRConfig
+	cfgIdx int // index of config instance within ERsCfg.Readers
+	fltrS  *engine.FilterS
 
 	rdrEvents     chan *erEvent // channel to dispatch the events created to
 	partialEvents chan *erEvent // channel to dispatch the partial events created to
@@ -121,7 +119,7 @@ func (rdr *SQSER) processMessage(body []byte) (err error) {
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
 	var pass bool
-	if pass, err = rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err = rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
 		return
 	}
@@ -130,7 +128,6 @@ func (rdr *SQSER) processMessage(body []byte) (err error) {
 	}
 	cgrEv := utils.NMAsCGREvent(agReq.CGRRequest, agReq.Tenant, utils.NestingSep, agReq.Opts)
 	rdrEv := rdr.rdrEvents
-	cgrEv.APIOpts = make(map[string]interface{})
 	if _, isPartial := cgrEv.APIOpts[utils.PartialOpt]; isPartial {
 		rdrEv = rdr.partialEvents
 	}
@@ -195,7 +192,6 @@ func (rdr *SQSER) getQueueURLWithClient(svc sqsClient) (err error) {
 }
 
 func (rdr *SQSER) readLoop(scv sqsClient) (err error) {
-	// scv := sqs.New(rdr.session)
 	for !rdr.isClosed() {
 		if rdr.Config().ConcurrentReqs != -1 {
 			<-rdr.cap // do not try to read if the limit is reached
@@ -228,10 +224,11 @@ func (rdr *SQSER) createPoster() {
 		processedOpt = new(config.EventExporterOpts)
 	}
 	rdr.poster = ees.NewSQSee(&config.EventExporterCfg{
-		ID:         rdr.Config().ID,
-		ExportPath: utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
-		Attempts:   rdr.cgrCfg.EEsCfg().GetDefaultExporter().Attempts,
-		Opts:       processedOpt,
+		ID:             rdr.Config().ID,
+		ExportPath:     utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
+		Attempts:       rdr.cgrCfg.GeneralCfg().PosterAttempts,
+		Opts:           processedOpt,
+		FailedPostsDir: rdr.cgrCfg.GeneralCfg().FailedPostsDir,
 	}, nil)
 }
 
@@ -263,15 +260,16 @@ func (rdr *SQSER) readMsg(scv sqsClient, msg *sqs.Message) (err error) {
 		rdr.rdrErr <- err
 		return
 	}
+
 	if rdr.poster != nil { // post it
-		if err = ees.ExportWithAttempts(context.Background(), rdr.poster, body, key,
-			rdr.connMgr, rdr.cgrCfg.GeneralCfg().DefaultTenant); err != nil {
+		if err = ees.ExportWithAttempts(rdr.poster, body, key); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> writing message %s error: %s",
 					utils.ERs, key, err.Error()))
 			return
 		}
 	}
+
 	return
 }
 

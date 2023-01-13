@@ -22,20 +22,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewRouteService returns the Route Service
 func NewRouteService(cfg *config.CGRConfig, dm *DataDBService,
-	cacheS *CacheService, filterSChan chan *engine.FilterS,
-	server *cores.Server, internalRouteSChan chan birpc.ClientConnector,
+	cacheS *engine.CacheS, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalRouteSChan chan rpcclient.ClientConnector,
 	connMgr *engine.ConnManager, anz *AnalyzerService,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &RouteService{
@@ -56,56 +55,48 @@ type RouteService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	dm          *DataDBService
-	cacheS      *CacheService
+	cacheS      *engine.CacheS
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
 	connMgr     *engine.ConnManager
 
-	routeS   *engine.RouteS
-	connChan chan birpc.ClientConnector
+	routeS   *engine.RouteService
+	rpc      *v1.RouteSv1
+	connChan chan rpcclient.ClientConnector
 	anz      *AnalyzerService
 	srvDep   map[string]*sync.WaitGroup
 }
 
 // Start should handle the sercive start
-func (routeS *RouteService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (routeS *RouteService) Start() (err error) {
 	if routeS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	if err = routeS.cacheS.WaitToPrecache(ctx,
-		utils.CacheRouteProfiles,
-		utils.CacheRouteFilterIndexes); err != nil {
-		return
-	}
+	<-routeS.cacheS.GetPrecacheChannel(utils.CacheRouteProfiles)
+	<-routeS.cacheS.GetPrecacheChannel(utils.CacheRouteFilterIndexes)
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, routeS.filterSChan); err != nil {
-		return
-	}
+	filterS := <-routeS.filterSChan
+	routeS.filterSChan <- filterS
+	dbchan := routeS.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
-	var datadb *engine.DataManager
-	if datadb, err = routeS.dm.WaitForDM(ctx); err != nil {
-		return
-	}
 	routeS.Lock()
 	defer routeS.Unlock()
 	routeS.routeS = engine.NewRouteService(datadb, filterS, routeS.cfg, routeS.connMgr)
 
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.RouteS))
-	srv, _ := engine.NewService(routeS.routeS)
-	// srv, _ := birpc.NewService(apis.NewRouteSv1(routeS.routeS), "", false)
+	routeS.rpc = v1.NewRouteSv1(routeS.routeS)
 	if !routeS.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			routeS.server.RpcRegister(s)
-		}
+		routeS.server.RpcRegister(routeS.rpc)
 	}
-	routeS.connChan <- routeS.anz.GetInternalCodec(srv, utils.RouteS)
+	routeS.connChan <- routeS.anz.GetInternalCodec(routeS.rpc, utils.RouteS)
 	return
 }
 
 // Reload handles the change of config
-func (routeS *RouteService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (routeS *RouteService) Reload() (err error) {
 	return
 }
 
@@ -115,8 +106,8 @@ func (routeS *RouteService) Shutdown() (err error) {
 	defer routeS.Unlock()
 	routeS.routeS.Shutdown() //we don't verify the error because shutdown never returns an error
 	routeS.routeS = nil
+	routeS.rpc = nil
 	<-routeS.connChan
-	routeS.server.RpcUnregisterName(utils.RouteSv1)
 	return
 }
 

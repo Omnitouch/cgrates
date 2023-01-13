@@ -24,26 +24,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 type EventExporter interface {
-	Cfg() *config.EventExporterCfg                                                      // return the config
-	Connect() error                                                                     // called before exporting an event to make sure it is connected
-	ExportEvent(ctx *context.Context, content interface{}, extraData interface{}) error // called on each event to be exported
-	Close() error                                                                       // called when the exporter needs to terminate
-	GetMetrics() *utils.SafeMapStorage                                                  // called to get metrics
+	Cfg() *config.EventExporterCfg         // return the config
+	Connect() error                        // called before exporting an event to make sure it is connected
+	ExportEvent(interface{}, string) error // called on each event to be exported
+	Close() error                          // called when the exporter needs to terminate
+	GetMetrics() *utils.SafeMapStorage     // called to get metrics
 	PrepareMap(*utils.CGREvent) (interface{}, error)
 	PrepareOrderMap(*utils.OrderedNavigableMap) (interface{}, error)
-	ExtraData(*utils.CGREvent) interface{}
 }
 
 // NewEventExporter produces exporters
-func NewEventExporter(cfg *config.EventExporterCfg, cgrCfg *config.CGRConfig,
-	filterS *engine.FilterS, connMngr *engine.ConnManager) (ee EventExporter, err error) {
+func NewEventExporter(cfg *config.EventExporterCfg, cgrCfg *config.CGRConfig, filterS *engine.FilterS,
+	connMngr *engine.ConnManager) (ee EventExporter, err error) {
 	var dc *utils.SafeMapStorage
 	if dc, err = newEEMetrics(utils.FirstNonEmpty(
 		cfg.Timezone,
@@ -52,9 +50,9 @@ func NewEventExporter(cfg *config.EventExporterCfg, cgrCfg *config.CGRConfig,
 	}
 	switch cfg.Type {
 	case utils.MetaFileCSV:
-		return NewFileCSVee(cfg, cgrCfg, filterS, dc, nil)
+		return NewFileCSVee(cfg, cgrCfg, filterS, dc)
 	case utils.MetaFileFWV:
-		return NewFileFWVee(cfg, cgrCfg, filterS, dc, nil)
+		return NewFileFWVee(cfg, cgrCfg, filterS, dc)
 	case utils.MetaHTTPPost:
 		return NewHTTPPostEE(cfg, cgrCfg, filterS, dc)
 	case utils.MetaHTTPjsonMap:
@@ -80,7 +78,7 @@ func NewEventExporter(cfg *config.EventExporterCfg, cgrCfg *config.CGRConfig,
 		return NewSQLEe(cfg, dc)
 	case utils.MetaLog:
 		return NewLogEE(cfg, dc), nil
-	case utils.MetaRpc:
+	case utils.MetaRPC:
 		return NewRpcEE(cfg, dc, connMngr)
 	default:
 		return nil, fmt.Errorf("unsupported exporter type: <%s>", cfg.Type)
@@ -115,13 +113,26 @@ func (c *concReq) done() {
 }
 
 // composeHeaderTrailer will return the orderNM for *hdr or *trl
-func composeHeaderTrailer(ctx *context.Context, prfx string, fields []*config.FCTemplate, dc utils.DataStorage, cfg *config.CGRConfig, fltS *engine.FilterS) (r *utils.OrderedNavigableMap, err error) {
+func composeHeaderTrailer(prfx string, fields []*config.FCTemplate, dc utils.DataStorage, cfg *config.CGRConfig, fltS *engine.FilterS) (r *utils.OrderedNavigableMap, err error) {
 	r = utils.NewOrderedNavigableMap()
 	err = engine.NewExportRequest(map[string]utils.DataStorage{
 		utils.MetaDC:  dc,
 		utils.MetaCfg: cfg.GetDataProvider(),
 	}, cfg.GeneralCfg().DefaultTenant, fltS,
-		map[string]*utils.OrderedNavigableMap{prfx: r}).SetFields(ctx, fields)
+		map[string]*utils.OrderedNavigableMap{prfx: r}).SetFields(fields)
+	return
+}
+
+func composeExp(fields []*config.FCTemplate, cgrEv *utils.CGREvent, dc utils.DataStorage, cfg *config.CGRConfig, fltS *engine.FilterS) (r *utils.OrderedNavigableMap, err error) {
+	r = utils.NewOrderedNavigableMap()
+	err = engine.NewExportRequest(map[string]utils.DataStorage{
+		utils.MetaReq:  utils.MapStorage(cgrEv.Event),
+		utils.MetaDC:   dc,
+		utils.MetaOpts: utils.MapStorage(cgrEv.APIOpts),
+		utils.MetaCfg:  cfg.GetDataProvider(),
+	}, utils.FirstNonEmpty(cgrEv.Tenant, cfg.GeneralCfg().DefaultTenant),
+		fltS,
+		map[string]*utils.OrderedNavigableMap{utils.MetaExp: r}).SetFields(fields)
 	return
 }
 
@@ -140,13 +151,13 @@ func newEEMetrics(location string) (*utils.SafeMapStorage, error) {
 	}}, nil
 }
 
-func updateEEMetrics(dc *utils.SafeMapStorage, originID string, ev engine.MapEvent, hasError bool, timezone string) {
+func updateEEMetrics(dc *utils.SafeMapStorage, cgrID string, ev engine.MapEvent, hasError bool, timezone string) {
 	dc.Lock()
 	defer dc.Unlock()
 	if hasError {
-		dc.MapStorage[utils.NegativeExports].(utils.StringSet).Add(originID)
+		dc.MapStorage[utils.NegativeExports].(utils.StringSet).Add(cgrID)
 	} else {
-		dc.MapStorage[utils.PositiveExports].(utils.StringSet).Add(originID)
+		dc.MapStorage[utils.PositiveExports].(utils.StringSet).Add(cgrID)
 	}
 	if aTime, err := ev.GetTime(utils.AnswerTime, timezone); err == nil {
 		if _, has := dc.MapStorage[utils.FirstEventATime]; !has {
@@ -242,7 +253,6 @@ func (slicePreparing) PrepareMap(mp *utils.CGREvent) (interface{}, error) {
 	}
 	return csvRecord, nil
 }
-
 func (slicePreparing) PrepareOrderMap(mp *utils.OrderedNavigableMap) (interface{}, error) {
 	return mp.OrderedFieldsAsStrings(), nil
 }

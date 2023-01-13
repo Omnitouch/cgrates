@@ -27,13 +27,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/guardian"
+	"github.com/cenkalti/rpc2"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/guardian"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 var (
@@ -42,16 +42,16 @@ var (
 )
 
 // NewSessionS constructs  a new SessionS instance
-func NewSessionS(cgrCfg *config.CGRConfig, dm *engine.DataManager, fltrS *engine.FilterS,
+func NewSessionS(cgrCfg *config.CGRConfig,
+	dm *engine.DataManager,
 	connMgr *engine.ConnManager) *SessionS {
 	cgrCfg.SessionSCfg().SessionIndexes.Add(utils.OriginID) // Make sure we have indexing for OriginID since it is a requirement on prefix searching
 
 	return &SessionS{
-		cfg:           cgrCfg,
+		cgrCfg:        cgrCfg,
 		dm:            dm,
-		fltrS:         fltrS,
 		connMgr:       connMgr,
-		biJClnts:      make(map[birpc.ClientConnector]string),
+		biJClnts:      make(map[rpcclient.ClientConnector]string),
 		biJIDs:        make(map[string]*biJClient),
 		aSessions:     make(map[string]*Session),
 		aSessionsIdx:  make(map[string]map[string]map[string]utils.StringSet),
@@ -64,46 +64,45 @@ func NewSessionS(cgrCfg *config.CGRConfig, dm *engine.DataManager, fltrS *engine
 
 // biJClient contains info we need to reach back a bidirectional json client
 type biJClient struct {
-	conn  birpc.ClientConnector // connection towards BiJ client
-	proto float64               // client protocol version
+	conn  rpcclient.ClientConnector // connection towards BiJ client
+	proto float64                   // client protocol version
 }
 
 // SessionS represents the session service
 type SessionS struct {
-	cfg     *config.CGRConfig // Separate from smCfg since there can be multiple
+	cgrCfg  *config.CGRConfig // Separate from smCfg since there can be multiple
 	dm      *engine.DataManager
-	fltrS   *engine.FilterS
 	connMgr *engine.ConnManager
 
-	biJMux   sync.RWMutex                     // mux protecting BI-JSON connections
-	biJClnts map[birpc.ClientConnector]string // index BiJSONConnection so we can sync them later
-	biJIDs   map[string]*biJClient            // identifiers of bidirectional JSON conns, used to call RPC based on connIDs
+	biJMux   sync.RWMutex                         // mux protecting BI-JSON connections
+	biJClnts map[rpcclient.ClientConnector]string // index BiJSONConnection so we can sync them later
+	biJIDs   map[string]*biJClient                // identifiers of bidirectional JSON conns, used to call RPC based on connIDs
 
 	aSsMux    sync.RWMutex        // protects aSessions
 	aSessions map[string]*Session // group sessions per sessionId
 
 	aSIMux        sync.RWMutex                                     // protects aSessionsIdx
-	aSessionsIdx  map[string]map[string]map[string]utils.StringSet // map[fieldName]map[fieldValue][originID]utils.StringSet[runID]sID
+	aSessionsIdx  map[string]map[string]map[string]utils.StringSet // map[fieldName]map[fieldValue][cgrID]utils.StringSet[runID]sID
 	aSessionsRIdx map[string][]*riFieldNameVal                     // reverse indexes for active sessions, used on remove
 
 	pSsMux    sync.RWMutex        // protects pSessions
-	pSessions map[string]*Session // group passive sessions based on originID
+	pSessions map[string]*Session // group passive sessions based on cgrID
 
 	pSIMux        sync.RWMutex                                     // protects pSessionsIdx
-	pSessionsIdx  map[string]map[string]map[string]utils.StringSet // map[fieldName]map[fieldValue][originID]utils.StringSet[runID]sID
+	pSessionsIdx  map[string]map[string]map[string]utils.StringSet // map[fieldName]map[fieldValue][cgrID]utils.StringSet[runID]sID
 	pSessionsRIdx map[string][]*riFieldNameVal                     // reverse indexes for passive sessions, used on remove
 }
 
 // ListenAndServe starts the service and binds it to the listen loop
 func (sS *SessionS) ListenAndServe(stopChan chan struct{}) {
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.SessionS))
-	if sS.cfg.SessionSCfg().ChannelSyncInterval != 0 {
+	if sS.cgrCfg.SessionSCfg().ChannelSyncInterval != 0 {
 		for { // Schedule sync channels to run repeately
 			select {
 			case <-stopChan:
 				return
-			case <-time.After(sS.cfg.SessionSCfg().ChannelSyncInterval):
-				sS.syncSessions(context.TODO())
+			case <-time.After(sS.cgrCfg.SessionSCfg().ChannelSyncInterval):
+				sS.syncSessions()
 			}
 		}
 	}
@@ -111,10 +110,10 @@ func (sS *SessionS) ListenAndServe(stopChan chan struct{}) {
 
 // Shutdown is called by engine to clear states
 func (sS *SessionS) Shutdown() (err error) {
-	if len(sS.cfg.SessionSCfg().ReplicationConns) == 0 {
+	if len(sS.cgrCfg.SessionSCfg().ReplicationConns) == 0 {
 		var hasErr bool
 		for _, s := range sS.getSessions("", false) { // Force sessions shutdown
-			if err = sS.terminateSession(context.TODO(), s, nil, nil, nil, false); err != nil {
+			if err = sS.terminateSession(s, nil, nil, nil, false); err != nil {
 				hasErr = true
 			}
 		}
@@ -126,18 +125,18 @@ func (sS *SessionS) Shutdown() (err error) {
 }
 
 // OnBiJSONConnect is called by rpc2.Client on each new connection
-func (sS *SessionS) OnBiJSONConnect(c birpc.ClientConnector) {
+func (sS *SessionS) OnBiJSONConnect(c *rpc2.Client) {
 	nodeID := utils.UUIDSha1Prefix() // connection identifier, should be later updated as login procedure
 	sS.biJMux.Lock()
 	sS.biJClnts[c] = nodeID
 	sS.biJIDs[nodeID] = &biJClient{
 		conn:  c,
-		proto: sS.cfg.SessionSCfg().ClientProtocol}
+		proto: sS.cgrCfg.SessionSCfg().ClientProtocol}
 	sS.biJMux.Unlock()
 }
 
 // OnBiJSONDisconnect is called by rpc2.Client on each client disconnection
-func (sS *SessionS) OnBiJSONDisconnect(c birpc.ClientConnector) {
+func (sS *SessionS) OnBiJSONDisconnect(c *rpc2.Client) {
 	sS.biJMux.Lock()
 	if nodeID, has := sS.biJClnts[c]; has {
 		delete(sS.biJClnts, c)
@@ -147,15 +146,15 @@ func (sS *SessionS) OnBiJSONDisconnect(c birpc.ClientConnector) {
 }
 
 // RegisterIntBiJConn is called on internal BiJ connection towards SessionS
-func (sS *SessionS) RegisterIntBiJConn(c birpc.ClientConnector, nodeID string) {
+func (sS *SessionS) RegisterIntBiJConn(c rpcclient.ClientConnector, nodeID string) {
 	if nodeID == utils.EmptyString {
-		nodeID = sS.cfg.GeneralCfg().NodeID
+		nodeID = sS.cgrCfg.GeneralCfg().NodeID
 	}
 	sS.biJMux.Lock()
 	sS.biJClnts[c] = nodeID
 	sS.biJIDs[nodeID] = &biJClient{
 		conn:  c,
-		proto: sS.cfg.SessionSCfg().ClientProtocol}
+		proto: sS.cgrCfg.SessionSCfg().ClientProtocol}
 	sS.biJMux.Unlock()
 }
 
@@ -171,7 +170,7 @@ func (sS *SessionS) biJClnt(connID string) (clnt *biJClient) {
 }
 
 // biJClnt returns connection ID based on bidirectional connection received
-func (sS *SessionS) biJClntID(c birpc.ClientConnector) (clntConnID string) {
+func (sS *SessionS) biJClntID(c rpcclient.ClientConnector) (clntConnID string) {
 	if c == nil {
 		return
 	}
@@ -211,15 +210,21 @@ type sTerminator struct {
 
 // setSTerminator installs a new terminator for a session
 // setSTerminator is not thread safe, only the goroutine forked from within
-func (sS *SessionS) setSTerminator(ctx *context.Context, s *Session, opts engine.MapEvent) {
+func (sS *SessionS) setSTerminator(s *Session, opts engine.MapEvent) {
 	var err error
 	// TTL
 	var ttl time.Duration
-	if ttl, err = engine.GetDurationOptsFromMultipleMaps(ctx, s.Tenant, s.EventStart, opts, s.OptsStart, sS.fltrS,
-		sS.cfg.SessionSCfg().Opts.TTL, config.SessionsTTLDftOpt, utils.OptsSesTTL); err != nil {
+	if opts.HasField(utils.OptsSessionsTTL) {
+		ttl, err = opts.GetDuration(utils.OptsSessionsTTL)
+	} else if s.OptsStart.HasField(utils.OptsSessionsTTL) {
+		ttl, err = s.OptsStart.GetDuration(utils.OptsSessionsTTL)
+	} else {
+		ttl = sS.cgrCfg.SessionSCfg().SessionTTL
+	}
+	if err != nil {
 		utils.Logger.Warning(
-			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from its options: <%s>, err: <%s>",
-				utils.SessionS, utils.OptsSesTTL, s.OptsStart[utils.MetaOriginID], opts, err))
+			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from it's options: <%s>, err: <%s>",
+				utils.SessionS, utils.OptsSessionsTTL, s.CGRID, opts, err))
 		return
 	}
 	if ttl == 0 {
@@ -227,11 +232,17 @@ func (sS *SessionS) setSTerminator(ctx *context.Context, s *Session, opts engine
 	}
 	// random delay computation
 	var maxDelay time.Duration
-	if maxDelay, err = engine.GetDurationOptsFromMultipleMaps(ctx, s.Tenant, s.EventStart, opts, s.OptsStart, sS.fltrS,
-		sS.cfg.SessionSCfg().Opts.TTLMaxDelay, config.SessionsTTLMaxDelayDftOpt, utils.OptsSesTTLMaxDelay); err != nil {
+	if opts.HasField(utils.OptsSessionsTTLMaxDelay) {
+		maxDelay, err = opts.GetDuration(utils.OptsSessionsTTLMaxDelay)
+	} else if s.OptsStart.HasField(utils.OptsSessionsTTLMaxDelay) {
+		maxDelay, err = s.OptsStart.GetDuration(utils.OptsSessionsTTLMaxDelay)
+	} else if sS.cgrCfg.SessionSCfg().SessionTTLMaxDelay != nil {
+		maxDelay = *sS.cgrCfg.SessionSCfg().SessionTTLMaxDelay
+	}
+	if err != nil {
 		utils.Logger.Warning(
-			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from its options: <%s>, err: <%s>",
-				utils.SessionS, utils.OptsSesTTLMaxDelay, s.OptsStart[utils.MetaOriginID], opts.String(), err.Error()))
+			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from it's options: <%s>, err: <%s>",
+				utils.SessionS, utils.OptsSessionsTTLMaxDelay, s.CGRID, opts.String(), err.Error()))
 		return
 	}
 	if maxDelay != 0 {
@@ -241,29 +252,47 @@ func (sS *SessionS) setSTerminator(ctx *context.Context, s *Session, opts engine
 	}
 	// LastUsed
 	var ttlLastUsed *time.Duration
-	if ttlLastUsed, err = engine.GetDurationPointerOptsFromMultipleMaps(ctx, s.Tenant, s.EventStart, opts, s.OptsStart, sS.fltrS,
-		sS.cfg.SessionSCfg().Opts.TTLLastUsed, utils.OptsSesTTLLastUsed); err != nil {
+	if opts.HasField(utils.OptsSessionsTTLLastUsed) {
+		ttlLastUsed, err = opts.GetDurationPtr(utils.OptsSessionsTTLLastUsed)
+	} else if s.OptsStart.HasField(utils.OptsSessionsTTLLastUsed) {
+		ttlLastUsed, err = s.OptsStart.GetDurationPtr(utils.OptsSessionsTTLLastUsed)
+	} else {
+		ttlLastUsed = sS.cgrCfg.SessionSCfg().SessionTTLLastUsed
+	}
+	if err != nil {
 		utils.Logger.Warning(
-			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from its options: <%s>, err: <%s>",
-				utils.SessionS, utils.OptsSesTTLLastUsed, s.OptsStart[utils.MetaOriginID], opts.String(), err.Error()))
+			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from it's options: <%s>, err: <%s>",
+				utils.SessionS, utils.OptsSessionsTTLLastUsed, s.CGRID, opts.String(), err.Error()))
 		return
 	}
 	// LastUsage
 	var ttlLastUsage *time.Duration
-	if ttlLastUsage, err = engine.GetDurationPointerOptsFromMultipleMaps(ctx, s.Tenant, s.EventStart, opts, s.OptsStart, sS.fltrS,
-		sS.cfg.SessionSCfg().Opts.TTLLastUsage, utils.OptsSesTTLLastUsage); err != nil {
+	if opts.HasField(utils.OptsSessionsTTLLastUsage) {
+		ttlLastUsage, err = opts.GetDurationPtr(utils.OptsSessionsTTLLastUsage)
+	} else if s.OptsStart.HasField(utils.OptsSessionsTTLLastUsage) {
+		ttlLastUsage, err = s.OptsStart.GetDurationPtr(utils.OptsSessionsTTLLastUsage)
+	} else {
+		ttlLastUsage = sS.cgrCfg.SessionSCfg().SessionTTLLastUsage
+	}
+	if err != nil {
 		utils.Logger.Warning(
-			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from its options: <%s>, err: <%s>",
-				utils.SessionS, utils.OptsSesTTLLastUsage, s.OptsStart[utils.MetaOriginID], opts.String(), err.Error()))
+			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from it's options: <%s>, err: <%s>",
+				utils.SessionS, utils.OptsSessionsTTLLastUsage, s.CGRID, opts.String(), err.Error()))
 		return
 	}
 	// TTLUsage
 	var ttlUsage *time.Duration
-	if ttlUsage, err = engine.GetDurationPointerOptsFromMultipleMaps(ctx, s.Tenant, s.EventStart, opts, s.OptsStart, sS.fltrS,
-		sS.cfg.SessionSCfg().Opts.TTLUsage, utils.OptsSesTTLUsage); err != nil {
+	if opts.HasField(utils.OptsSessionsTTLUsage) {
+		ttlUsage, err = opts.GetDurationPtr(utils.OptsSessionsTTLUsage)
+	} else if s.OptsStart.HasField(utils.OptsSessionsTTLUsage) {
+		ttlUsage, err = s.OptsStart.GetDurationPtr(utils.OptsSessionsTTLUsage)
+	} else {
+		ttlUsage = sS.cgrCfg.SessionSCfg().SessionTTLUsage
+	}
+	if err != nil {
 		utils.Logger.Warning(
-			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from its options: <%s>, err: <%s>",
-				utils.SessionS, utils.OptsSesTTLUsage, s.OptsStart[utils.MetaOriginID], opts.String(), err.Error()))
+			fmt.Sprintf("<%s>, cannot extract <%s> for session:<%s>, from it's options: <%s>, err: <%s>",
+				utils.SessionS, utils.OptsSessionsTTLUsage, s.CGRID, opts.String(), err.Error()))
 		return
 	}
 	// previously defined, reset
@@ -300,7 +329,7 @@ func (sS *SessionS) setSTerminator(ctx *context.Context, s *Session, opts engine
 			if s.sTerminator.ttlLastUsage != nil {
 				lastUsage = *s.sTerminator.ttlLastUsage
 			}
-			sS.forceSTerminate(ctx, s, lastUsage, s.sTerminator.ttlUsage,
+			sS.forceSTerminate(s, lastUsage, s.sTerminator.ttlUsage,
 				s.sTerminator.ttlLastUsed)
 			s.Unlock()
 		case <-endChan:
@@ -312,40 +341,40 @@ func (sS *SessionS) setSTerminator(ctx *context.Context, s *Session, opts engine
 
 // forceSTerminate is called when a session times-out or it is forced from CGRateS side
 // not thread safe
-func (sS *SessionS) forceSTerminate(ctx *context.Context, s *Session, extraUsage time.Duration, tUsage, lastUsed *time.Duration) (err error) {
+func (sS *SessionS) forceSTerminate(s *Session, extraUsage time.Duration, tUsage, lastUsed *time.Duration) (err error) {
 	if extraUsage != 0 {
 		for i := range s.SRuns {
-			if _, err = sS.debitSession(ctx, s, i, extraUsage, lastUsed); err != nil {
+			if _, err = sS.debitSession(s, i, extraUsage, lastUsed); err != nil {
 				utils.Logger.Warning(
 					fmt.Sprintf(
-						"<%s> failed debitting originID %s, sRunIdx: %d, err: %s",
-						utils.SessionS, s.originID(), i, err.Error()))
+						"<%s> failed debitting cgrID %s, sRunIdx: %d, err: %s",
+						utils.SessionS, s.cgrID(), i, err.Error()))
 			}
 		}
 	}
 	// we apply the correction before
-	if err = sS.endSession(ctx, s, tUsage, lastUsed, nil, false); err != nil {
+	if err = sS.endSession(s, tUsage, lastUsed, nil, false); err != nil {
 		utils.Logger.Warning(
 			fmt.Sprintf(
 				"<%s> failed force terminating session with ID <%s>, err: <%s>",
-				utils.SessionS, s.originID(), err.Error()))
+				utils.SessionS, s.cgrID(), err.Error()))
 	}
 	// post the CDRs
-	if len(sS.cfg.SessionSCfg().CDRsConns) != 0 {
+	if len(sS.cgrCfg.SessionSCfg().CDRsConns) != 0 {
 		var reply string
 		for _, cgrEv := range s.asCGREvents() {
-			if cgrEv.APIOpts == nil {
-				cgrEv.APIOpts = make(map[string]interface{})
+			argsProc := &engine.ArgV1ProcessEvent{
+				Flags: []string{fmt.Sprintf("%s:false", utils.MetaChargers),
+					fmt.Sprintf("%s:false", utils.MetaAttributes)},
+				CGREvent: *cgrEv,
 			}
-			cgrEv.APIOpts[utils.MetaAttributes] = false
-			cgrEv.APIOpts[utils.MetaChargers] = false
 			if unratedReqs.HasField( // order additional rating for unrated request types
 				engine.MapEvent(cgrEv.Event).GetStringIgnoreErrors(utils.RequestType)) {
-				// argsProc.Flags = append(argsProc.Flags, utils.MetaRALs)
+				argsProc.Flags = append(argsProc.Flags, utils.MetaRALs)
 			}
-			cgrEv.SetCloneable(true)
-			if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().CDRsConns,
-				utils.CDRsV1ProcessEvent, cgrEv, &reply); err != nil {
+			argsProc.SetCloneable(true)
+			if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().CDRsConns, nil,
+				utils.CDRsV1ProcessEvent, argsProc, &reply); err != nil {
 				utils.Logger.Warning(
 					fmt.Sprintf(
 						"<%s> could not post CDR for event %s, err: %s",
@@ -354,32 +383,33 @@ func (sS *SessionS) forceSTerminate(ctx *context.Context, s *Session, extraUsage
 		}
 	}
 	// release the resources for the session
-	if len(sS.cfg.SessionSCfg().ResourceSConns) != 0 && s.ResourceID != "" {
+	if len(sS.cgrCfg.SessionSCfg().ResSConns) != 0 && s.ResourceID != "" {
 		var reply string
-		if s.OptsStart == nil {
-			s.OptsStart = make(engine.MapEvent)
-		}
-		args := &utils.CGREvent{
+		cgrEv := &utils.CGREvent{
 			Tenant:  s.Tenant,
 			ID:      utils.GenUUID(),
 			Event:   s.EventStart,
 			APIOpts: s.OptsStart,
 		}
-		args.APIOpts[utils.OptsResourcesUsageID] = s.ResourceID
-		args.APIOpts[utils.OptsResourcesUnits] = 1
-		if err := sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ResourceSConns,
+		if cgrEv.APIOpts == nil {
+			cgrEv.APIOpts = make(map[string]interface{})
+		}
+		cgrEv.APIOpts[utils.OptsResourcesUsageID] = s.ResourceID
+		cgrEv.APIOpts[utils.OptsResourcesUnits] = 1
+		cgrEv.SetCloneable(true)
+		if err := sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil,
 			utils.ResourceSv1ReleaseResources,
-			args, &reply); err != nil {
+			cgrEv, &reply); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s could not release resource with resourceID: %s",
 					utils.SessionS, err.Error(), s.ResourceID))
 		}
 	}
-	sS.replicateSessions(ctx, utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false, sS.cfg.SessionSCfg().ReplicationConns)
+	sS.replicateSessions(s.CGRID, false, sS.cgrCfg.SessionSCfg().ReplicationConns)
 	if clntConn := sS.biJClnt(s.ClientConnID); clntConn != nil {
 		go func() {
 			var rply string
-			if err := clntConn.conn.Call(ctx,
+			if err := clntConn.conn.Call(
 				utils.SessionSv1DisconnectSession,
 				utils.AttrDisconnectSession{
 					EventStart: s.EventStart,
@@ -388,7 +418,7 @@ func (sS *SessionS) forceSTerminate(ctx *context.Context, s *Session, extraUsage
 				if err != utils.ErrNotImplemented {
 					utils.Logger.Warning(
 						fmt.Sprintf("<%s> err: %s remotely disconnect session with id: %s",
-							utils.SessionS, err.Error(), s.OptsStart[utils.MetaOriginID]))
+							utils.SessionS, err.Error(), s.CGRID))
 				}
 			}
 		}()
@@ -397,10 +427,110 @@ func (sS *SessionS) forceSTerminate(ctx *context.Context, s *Session, extraUsage
 }
 
 // debitSession performs debit for a session run
-func (sS *SessionS) debitSession(ctx *context.Context, s *Session, sRunIdx int, dur time.Duration,
+func (sS *SessionS) debitSession(s *Session, sRunIdx int, dur time.Duration,
 	lastUsed *time.Duration) (maxDur time.Duration, err error) {
-
+	if sRunIdx >= len(s.SRuns) {
+		err = errors.New("sRunIdx out of range")
+		return
+	}
+	sr := s.SRuns[sRunIdx]
+	if !s.Chargeable {
+		sS.pause(sr, dur)
+		sr.TotalUsage += sr.LastUsage
+		return dur, nil
+	}
+	rDur := sr.debitReserve(dur, lastUsed) // debit out of reserve, rDur is still to be debited
+	if rDur == time.Duration(0) {
+		return dur, nil // complete debit out of reserve
+	}
+	dbtRsrv := dur - rDur // the amount debited from reserve
+	if sr.CD.LoopIndex > 0 {
+		sr.CD.TimeStart = sr.CD.TimeEnd
+	}
+	sr.CD.TimeEnd = sr.CD.TimeStart.Add(rDur)
+	sr.CD.DurationIndex += rDur
+	cd := sr.CD.Clone()
+	cc := new(engine.CallCost)
+	err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
+		utils.ResponderMaxDebit,
+		&engine.CallDescriptorWithAPIOpts{
+			CallDescriptor: cd,
+			APIOpts:        s.OptsStart,
+		}, cc)
+	if err != nil {
+		// verify in case of *dynaprepaid RequestType
+		if err.Error() == utils.ErrAccountNotFound.Error() &&
+			sr.Event.GetStringIgnoreErrors(utils.RequestType) == utils.MetaDynaprepaid {
+			var reply string
+			// execute the actionPlan configured in Scheduler
+			if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().SchedulerConns, nil,
+				utils.SchedulerSv1ExecuteActionPlans, &utils.AttrsExecuteActionPlans{
+					ActionPlanIDs: sS.cgrCfg.SchedulerCfg().DynaprepaidActionPlans,
+					Tenant:        cd.Tenant, AccountID: cd.Account},
+				&reply); err != nil {
+				return
+			}
+			// execute again the MaxDebit operation
+			err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
+				utils.ResponderMaxDebit,
+				&engine.CallDescriptorWithAPIOpts{
+					CallDescriptor: cd,
+					APIOpts:        s.OptsStart,
+				}, cc)
+		}
+		if err != nil {
+			sr.ExtraDuration += dbtRsrv
+			return 0, err
+		}
+	}
+	sr.CD.TimeEnd = cc.GetEndTime() // set debited timeEnd
+	ccDuration := cc.GetDuration()
+	if ccDuration > rDur {
+		sr.ExtraDuration = ccDuration - rDur
+	}
+	if ccDuration >= rDur {
+		sr.LastUsage = dur
+	} else {
+		sr.LastUsage = ccDuration + dbtRsrv
+	}
+	sr.CD.DurationIndex -= rDur
+	sr.CD.DurationIndex += ccDuration
+	sr.CD.MaxCostSoFar += cc.Cost
+	sr.CD.LoopIndex++
+	sr.TotalUsage += sr.LastUsage
+	ec := engine.NewEventCostFromCallCost(cc, s.CGRID,
+		sr.Event.GetStringIgnoreErrors(utils.RunID))
+	if sr.EventCost == nil {
+		if ccDuration != time.Duration(0) {
+			sr.EventCost = ec
+		}
+	} else {
+		ec.SyncKeys(sr.EventCost)
+		sr.EventCost.Merge(ec)
+	}
+	maxDur = sr.LastUsage
 	return
+}
+
+func (sS *SessionS) pause(sr *SRun, dur time.Duration) {
+	if sr.CD.LoopIndex > 0 {
+		sr.CD.TimeStart = sr.CD.TimeEnd
+	}
+	sr.CD.TimeEnd = sr.CD.TimeStart.Add(dur)
+	sr.CD.DurationIndex += dur
+	ec := engine.NewFreeEventCost(sr.CD.CgrID, sr.CD.RunID, sr.CD.Account, sr.CD.TimeStart, dur)
+	sr.LastUsage = dur
+	sr.CD.LoopIndex++
+	if sr.EventCost == nil { // is the first increment
+		// when we start the call with debit interval 0
+		// but later we update this value with one greater than 0
+		sr.EventCost = ec
+	} else { // we already debited something
+		// copy the old AccountSummary as in Merge the old one is overwriten by the new one
+		ec.AccountSummary = sr.EventCost.AccountSummary
+		// similar to the debit merge the event costs
+		sr.EventCost.Merge(ec)
+	}
 }
 
 // debitLoopSession will periodically debit sessions, ie: automatic prepaid
@@ -421,17 +551,17 @@ func (sS *SessionS) debitLoopSession(s *Session, sRunIdx int,
 			return
 		}
 		var maxDebit time.Duration
-		if maxDebit, err = sS.debitSession(context.TODO(), s, sRunIdx, dbtIvl, nil); err != nil {
+		if maxDebit, err = sS.debitSession(s, sRunIdx, dbtIvl, nil); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> could not complete debit operation on session: <%s>, error: <%s>",
-					utils.SessionS, s.originID(), err.Error()))
+					utils.SessionS, s.cgrID(), err.Error()))
 			dscReason := utils.ErrServerError.Error()
 			if err.Error() == utils.ErrUnauthorizedDestination.Error() {
 				dscReason = err.Error()
 			}
 			// try to disconect the session n times before we force terminate it on our side
 			fib := utils.FibDuration(time.Millisecond, 0)
-			for i := 0; i < sS.cfg.SessionSCfg().TerminateAttempts; i++ {
+			for i := 0; i < sS.cgrCfg.SessionSCfg().TerminateAttempts; i++ {
 				if i != 0 { // not the first iteration
 					time.Sleep(fib())
 				}
@@ -441,26 +571,26 @@ func (sS *SessionS) debitLoopSession(s *Session, sRunIdx int,
 				}
 				utils.Logger.Warning(
 					fmt.Sprintf("<%s> could not disconnect session: %s, error: %s",
-						utils.SessionS, s.originID(), err.Error()))
+						utils.SessionS, s.cgrID(), err.Error()))
 			}
-			if err = sS.forceSTerminate(context.TODO(), s, 0, nil, nil); err != nil {
-				utils.Logger.Warning(fmt.Sprintf("<%s> failed force-terminating session: <%s>, err: <%s>", utils.SessionS, s.originID(), err))
+			if err = sS.forceSTerminate(s, 0, nil, nil); err != nil {
+				utils.Logger.Warning(fmt.Sprintf("<%s> failed force-terminating session: <%s>, err: <%s>", utils.SessionS, s.cgrID(), err))
 			}
 			s.Unlock()
 			return
 		}
 		debitStop := s.debitStop // avoid concurrency with endSession
 		s.SRuns[sRunIdx].NextAutoDebit = utils.TimePointer(time.Now().Add(dbtIvl))
-		if maxDebit < dbtIvl && sS.cfg.SessionSCfg().MinDurLowBalance != time.Duration(0) { // warn client for low balance
-			if sS.cfg.SessionSCfg().MinDurLowBalance >= dbtIvl {
+		if maxDebit < dbtIvl && sS.cgrCfg.SessionSCfg().MinDurLowBalance != time.Duration(0) { // warn client for low balance
+			if sS.cgrCfg.SessionSCfg().MinDurLowBalance >= dbtIvl {
 				utils.Logger.Warning(fmt.Sprintf("<%s> can not run warning for the session: <%s> since the remaining time:<%s> is higher than the debit interval:<%s>.",
-					utils.SessionS, s.originID(), sS.cfg.SessionSCfg().MinDurLowBalance, dbtIvl))
-			} else if maxDebit <= sS.cfg.SessionSCfg().MinDurLowBalance {
-				go sS.warnSession(s.ClientConnID, s.EventStart.Clone(), s.OptsStart.Clone())
+					utils.SessionS, s.cgrID(), sS.cgrCfg.SessionSCfg().MinDurLowBalance, dbtIvl))
+			} else if maxDebit <= sS.cgrCfg.SessionSCfg().MinDurLowBalance {
+				go sS.warnSession(s.ClientConnID, s.EventStart.Clone())
 			}
 		}
 		s.Unlock()
-		sS.replicateSessions(context.TODO(), utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false, sS.cfg.SessionSCfg().ReplicationConns)
+		sS.replicateSessions(s.CGRID, false, sS.cgrCfg.SessionSCfg().ReplicationConns)
 		if maxDebit < dbtIvl { // disconnect faster
 			select {
 			case <-debitStop: // call was disconnected already
@@ -470,7 +600,7 @@ func (sS *SessionS) debitLoopSession(s *Session, sRunIdx int,
 				defer s.Unlock()
 				// try to disconect the session n times before we force terminate it on our side
 				fib := utils.FibDuration(time.Millisecond, 0)
-				for i := 0; i < sS.cfg.SessionSCfg().TerminateAttempts; i++ {
+				for i := 0; i < sS.cgrCfg.SessionSCfg().TerminateAttempts; i++ {
 					if i != 0 { // not the first iteration
 						time.Sleep(fib())
 					}
@@ -479,14 +609,14 @@ func (sS *SessionS) debitLoopSession(s *Session, sRunIdx int,
 					}
 					utils.Logger.Warning(
 						fmt.Sprintf("<%s> could not disconnect session: %s, error: %s",
-							utils.SessionS, s.originID(), err.Error()))
+							utils.SessionS, s.cgrID(), err.Error()))
 				}
 				utils.Logger.Warning(
 					fmt.Sprintf("<%s> could not disconnect session: <%s>, error: <%s>",
-						utils.SessionS, s.originID(), err.Error()))
-				if err = sS.forceSTerminate(context.TODO(), s, 0, nil, nil); err != nil {
+						utils.SessionS, s.cgrID(), err.Error()))
+				if err = sS.forceSTerminate(s, 0, nil, nil); err != nil {
 					utils.Logger.Warning(fmt.Sprintf("<%s> failed force-terminating session: <%s>, err: <%s>",
-						utils.SessionS, s.originID(), err))
+						utils.SessionS, s.cgrID(), err))
 				}
 			}
 			return
@@ -498,6 +628,138 @@ func (sS *SessionS) debitLoopSession(s *Session, sRunIdx int,
 			continue
 		}
 	}
+}
+
+// refundSession will refund the extra usage debitted by the end of session
+// not thread-safe so the locks need to be done in a layer above
+// rUsage represents the amount of usage to be refunded
+func (sS *SessionS) refundSession(s *Session, sRunIdx int, rUsage time.Duration) (err error) {
+	if sRunIdx >= len(s.SRuns) {
+		return errors.New("sRunIdx out of range")
+	}
+	sr := s.SRuns[sRunIdx]
+	if sr.EventCost == nil {
+		return errors.New("no event cost")
+	}
+	srplsEC, err := sr.EventCost.Trim(sr.EventCost.GetUsage() - rUsage)
+	if err != nil {
+		return err
+	} else if srplsEC == nil {
+		return
+	}
+	sCC := srplsEC.AsCallCost(sr.CD.ToR)
+	var incrmts engine.Increments
+	for _, tmspn := range sCC.Timespans {
+		for _, incr := range tmspn.Increments {
+			if incr.BalanceInfo == nil ||
+				(incr.BalanceInfo.Unit == nil &&
+					incr.BalanceInfo.Monetary == nil) {
+				continue // not enough information for refunds, most probably free units uncounted
+			}
+			for i := 0; i < tmspn.CompressFactor; i++ {
+				incrmts = append(incrmts, incr)
+			}
+		}
+	}
+	cd := &engine.CallDescriptor{
+		CgrID:       s.CGRID,
+		RunID:       sr.Event.GetStringIgnoreErrors(utils.RunID),
+		Category:    sr.CD.Category,
+		Tenant:      sr.CD.Tenant,
+		Subject:     sr.CD.Subject,
+		Account:     sr.CD.Account,
+		Destination: sr.CD.Destination,
+		ToR:         utils.FirstNonEmpty(sr.CD.ToR, utils.MetaVoice),
+		Increments:  incrmts,
+	}
+	var acnt engine.Account
+	if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil, utils.ResponderRefundIncrements,
+		&engine.CallDescriptorWithAPIOpts{
+			CallDescriptor: cd,
+			APIOpts:        s.OptsStart,
+		}, &acnt); err != nil {
+		return
+	}
+	if acnt.ID != "" { // Account info updated, update also cached AccountSummary
+		acntSummary := acnt.AsAccountSummary()
+		acntSummary.UpdateInitialValue(sr.EventCost.AccountSummary)
+		sr.EventCost.AccountSummary = acntSummary
+	}
+	return
+}
+
+// storeSCost will post the session cost to CDRs
+// not thread safe, need to be handled in a layer above
+func (sS *SessionS) storeSCost(s *Session, sRunIdx int) (err error) {
+	sr := s.SRuns[sRunIdx]
+	smCost := &engine.SMCost{
+		CGRID:       s.CGRID,
+		CostSource:  utils.MetaSessionS,
+		RunID:       sr.Event.GetStringIgnoreErrors(utils.RunID),
+		OriginHost:  s.EventStart.GetStringIgnoreErrors(utils.OriginHost),
+		OriginID:    s.EventStart.GetStringIgnoreErrors(utils.OriginID),
+		Usage:       sr.TotalUsage,
+		CostDetails: sr.EventCost,
+	}
+	argSmCost := &engine.AttrCDRSStoreSMCost{
+		Cost:           smCost,
+		CheckDuplicate: true,
+		APIOpts:        s.OptsStart,
+		Tenant:         s.Tenant,
+	}
+	var reply string
+	// use the v1 because it doesn't do rounding refund
+	if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().CDRsConns, nil, utils.CDRsV1StoreSessionCost,
+		argSmCost, &reply); err != nil && err == utils.ErrExists {
+		utils.Logger.Warning(
+			fmt.Sprintf("<%s> refunding session: <%s> error: <%s>",
+				utils.SessionS, s.CGRID, err.Error()))
+		if err = sS.refundSession(s, sRunIdx, sr.CD.GetDuration()); err != nil { // refund entire duration
+			utils.Logger.Warning(
+				fmt.Sprintf(
+					"<%s> failed refunding session: <%s>, srIdx: <%d>, error: <%s>",
+					utils.SessionS, s.CGRID, sRunIdx, err.Error()))
+		}
+	}
+	return
+}
+
+// roundCost will round the EventCost and will refund the extra debited increments
+// should be called only at the endSession
+// not thread safe, need to be handled in a layer above
+func (sS *SessionS) roundCost(s *Session, sRunIdx int) (err error) {
+	sr := s.SRuns[sRunIdx]
+	runID := sr.Event.GetStringIgnoreErrors(utils.RunID)
+	cc := sr.EventCost.AsCallCost(utils.EmptyString)
+	if sr.CD != nil {
+		cc.Category = sr.CD.Category
+		cc.Subject = sr.CD.Subject
+		cc.Tenant = sr.CD.Tenant
+		cc.Account = sr.CD.Account
+		cc.Destination = sr.CD.Destination
+		cc.ToR = sr.CD.ToR
+	}
+	cc.Round()
+	if roundIncrements := cc.GetRoundIncrements(); len(roundIncrements) != 0 {
+		cd := cc.CreateCallDescriptor()
+		cd.CgrID = s.CGRID
+		cd.RunID = runID
+		cd.Increments = roundIncrements
+		response := new(engine.Account)
+		if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
+			utils.ResponderRefundRounding,
+			&engine.CallDescriptorWithAPIOpts{CallDescriptor: cd},
+			response); err != nil {
+			return
+		}
+		if response != nil {
+			accSum := response.AsAccountSummary()
+			accSum.UpdateInitialValue(cc.AccountSummary)
+			cc.AccountSummary = accSum
+		}
+	}
+	sr.EventCost = engine.NewEventCostFromCallCost(cc, s.CGRID, runID)
+	return
 }
 
 // disconnectSession will send disconnect from SessionS to clients
@@ -514,7 +776,7 @@ func (sS *SessionS) disconnectSession(s *Session, rsn string) (err error) {
 		servMethod = "SMGClientV1.DisconnectSession"
 	}
 	var rply string
-	if err = clnt.conn.Call(context.TODO(), servMethod,
+	if err = clnt.conn.Call(servMethod,
 		utils.AttrDisconnectSession{
 			EventStart: s.EventStart,
 			Reason:     rsn}, &rply); err != nil {
@@ -528,18 +790,18 @@ func (sS *SessionS) disconnectSession(s *Session, rsn string) (err error) {
 
 // warnSession will send warning from SessionS to clients
 // regarding low balance
-func (sS *SessionS) warnSession(connID string, ev map[string]interface{}, opt map[string]interface{}) (err error) {
+func (sS *SessionS) warnSession(connID string, ev map[string]interface{}) (err error) {
 	clnt := sS.biJClnt(connID)
 	if clnt == nil {
 		return fmt.Errorf("calling %s requires bidirectional JSON connection, connID: <%s>",
 			utils.SessionSv1WarnDisconnect, connID)
 	}
 	var rply string
-	if err = clnt.conn.Call(context.TODO(), utils.SessionSv1WarnDisconnect,
+	if err = clnt.conn.Call(utils.SessionSv1WarnDisconnect,
 		ev, &rply); err != nil {
 		if err != utils.ErrNotImplemented {
 			utils.Logger.Warning(fmt.Sprintf("<%s> failed to warn session: <%s>, err: <%s>",
-				utils.SessionS, opt[utils.MetaOriginID], err))
+				utils.SessionS, ev[utils.CGRID], err))
 			return
 		}
 		err = nil
@@ -547,30 +809,28 @@ func (sS *SessionS) warnSession(connID string, ev map[string]interface{}, opt ma
 	return
 }
 
-// replicateSessions will replicate sessions with or without originID specified
-func (sS *SessionS) replicateSessions(ctx *context.Context, originID string, psv bool, connIDs []string) {
+// replicateSessions will replicate sessions with or without cgrID specified
+func (sS *SessionS) replicateSessions(cgrID string, psv bool, connIDs []string) {
 	if len(connIDs) == 0 {
 		return
 	}
-	ss := sS.getSessions(originID, psv)
+	ss := sS.getSessions(cgrID, psv)
 	if len(ss) == 0 {
 		// session scheduled to be removed from remote (initiate also the EventStart to avoid the panic)
 		ss = []*Session{{
+			CGRID:      cgrID,
 			EventStart: make(engine.MapEvent),
-			OptsStart: engine.NewMapEvent(map[string]interface{}{
-				utils.MetaOriginID: originID,
-			}),
 		}}
 	}
 	for _, s := range ss {
 		sCln := s.Clone()
 		var rply string
-		if err := sS.connMgr.Call(ctx, connIDs,
+		if err := sS.connMgr.Call(connIDs, nil,
 			utils.SessionSv1SetPassiveSession,
 			sCln, &rply); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> cannot replicate session with id <%s>, err: %s",
-					utils.SessionS, sCln.OptsStart[utils.MetaOriginID], err.Error()))
+					utils.SessionS, sCln.CGRID, err.Error()))
 		}
 	}
 }
@@ -586,7 +846,7 @@ func (sS *SessionS) registerSession(s *Session, passive bool) {
 		sMp = sS.pSessions
 	}
 	sMux.Lock()
-	sMp[utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])] = s
+	sMp[s.CGRID] = s
 	sMux.Unlock()
 	sS.indexSession(s, passive)
 }
@@ -600,14 +860,14 @@ func (sS *SessionS) isIndexed(s *Session, passive bool) (has bool) {
 		sMp = sS.pSessions
 	}
 	sMux.Lock()
-	_, has = sMp[utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])]
+	_, has = sMp[s.CGRID]
 	sMux.Unlock()
 	return
 }
 
-// uregisterSession will unregister an active or passive session based on it's originID
+// uregisterSession will unregister an active or passive session based on it's CGRID
 // called on session terminate or relocate
-func (sS *SessionS) unregisterSession(originID string, passive bool) bool {
+func (sS *SessionS) unregisterSession(cgrID string, passive bool) bool {
 	sMux := &sS.aSsMux
 	sMp := sS.aSessions
 	if passive {
@@ -615,13 +875,13 @@ func (sS *SessionS) unregisterSession(originID string, passive bool) bool {
 		sMp = sS.pSessions
 	}
 	sMux.Lock()
-	if _, has := sMp[originID]; !has {
+	if _, has := sMp[cgrID]; !has {
 		sMux.Unlock()
 		return false
 	}
-	delete(sMp, originID)
+	delete(sMp, cgrID)
 	sMux.Unlock()
-	sS.unindexSession(originID, passive)
+	sS.unindexSession(cgrID, passive)
 	return true
 }
 
@@ -637,7 +897,7 @@ func (sS *SessionS) indexSession(s *Session, pSessions bool) {
 	}
 	idxMux.Lock()
 	defer idxMux.Unlock()
-	for fieldName := range sS.cfg.SessionSCfg().SessionIndexes {
+	for fieldName := range sS.cgrCfg.SessionSCfg().SessionIndexes {
 		for _, sr := range s.SRuns {
 			fieldVal, err := sr.Event.GetString(fieldName) // the only error from GetString is ErrNotFound
 			if err != nil {
@@ -652,23 +912,23 @@ func (sS *SessionS) indexSession(s *Session, pSessions bool) {
 			if _, hasFieldVal := ssIndx[fieldName][fieldVal]; !hasFieldVal {
 				ssIndx[fieldName][fieldVal] = make(map[string]utils.StringSet)
 			}
-			if _, hasOptOriginID := ssIndx[fieldName][fieldVal][utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])]; !hasOptOriginID {
-				ssIndx[fieldName][fieldVal][utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])] = make(utils.StringSet)
+			if _, hasCGRID := ssIndx[fieldName][fieldVal][s.CGRID]; !hasCGRID {
+				ssIndx[fieldName][fieldVal][s.CGRID] = make(utils.StringSet)
 			}
-			// ssIndx[fieldName][fieldVal][utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])].Add(sr.CD.RunID)
+			ssIndx[fieldName][fieldVal][s.CGRID].Add(sr.CD.RunID)
 
 			// reverse index
-			if _, hasIt := ssRIdx[utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])]; !hasIt {
-				ssRIdx[utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])] = make([]*riFieldNameVal, 0)
+			if _, hasIt := ssRIdx[s.CGRID]; !hasIt {
+				ssRIdx[s.CGRID] = make([]*riFieldNameVal, 0)
 			}
-			ssRIdx[utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])] = append(ssRIdx[utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])], &riFieldNameVal{fieldName: fieldName, fieldValue: fieldVal})
+			ssRIdx[s.CGRID] = append(ssRIdx[s.CGRID], &riFieldNameVal{fieldName: fieldName, fieldValue: fieldVal})
 		}
 	}
 }
 
 // unindexASession removes an active or passive session from indexes
 // called on terminate or relocate
-func (sS *SessionS) unindexSession(originID string, pSessions bool) bool {
+func (sS *SessionS) unindexSession(cgrID string, pSessions bool) bool {
 	idxMux := &sS.aSIMux
 	ssIndx := sS.aSessionsIdx
 	ssRIdx := sS.aSessionsRIdx
@@ -679,11 +939,11 @@ func (sS *SessionS) unindexSession(originID string, pSessions bool) bool {
 	}
 	idxMux.Lock()
 	defer idxMux.Unlock()
-	if _, hasIt := ssRIdx[originID]; !hasIt {
+	if _, hasIt := ssRIdx[cgrID]; !hasIt {
 		return false
 	}
-	for _, riFNV := range ssRIdx[originID] {
-		delete(ssIndx[riFNV.fieldName][riFNV.fieldValue], originID)
+	for _, riFNV := range ssRIdx[cgrID] {
+		delete(ssIndx[riFNV.fieldName][riFNV.fieldValue], cgrID)
 		if len(ssIndx[riFNV.fieldName][riFNV.fieldValue]) == 0 {
 			delete(ssIndx[riFNV.fieldName], riFNV.fieldValue)
 		}
@@ -691,23 +951,27 @@ func (sS *SessionS) unindexSession(originID string, pSessions bool) bool {
 			delete(ssIndx, riFNV.fieldName)
 		}
 	}
-	delete(ssRIdx, originID)
+	delete(ssRIdx, cgrID)
 	return true
 }
 
-func (sS *SessionS) getIndexedFilters(ctx *context.Context, tenant string, fltrs []string) (
+func (sS *SessionS) getIndexedFilters(tenant string, fltrs []string) (
 	indexedFltr map[string][]string, unindexedFltr []*engine.FilterRule) {
 	indexedFltr = make(map[string][]string)
 	for _, fltrID := range fltrs {
-		f, err := sS.dm.GetFilter(ctx, tenant, fltrID,
+		f, err := sS.dm.GetFilter(tenant, fltrID,
 			true, true, utils.NonTransactional)
 		if err != nil {
+			continue
+		}
+		if f.ActivationInterval != nil &&
+			!f.ActivationInterval.IsActiveAtTime(time.Now()) { // not active
 			continue
 		}
 		for _, fltr := range f.Rules {
 			fldName := strings.TrimPrefix(fltr.Element, utils.DynamicDataPrefix+utils.MetaReq+utils.NestingSep) // remove ~req. prefix
 			if fltr.Type != utils.MetaString ||
-				!sS.cfg.SessionSCfg().SessionIndexes.Has(fldName) {
+				!sS.cgrCfg.SessionSCfg().SessionIndexes.Has(fldName) {
 				unindexedFltr = append(unindexedFltr, fltr)
 				continue
 			}
@@ -740,12 +1004,12 @@ func (sS *SessionS) getSessionIDsMatchingIndexes(fltrs map[string][]string,
 			if _, hasFldVal := ssIndx[fltrName][fltrVal]; !hasFldVal {
 				continue
 			}
-			for originID, runIDs := range ssIndx[fltrName][fltrVal] {
-				if _, hasoriginID := matchingSessionsbyValue[originID]; !hasoriginID {
-					matchingSessionsbyValue[originID] = utils.StringSet{}
+			for cgrID, runIDs := range ssIndx[fltrName][fltrVal] {
+				if _, hasCGRID := matchingSessionsbyValue[cgrID]; !hasCGRID {
+					matchingSessionsbyValue[cgrID] = utils.StringSet{}
 				}
 				for runID := range runIDs {
-					matchingSessionsbyValue[originID].Add(runID)
+					matchingSessionsbyValue[cgrID].Add(runID)
 				}
 			}
 		}
@@ -759,14 +1023,14 @@ func (sS *SessionS) getSessionIDsMatchingIndexes(fltrs map[string][]string,
 			continue
 		}
 		// Higher run, takes out non matching indexes
-		for originID, runIDs := range matchingSessions {
-			if matchedRunIDs, hasoriginID := matchedIndx[originID]; !hasoriginID {
-				delete(matchingSessions, originID)
+		for cgrID, runIDs := range matchingSessions {
+			if matchedRunIDs, hasCGRID := matchedIndx[cgrID]; !hasCGRID {
+				delete(matchingSessions, cgrID)
 				continue
 			} else {
 				for runID := range runIDs {
 					if !matchedRunIDs.Has(runID) {
-						delete(matchingSessions[originID], runID)
+						delete(matchingSessions[cgrID], runID)
 					}
 				}
 			}
@@ -775,36 +1039,36 @@ func (sS *SessionS) getSessionIDsMatchingIndexes(fltrs map[string][]string,
 			return make([]string, 0), make(map[string]utils.StringSet)
 		}
 	}
-	originIDs := []string{}
-	for originID := range matchingSessions {
-		originIDs = append(originIDs, originID)
+	cgrIDs := []string{}
+	for cgrID := range matchingSessions {
+		cgrIDs = append(cgrIDs, cgrID)
 
 	}
-	return originIDs, matchingSessions
+	return cgrIDs, matchingSessions
 }
 
 // filterSessions will return a list of sessions in external format based on filters passed
 // is thread safe for the Sessions
-func (sS *SessionS) filterSessions(ctx *context.Context, sf *utils.SessionFilter, psv bool) (aSs []*ExternalSession) {
+func (sS *SessionS) filterSessions(sf *utils.SessionFilter, psv bool) (aSs []*ExternalSession) {
 	if len(sf.Filters) == 0 {
 		ss := sS.getSessions(utils.EmptyString, psv)
 		for _, s := range ss {
 			aSs = append(aSs,
-				s.AsExternalSessions(sS.cfg.GeneralCfg().DefaultTimezone,
-					sS.cfg.GeneralCfg().NodeID)...) // Expensive for large number of sessions
+				s.AsExternalSessions(sS.cgrCfg.GeneralCfg().DefaultTimezone,
+					sS.cgrCfg.GeneralCfg().NodeID)...) // Expensive for large number of sessions
 			if sf.Limit != nil && *sf.Limit > 0 && *sf.Limit < len(aSs) {
 				return aSs[:*sf.Limit]
 			}
 		}
 		return
 	}
-	tenant := utils.FirstNonEmpty(sf.Tenant, sS.cfg.GeneralCfg().DefaultTenant)
-	indx, unindx := sS.getIndexedFilters(ctx, tenant, sf.Filters)
-	originIDs, _ /*matchingSRuns*/ := sS.getSessionIDsMatchingIndexes(indx, psv)
-	if len(indx) != 0 && len(originIDs) == 0 { // no sessions matched the indexed filters
+	tenant := utils.FirstNonEmpty(sf.Tenant, sS.cgrCfg.GeneralCfg().DefaultTenant)
+	indx, unindx := sS.getIndexedFilters(tenant, sf.Filters)
+	cgrIDs, matchingSRuns := sS.getSessionIDsMatchingIndexes(indx, psv)
+	if len(indx) != 0 && len(cgrIDs) == 0 { // no sessions matched the indexed filters
 		return
 	}
-	ss := sS.getSessionsFromOriginIDs(psv, originIDs...)
+	ss := sS.getSessionsFromCGRIDs(psv, cgrIDs...)
 	pass := func(filterRules []*engine.FilterRule,
 		me engine.MapEvent) (pass bool) {
 		pass = true
@@ -815,7 +1079,7 @@ func (sS *SessionS) filterSessions(ctx *context.Context, sf *utils.SessionFilter
 		ev := utils.MapStorage{utils.MetaReq: me.Data()}
 		for _, fltr := range filterRules {
 			// we don't know how many values we have so we need to build the fieldValues DataProvider
-			if pass, err = fltr.Pass(ctx, ev); err != nil || !pass {
+			if pass, err = fltr.Pass(ev); err != nil || !pass {
 				pass = false
 				return
 			}
@@ -824,15 +1088,15 @@ func (sS *SessionS) filterSessions(ctx *context.Context, sf *utils.SessionFilter
 	}
 	for _, s := range ss {
 		s.RLock()
-		// runIDs := matchingSRuns[s.OptsStart[utils.MetaOriginID]]
+		runIDs := matchingSRuns[s.CGRID]
 		for _, sr := range s.SRuns {
-			// if len(originIDs) != 0 && !runIDs.Has(sr.CD.RunID) {
-			// continue
-			// }
+			if len(cgrIDs) != 0 && !runIDs.Has(sr.CD.RunID) {
+				continue
+			}
 			if pass(unindx, sr.Event) {
 				aSs = append(aSs,
-					s.AsExternalSession(sr, sS.cfg.GeneralCfg().DefaultTimezone,
-						sS.cfg.GeneralCfg().NodeID)) // Expensive for large number of sessions
+					s.AsExternalSession(sr, sS.cgrCfg.GeneralCfg().DefaultTimezone,
+						sS.cgrCfg.GeneralCfg().NodeID)) // Expensive for large number of sessions
 				if sf.Limit != nil && *sf.Limit > 0 && *sf.Limit < len(aSs) {
 					s.RUnlock()
 					return aSs[:*sf.Limit]
@@ -845,7 +1109,7 @@ func (sS *SessionS) filterSessions(ctx *context.Context, sf *utils.SessionFilter
 }
 
 // filterSessionsCount re
-func (sS *SessionS) filterSessionsCount(ctx *context.Context, sf *utils.SessionFilter, psv bool) (count int) {
+func (sS *SessionS) filterSessionsCount(sf *utils.SessionFilter, psv bool) (count int) {
 	count = 0
 	if len(sf.Filters) == 0 {
 		ss := sS.getSessions(utils.EmptyString, psv)
@@ -854,13 +1118,13 @@ func (sS *SessionS) filterSessionsCount(ctx *context.Context, sf *utils.SessionF
 		}
 		return
 	}
-	tenant := utils.FirstNonEmpty(sf.Tenant, sS.cfg.GeneralCfg().DefaultTenant)
-	indx, unindx := sS.getIndexedFilters(ctx, tenant, sf.Filters)
-	originIDs, _ /* matchingSRuns*/ := sS.getSessionIDsMatchingIndexes(indx, psv)
-	if len(indx) != 0 && len(originIDs) == 0 { // no sessions matched the indexed filters
+	tenant := utils.FirstNonEmpty(sf.Tenant, sS.cgrCfg.GeneralCfg().DefaultTenant)
+	indx, unindx := sS.getIndexedFilters(tenant, sf.Filters)
+	cgrIDs, matchingSRuns := sS.getSessionIDsMatchingIndexes(indx, psv)
+	if len(indx) != 0 && len(cgrIDs) == 0 { // no sessions matched the indexed filters
 		return
 	}
-	ss := sS.getSessionsFromOriginIDs(psv, originIDs...)
+	ss := sS.getSessionsFromCGRIDs(psv, cgrIDs...)
 	pass := func(filterRules []*engine.FilterRule,
 		me engine.MapEvent) (pass bool) {
 		pass = true
@@ -871,7 +1135,7 @@ func (sS *SessionS) filterSessionsCount(ctx *context.Context, sf *utils.SessionF
 		ev := utils.MapStorage{utils.MetaReq: me.Data()}
 		for _, fltr := range filterRules {
 			// we don't know how many values we have so we need to build the fieldValues DataProvider
-			if pass, err = fltr.Pass(ctx, ev); err != nil || !pass {
+			if pass, err = fltr.Pass(ev); err != nil || !pass {
 				return
 			}
 		}
@@ -879,11 +1143,11 @@ func (sS *SessionS) filterSessionsCount(ctx *context.Context, sf *utils.SessionF
 	}
 	for _, s := range ss {
 		s.RLock()
-		// runIDs := matchingSRuns[s.OptsStart[utils.MetaOriginID]]
+		runIDs := matchingSRuns[s.CGRID]
 		for _, sr := range s.SRuns {
-			// if len(originIDs) != 0 && !runIDs.Has(sr.CD.RunID) {
-			// continue
-			// }
+			if len(cgrIDs) != 0 && !runIDs.Has(sr.CD.RunID) {
+				continue
+			}
 			if pass(unindx, sr.Event) {
 				count++
 			}
@@ -896,18 +1160,19 @@ func (sS *SessionS) filterSessionsCount(ctx *context.Context, sf *utils.SessionF
 // newSession will populate SRuns within a Session based on ChargerS output
 // forSession can only be called once per Session
 // not thread-safe since it should be called in init where there is no concurrency
-func (sS *SessionS) newSession(ctx *context.Context, cgrEv *utils.CGREvent, resID, clntConnID string,
+func (sS *SessionS) newSession(cgrEv *utils.CGREvent, resID, clntConnID string,
 	dbtItval time.Duration, forceDuration, isMsg bool) (s *Session, err error) {
-	if len(sS.cfg.SessionSCfg().ChargerSConns) == 0 {
+	if len(sS.cgrCfg.SessionSCfg().ChargerSConns) == 0 {
 		err = errors.New("ChargerS is disabled")
 		return
 	}
-	originID := GetSetOptsOriginID(cgrEv.Event, cgrEv.APIOpts)
+	cgrID := GetSetCGRID(cgrEv.Event)
 	evStart := engine.MapEvent(cgrEv.Event)
 	if !evStart.HasField(utils.Usage) && evStart.HasField(utils.LastUsed) {
 		evStart[utils.Usage] = evStart[utils.LastUsed]
 	}
 	s = &Session{
+		CGRID:         cgrID,
 		Tenant:        cgrEv.Tenant,
 		ResourceID:    resID,
 		EventStart:    evStart.Clone(), // decouple the event from the request so we can avoid concurrency with debit and ttl
@@ -915,42 +1180,64 @@ func (sS *SessionS) newSession(ctx *context.Context, cgrEv *utils.CGREvent, resI
 		ClientConnID:  clntConnID,
 		DebitInterval: dbtItval,
 	}
-	s.OptsStart[utils.MetaOriginID] = originID
-	opts := engine.MapEvent{utils.MetaOpts: s.OptsStart}
-	if s.Chargeable, err = engine.GetBoolOpts(ctx, cgrEv.Tenant, opts, sS.fltrS, sS.cfg.SessionSCfg().Opts.Chargeable,
-		config.SessionsChargeableDftOpt, utils.OptsSesChargeable); err != nil {
-		return
-	}
+	s.Chargeable = s.OptsStart.GetBoolOrDefault(utils.OptsChargeable, true)
 	if !isMsg && sS.isIndexed(s, false) { // check if already exists
 		return nil, utils.ErrExists
 	}
 
 	var chrgrs []*engine.ChrgSProcessEventReply
-	if chrgrs, err = sS.processChargerS(ctx, cgrEv); err != nil {
+	if chrgrs, err = sS.processChargerS(cgrEv); err != nil {
 		return
 	}
 	s.SRuns = make([]*SRun, len(chrgrs))
 	for i, chrgr := range chrgrs {
 		me := engine.MapEvent(chrgr.CGREvent.Event)
+		startTime := me.GetTimeIgnoreErrors(utils.AnswerTime,
+			sS.cgrCfg.GeneralCfg().DefaultTimezone)
+		if startTime.IsZero() { // AnswerTime not parsable, try SetupTime
+			startTime = s.EventStart.GetTimeIgnoreErrors(utils.SetupTime,
+				sS.cgrCfg.GeneralCfg().DefaultTimezone)
+		}
+		category := me.GetStringIgnoreErrors(utils.Category)
+		if len(category) == 0 {
+			category = sS.cgrCfg.GeneralCfg().DefaultCategory
+		}
+		subject := me.GetStringIgnoreErrors(utils.Subject)
+		if len(subject) == 0 {
+			subject = me.GetStringIgnoreErrors(utils.AccountField)
+		}
 		s.SRuns[i] = &SRun{
 			Event: me,
-			RunID: chrgr.CGREvent.APIOpts[utils.MetaRunID].(string),
+			CD: &engine.CallDescriptor{
+				CgrID:         s.CGRID,
+				RunID:         me.GetStringIgnoreErrors(utils.RunID),
+				ToR:           me.GetStringIgnoreErrors(utils.ToR),
+				Tenant:        chrgr.CGREvent.Tenant,
+				Category:      category,
+				Subject:       subject,
+				Account:       me.GetStringIgnoreErrors(utils.AccountField),
+				Destination:   me.GetStringIgnoreErrors(utils.Destination),
+				TimeStart:     startTime,
+				TimeEnd:       startTime.Add(s.EventStart.GetDurationIgnoreErrors(utils.Usage)),
+				ExtraFields:   me.AsMapString(utils.MainCDRFields),
+				ForceDuration: forceDuration,
+			},
 		}
 	}
 	return
 }
 
 // processChargerS processes the event with chargers and cahces the response based on the requestID
-func (sS *SessionS) processChargerS(ctx *context.Context, cgrEv *utils.CGREvent) (chrgrs []*engine.ChrgSProcessEventReply, err error) {
+func (sS *SessionS) processChargerS(cgrEv *utils.CGREvent) (chrgrs []*engine.ChrgSProcessEventReply, err error) {
 	if x, ok := engine.Cache.Get(utils.CacheEventCharges, cgrEv.ID); ok && x != nil {
 		return x.([]*engine.ChrgSProcessEventReply), nil
 	}
-	if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ChargerSConns,
+	if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ChargerSConns, nil,
 		utils.ChargerSv1ProcessEvent, cgrEv, &chrgrs); err != nil {
 		err = utils.NewErrChargerS(err)
 	}
 
-	if errCh := engine.Cache.Set(ctx, utils.CacheEventCharges, cgrEv.ID, chrgrs, nil,
+	if errCh := engine.Cache.Set(utils.CacheEventCharges, cgrEv.ID, chrgrs, nil,
 		true, utils.NonTransactional); errCh != nil {
 		return nil, errCh
 	}
@@ -958,7 +1245,7 @@ func (sS *SessionS) processChargerS(ctx *context.Context, cgrEv *utils.CGREvent)
 }
 
 // getSessions is used to return in a thread-safe manner active or passive sessions
-func (sS *SessionS) getSessions(originID string, pSessions bool) (ss []*Session) {
+func (sS *SessionS) getSessions(cgrID string, pSessions bool) (ss []*Session) {
 	ssMux := &sS.aSsMux  // get the pointer so we don't copy, otherwise locks will not work
 	ssMp := sS.aSessions // reference it so we don't overwrite the new map without protection
 	if pSessions {
@@ -967,7 +1254,7 @@ func (sS *SessionS) getSessions(originID string, pSessions bool) (ss []*Session)
 	}
 	ssMux.RLock()
 	defer ssMux.RUnlock()
-	if len(originID) == 0 {
+	if len(cgrID) == 0 {
 		ss = make([]*Session, len(ssMp))
 		var i int
 		for _, s := range ssMp {
@@ -976,14 +1263,14 @@ func (sS *SessionS) getSessions(originID string, pSessions bool) (ss []*Session)
 		}
 		return
 	}
-	if s, hasOptOriginID := ssMp[originID]; hasOptOriginID {
+	if s, hasCGRID := ssMp[cgrID]; hasCGRID {
 		ss = []*Session{s}
 	}
 	return
 }
 
 // getSessions is used to return in a thread-safe manner active or passive sessions
-func (sS *SessionS) getSessionsFromOriginIDs(pSessions bool, originIDs ...string) (ss []*Session) {
+func (sS *SessionS) getSessionsFromCGRIDs(pSessions bool, cgrIDs ...string) (ss []*Session) {
 	ssMux := &sS.aSsMux  // get the pointer so we don't copy, otherwise locks will not work
 	ssMp := sS.aSessions // reference it so we don't overwrite the new map without protection
 	if pSessions {
@@ -992,7 +1279,7 @@ func (sS *SessionS) getSessionsFromOriginIDs(pSessions bool, originIDs ...string
 	}
 	ssMux.RLock()
 	defer ssMux.RUnlock()
-	if len(originIDs) == 0 {
+	if len(cgrIDs) == 0 {
 		ss = make([]*Session, len(ssMp))
 		var i int
 		for _, s := range ssMp {
@@ -1001,9 +1288,9 @@ func (sS *SessionS) getSessionsFromOriginIDs(pSessions bool, originIDs ...string
 		}
 		return
 	}
-	ss = make([]*Session, len(originIDs))
-	for i, originID := range originIDs {
-		if s, hasoriginID := ssMp[originID]; hasoriginID {
+	ss = make([]*Session, len(cgrIDs))
+	for i, cgrID := range cgrIDs {
+		if s, hasCGRID := ssMp[cgrID]; hasCGRID {
 			ss[i] = s
 		}
 	}
@@ -1011,14 +1298,14 @@ func (sS *SessionS) getSessionsFromOriginIDs(pSessions bool, originIDs ...string
 }
 
 // transitSState will transit the sessions from one state (active/passive) to another (passive/active)
-func (sS *SessionS) transitSState(originID string, psv bool) (s *Session) {
-	ss := sS.getSessions(originID, !psv)
+func (sS *SessionS) transitSState(cgrID string, psv bool) (s *Session) {
+	ss := sS.getSessions(cgrID, !psv)
 	if len(ss) == 0 {
 		return
 	}
 	s = ss[0]
 	s.Lock()
-	sS.unregisterSession(originID, !psv)
+	sS.unregisterSession(cgrID, !psv)
 	sS.registerSession(s, psv)
 	if !psv {
 		sS.initSessionDebitLoops(s)
@@ -1031,113 +1318,109 @@ func (sS *SessionS) transitSState(originID string, psv bool) (s *Session) {
 }
 
 // getActivateSession returns the session from active list or moves from passive
-func (sS *SessionS) getActivateSession(originID string) (s *Session) {
-	ss := sS.getSessions(originID, false)
+func (sS *SessionS) getActivateSession(cgrID string) (s *Session) {
+	ss := sS.getSessions(cgrID, false)
 	if len(ss) != 0 {
 		return ss[0]
 	}
-	return sS.transitSState(originID, false)
+	return sS.transitSState(cgrID, false)
 }
 
-// relocateSession will change the originID of a session (ie: prefix based session group)
-func (sS *SessionS) relocateSession(ctx *context.Context, initOriginID, originID, originHost string) (s *Session) {
+// relocateSession will change the CGRID of a session (ie: prefix based session group)
+func (sS *SessionS) relocateSession(initOriginID, originID, originHost string) (s *Session) {
 	if initOriginID == "" {
 		return
 	}
-	initOptOriginID := utils.Sha1(initOriginID, originHost)
-	newOptOriginID := utils.Sha1(originID, originHost)
-	s = sS.getActivateSession(initOptOriginID)
+	initCGRID := utils.Sha1(initOriginID, originHost)
+	newCGRID := utils.Sha1(originID, originHost)
+	s = sS.getActivateSession(initCGRID)
 	if s == nil {
 		return
 	}
-	sS.unregisterSession(utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false)
+	sS.unregisterSession(s.CGRID, false)
 	s.Lock()
-	// Overwrite initial originID with new one
-	s.OptsStart[utils.MetaOriginID] = newOptOriginID // Overwrite optOriginID for final CDR
-	s.EventStart[utils.OriginID] = originID          // Overwrite OriginID for session indexing
+	s.CGRID = newCGRID
+	// Overwrite initial CGRID with new one
+	s.EventStart[utils.CGRID] = newCGRID    // Overwrite CGRID for final CDR
+	s.EventStart[utils.OriginID] = originID // Overwrite OriginID for session indexing
 	for _, sRun := range s.SRuns {
-		//sRun.Event[utils.MetaOriginID] = newOptOriginID // needed for CDR generation
+		sRun.Event[utils.CGRID] = newCGRID // needed for CDR generation
 		sRun.Event[utils.OriginID] = originID
 	}
 	s.Unlock()
 	sS.registerSession(s, false)
-	sS.replicateSessions(ctx, initOptOriginID, false, sS.cfg.SessionSCfg().ReplicationConns)
+	sS.replicateSessions(initCGRID, false, sS.cgrCfg.SessionSCfg().ReplicationConns)
 	return
 }
 
-// getRelocateSession will relocate a session if it cannot find originID and initialOriginID is present
-func (sS *SessionS) getRelocateSession(ctx *context.Context, optOriginID string, initOriginID,
+// getRelocateSession will relocate a session if it cannot find cgrID and initialOriginID is present
+func (sS *SessionS) getRelocateSession(cgrID string, initOriginID,
 	originID, originHost string) (s *Session) {
-	if s = sS.getActivateSession(optOriginID); s != nil ||
+	if s = sS.getActivateSession(cgrID); s != nil ||
 		initOriginID == "" {
 		return
 	}
-	return sS.relocateSession(ctx, initOriginID, originID, originHost)
+	return sS.relocateSession(initOriginID, originID, originHost)
 }
 
 // syncSessions synchronizes the active sessions with the one in the clients
 // it will force-disconnect the one found in SessionS but not in clients
-func (sS *SessionS) syncSessions(ctx *context.Context) {
+func (sS *SessionS) syncSessions() {
 	sS.aSsMux.RLock()
 	asCount := len(sS.aSessions)
 	sS.aSsMux.RUnlock()
 	if asCount == 0 { // no need to sync the sessions if none is active
 		return
 	}
-	type qReply struct {
-		reply []*SessionID
-		err   error
-	}
-	biClnts := sS.biJClients()
-	replys := make(chan *qReply, len(biClnts))
-
-	for _, clnt := range biClnts {
-		ctx, cancel := context.WithTimeout(ctx, sS.cfg.GeneralCfg().ReplyTimeout)
-		defer cancel()
-		go func(clnt *biJClient) {
-			var reply qReply
-			reply.err = clnt.conn.Call(ctx, utils.SessionSv1GetActiveSessionIDs,
-				utils.EmptyString, &reply.reply)
-			replys <- &reply
-		}(clnt)
-	}
-	queriedOriginIDs := utils.StringSet{}
-	for range biClnts {
-		reply := <-replys
-		if reply.err != nil {
-			if reply.err.Error() != utils.ErrNoActiveSession.Error() {
-				utils.Logger.Warning(
-					fmt.Sprintf("<%s> error <%s> quering session ids", utils.SessionS, reply.err.Error()))
+	queriedCGRIDs := engine.NewSafEvent(nil) // need this to be
+	var err error
+	for _, clnt := range sS.biJClients() {
+		errChan := make(chan error)
+		go func() {
+			var queriedSessionIDs []*SessionID
+			if err := clnt.conn.Call(utils.SessionSv1GetActiveSessionIDs,
+				utils.EmptyString, &queriedSessionIDs); err != nil {
+				errChan <- err
 			}
-			continue
-		}
-		for _, sessionID := range reply.reply {
-			queriedOriginIDs.Add(sessionID.OptsOriginID())
+			for _, sessionID := range queriedSessionIDs {
+				queriedCGRIDs.Set(sessionID.CGRID(), struct{}{})
+			}
+			errChan <- nil
+		}()
+		select {
+		case err = <-errChan:
+			if err != nil && err.Error() != utils.ErrNoActiveSession.Error() {
+				utils.Logger.Warning(
+					fmt.Sprintf("<%s> error <%s> quering session ids", utils.SessionS, err.Error()))
+			}
+		case <-time.After(sS.cgrCfg.GeneralCfg().ReplyTimeout):
+			utils.Logger.Warning(
+				fmt.Sprintf("<%s> timeout quering session ids ", utils.SessionS))
 		}
 	}
 	var toBeRemoved []string
 	sS.aSsMux.RLock()
-	for optOriginID := range sS.aSessions {
-		if !queriedOriginIDs.Has(optOriginID) {
-			toBeRemoved = append(toBeRemoved, optOriginID)
+	for cgrid := range sS.aSessions {
+		if !queriedCGRIDs.HasField(cgrid) {
+			toBeRemoved = append(toBeRemoved, cgrid)
 		}
 	}
 	sS.aSsMux.RUnlock()
-	sS.terminateSyncSessions(ctx, toBeRemoved)
+	sS.terminateSyncSessions(toBeRemoved)
 }
 
 // Extracted from syncSessions in order to test all cases
-func (sS *SessionS) terminateSyncSessions(ctx *context.Context, toBeRemoved []string) {
-	for _, optOriginID := range toBeRemoved {
-		ss := sS.getSessions(optOriginID, false)
+func (sS *SessionS) terminateSyncSessions(toBeRemoved []string) {
+	for _, cgrID := range toBeRemoved {
+		ss := sS.getSessions(cgrID, false)
 		if len(ss) == 0 {
 			continue
 		}
 		ss[0].Lock()
-		if err := sS.forceSTerminate(ctx, ss[0], 0, nil, nil); err != nil {
+		if err := sS.forceSTerminate(ss[0], 0, nil, nil); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> failed force-terminating session: <%s>, err: <%s>",
-					utils.SessionS, optOriginID, err.Error()))
+					utils.SessionS, cgrID, err.Error()))
 		}
 		ss[0].Unlock()
 	}
@@ -1162,7 +1445,7 @@ func (sS *SessionS) initSessionDebitLoops(s *Session) {
 }
 
 // authEvent calculates maximum usage allowed for the given event
-func (sS *SessionS) authEvent(ctx *context.Context, cgrEv *utils.CGREvent, forceDuration bool) (usage map[string]time.Duration, err error) {
+func (sS *SessionS) authEvent(cgrEv *utils.CGREvent, forceDuration bool) (usage map[string]time.Duration, err error) {
 	evStart := engine.MapEvent(cgrEv.Event)
 	var eventUsage time.Duration
 	if eventUsage, err = evStart.GetDuration(utils.Usage); err != nil {
@@ -1170,11 +1453,11 @@ func (sS *SessionS) authEvent(ctx *context.Context, cgrEv *utils.CGREvent, force
 			return
 		}
 		err = nil
-		eventUsage = sS.cfg.SessionSCfg().GetDefaultUsage(evStart.GetStringIgnoreErrors(utils.ToR))
+		eventUsage = sS.cgrCfg.SessionSCfg().GetDefaultUsage(evStart.GetStringIgnoreErrors(utils.ToR))
 		evStart[utils.Usage] = eventUsage // will be used in CD
 	}
 	var s *Session
-	if s, err = sS.newSession(ctx, cgrEv, "", "", 0, forceDuration, true); err != nil {
+	if s, err = sS.newSession(cgrEv, "", "", 0, forceDuration, true); err != nil {
 		return
 	}
 	usage = make(map[string]time.Duration)
@@ -1183,28 +1466,28 @@ func (sS *SessionS) authEvent(ctx *context.Context, cgrEv *utils.CGREvent, force
 		if !authReqs.HasField(
 			sr.Event.GetStringIgnoreErrors(utils.RequestType)) {
 			rplyMaxUsage = eventUsage
-			// } else if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
-			// 	utils.ResponderGetMaxSessionTime,
-			// 	&engine.CallDescriptorWithAPIOpts{
-			// 		CallDescriptor: sr.CD,
-			// 		APIOpts:        s.OptsStart,
-			// 	}, &rplyMaxUsage); err != nil {
-			// 	err = utils.NewErrRALs(err)
-			// 	return
+		} else if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
+			utils.ResponderGetMaxSessionTime,
+			&engine.CallDescriptorWithAPIOpts{
+				CallDescriptor: sr.CD,
+				APIOpts:        s.OptsStart,
+			}, &rplyMaxUsage); err != nil {
+			err = utils.NewErrRALs(err)
+			return
 		}
 		if rplyMaxUsage > eventUsage {
 			rplyMaxUsage = eventUsage
 		}
-		// usage[sr.CD.RunID] = rplyMaxUsage
+		usage[sr.CD.RunID] = rplyMaxUsage
 	}
 	return
 }
 
 // initSession handles a new session
 // not thread-safe for Session since it is constructed here
-func (sS *SessionS) initSession(ctx *context.Context, cgrEv *utils.CGREvent, clntConnID,
+func (sS *SessionS) initSession(cgrEv *utils.CGREvent, clntConnID,
 	resID string, dbtItval time.Duration, isMsg, forceDuration bool) (s *Session, err error) {
-	if s, err = sS.newSession(ctx, cgrEv, resID, clntConnID, dbtItval, forceDuration, isMsg); err != nil {
+	if s, err = sS.newSession(cgrEv, resID, clntConnID, dbtItval, forceDuration, isMsg); err != nil {
 		return nil, err
 	}
 	if !isMsg {
@@ -1217,9 +1500,9 @@ func (sS *SessionS) initSession(ctx *context.Context, cgrEv *utils.CGREvent, cln
 }
 
 // updateSession will reset terminator, perform debits and replicate sessions
-func (sS *SessionS) updateSession(ctx *context.Context, s *Session, updtEv, opts engine.MapEvent, isMsg bool) (maxUsage map[string]time.Duration, err error) {
+func (sS *SessionS) updateSession(s *Session, updtEv, opts engine.MapEvent, isMsg bool) (maxUsage map[string]time.Duration, err error) {
 	if !isMsg {
-		defer sS.replicateSessions(ctx, utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false, sS.cfg.SessionSCfg().ReplicationConns)
+		defer sS.replicateSessions(s.CGRID, false, sS.cgrCfg.SessionSCfg().ReplicationConns)
 		s.Lock()
 		defer s.Unlock()
 
@@ -1230,135 +1513,127 @@ func (sS *SessionS) updateSession(ctx *context.Context, s *Session, updtEv, opts
 			}
 			s.EventStart[k] = v // update previoius field with new one
 		}
-		s.updateSRuns(updtEv, sS.cfg.SessionSCfg().AlterableFields)
-		sS.setSTerminator(ctx, s, opts) // reset the terminator
+		s.updateSRuns(updtEv, sS.cgrCfg.SessionSCfg().AlterableFields)
+		sS.setSTerminator(s, opts) // reset the terminator
 	}
-	event := &utils.CGREvent{
-		Tenant:  s.Tenant,
-		Event:   updtEv,
-		APIOpts: opts,
-	}
-	if s.Chargeable, err = engine.GetBoolOpts(ctx, event.Tenant, event.AsDataProvider(), sS.fltrS, sS.cfg.SessionSCfg().Opts.Chargeable,
-		config.SessionsChargeableDftOpt, utils.OptsSesChargeable); err != nil {
-		return
-	}
+	s.Chargeable = opts.GetBoolOrDefault(utils.OptsChargeable, true)
 	//init has no updtEv
 	if updtEv == nil {
 		updtEv = engine.MapEvent(s.EventStart.Clone())
 	}
 
 	var reqMaxUsage time.Duration
-	if _, err = updtEv.GetDuration(utils.Usage); err != nil {
+	if reqMaxUsage, err = updtEv.GetDuration(utils.Usage); err != nil {
 		if err != utils.ErrNotFound {
 			return
 		}
 		err = nil
-		reqMaxUsage = sS.cfg.SessionSCfg().GetDefaultUsage(updtEv.GetStringIgnoreErrors(utils.ToR))
+		reqMaxUsage = sS.cgrCfg.SessionSCfg().GetDefaultUsage(updtEv.GetStringIgnoreErrors(utils.ToR))
 		updtEv[utils.Usage] = reqMaxUsage
 	}
 	maxUsage = make(map[string]time.Duration)
-	for _, sr := range s.SRuns {
+	for i, sr := range s.SRuns {
 		reqType := sr.Event.GetStringIgnoreErrors(utils.RequestType)
 		if reqType == utils.MetaNone {
-			//	maxUsage[sr.CD.RunID] = reqMaxUsage
+			maxUsage[sr.CD.RunID] = reqMaxUsage
 			continue
 		}
-		// var rplyMaxUsage time.Duration
-		// if reqType != utils.MetaPrepaid || s.debitStop != nil {
-		// 	rplyMaxUsage = reqMaxUsage
-		// } else if rplyMaxUsage, err = sS.debitSession(s, i, reqMaxUsage,
-		// 	updtEv.GetDurationPtrIgnoreErrors(utils.LastUsed)); err != nil {
-		// 	return
-		// }
-		// maxUsage[sr.CD.RunID] = rplyMaxUsage
+		var rplyMaxUsage time.Duration
+		if reqType != utils.MetaPrepaid || s.debitStop != nil {
+			rplyMaxUsage = reqMaxUsage
+		} else if rplyMaxUsage, err = sS.debitSession(s, i, reqMaxUsage,
+			updtEv.GetDurationPtrIgnoreErrors(utils.LastUsed)); err != nil {
+			return
+		}
+		maxUsage[sr.CD.RunID] = rplyMaxUsage
 	}
 	return
 }
 
 // terminateSession will end a session from outside
 // calls endSession thread safe
-func (sS *SessionS) terminateSession(ctx *context.Context, s *Session, tUsage, lastUsage *time.Duration,
+func (sS *SessionS) terminateSession(s *Session, tUsage, lastUsage *time.Duration,
 	aTime *time.Time, isMsg bool) (err error) {
 	s.Lock()
-	err = sS.endSession(ctx, s, tUsage, lastUsage, aTime, isMsg)
+	err = sS.endSession(s, tUsage, lastUsage, aTime, isMsg)
 	s.Unlock()
 	return
 }
 
 // endSession will end a session from outside
 // this function is not thread safe
-func (sS *SessionS) endSession(ctx *context.Context, s *Session, tUsage, lastUsage *time.Duration,
+func (sS *SessionS) endSession(s *Session, tUsage, lastUsage *time.Duration,
 	aTime *time.Time, isMsg bool) (err error) {
 	if !isMsg {
 		//check if we have replicate connection and close the session there
-		defer sS.replicateSessions(ctx, utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), true, sS.cfg.SessionSCfg().ReplicationConns)
-		sS.unregisterSession(utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false)
+		defer sS.replicateSessions(s.CGRID, true, sS.cgrCfg.SessionSCfg().ReplicationConns)
+		sS.unregisterSession(s.CGRID, false)
 		s.stopSTerminator()
 		s.stopDebitLoops()
 	}
 	for sRunIdx, sr := range s.SRuns {
-		// sUsage := sr.TotalUsage
-		// if tUsage != nil {
-		// sUsage = *tUsage
-		// sr.TotalUsage = *tUsage
-		// } else if lastUsage != nil &&
-		// sr.LastUsage != *lastUsage {
-		// sr.TotalUsage -= sr.LastUsage
-		// sr.TotalUsage += *lastUsage
-		// sUsage = sr.TotalUsage
-		// }
-		// if sr.EventCost != nil {
-		// 	if !isMsg { // in case of one time charge there is no need of corrections
-		// 		if notCharged := sUsage - sr.EventCost.GetUsage(); notCharged > 0 { // we did not charge enough, make a manual debit here
-		// 			if !s.Chargeable {
-		// 				sS.pause(sr, notCharged)
-		// 			} else {
-		// 				if sr.CD.LoopIndex > 0 {
-		// 					sr.CD.TimeStart = sr.CD.TimeEnd
-		// 				}
-		// 				sr.CD.TimeEnd = sr.CD.TimeStart.Add(notCharged)
-		// 				sr.CD.DurationIndex += notCharged
-		// 				cc := new(engine.CallCost)
-		// 				if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil, utils.ResponderDebit,
-		// 					&engine.CallDescriptorWithAPIOpts{
-		// 						CallDescriptor: sr.CD,
-		// 						APIOpts:        s.OptsStart,
-		// 					}, cc); err == nil {
-		// 					sr.EventCost.Merge(
-		// 						engine.NewEventCostFromCallCost(cc, s.OptsStart[utils.MetaOriginID],
-		// 							sr.Event.GetStringIgnoreErrors(utils.RunID)))
-		// 				}
-		// 			}
-		// 		} else if notCharged < 0 { // charged too much, try refund
-		// 			if err = sS.refundSession(s, sRunIdx, -notCharged); err != nil {
-		// 				utils.Logger.Warning(
-		// 					fmt.Sprintf(
-		// 						"<%s> failed refunding session: <%s>, srIdx: <%d>, error: <%s>",
-		// 						utils.SessionS, s.OptsStart[utils.MetaOriginID], sRunIdx, err.Error()))
-		// 			}
-		// 		}
-		// 		if err := sS.roundCost(s, sRunIdx); err != nil { // will round the cost and refund the extra increment
-		// 			utils.Logger.Warning(
-		// 				fmt.Sprintf("<%s> failed rounding  session cost for <%s>, srIdx: <%d>, error: <%s>",
-		// 					utils.SessionS, s.OptsStart[utils.MetaOriginID], sRunIdx, err.Error()))
-		// 		}
-		// 	}
-		// 	// compute the event cost before saving the SessionCost
-		// 	// add here to be applied for messages also
-		// 	sr.EventCost.Compute()
-		// 	if sS.cgrCfg.SessionSCfg().StoreSCosts {
-		// 		if err := sS.storeSCost(s, sRunIdx); err != nil {
-		// 			utils.Logger.Warning(
-		// 				fmt.Sprintf("<%s> failed storing session cost for <%s>, srIdx: <%d>, error: <%s>",
-		// 					utils.SessionS, s.OptsStart[utils.MetaOriginID], sRunIdx, err.Error()))
-		// 		}
-		// 	}
+		sUsage := sr.TotalUsage
+		if tUsage != nil {
+			sUsage = *tUsage
+			sr.TotalUsage = *tUsage
+		} else if lastUsage != nil &&
+			sr.LastUsage != *lastUsage {
+			sr.TotalUsage -= sr.LastUsage
+			sr.TotalUsage += *lastUsage
+			sUsage = sr.TotalUsage
+		}
+		if sr.EventCost != nil {
+			// if !isMsg { // in case of one time charge there is no need of corrections
+			if notCharged := sUsage - sr.EventCost.GetUsage(); notCharged > 0 { // we did not charge enough, make a manual debit here
+				if !s.Chargeable {
+					sS.pause(sr, notCharged)
+				} else {
+					if sr.CD.LoopIndex > 0 {
+						sr.CD.TimeStart = sr.CD.TimeEnd
+					}
+					sr.CD.TimeEnd = sr.CD.TimeStart.Add(notCharged)
+					sr.CD.DurationIndex += notCharged
+					cc := new(engine.CallCost)
+					if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil, utils.ResponderDebit,
+						&engine.CallDescriptorWithAPIOpts{
+							CallDescriptor: sr.CD,
+							APIOpts:        s.OptsStart,
+						}, cc); err == nil {
+						sr.EventCost.Merge(
+							engine.NewEventCostFromCallCost(cc, s.CGRID,
+								sr.Event.GetStringIgnoreErrors(utils.RunID)))
+					}
+				}
+			} else if notCharged < 0 { // charged too much, try refund
+				if err = sS.refundSession(s, sRunIdx, -notCharged); err != nil {
+					utils.Logger.Warning(
+						fmt.Sprintf(
+							"<%s> failed refunding session: <%s>, srIdx: <%d>, error: <%s>",
+							utils.SessionS, s.CGRID, sRunIdx, err.Error()))
+				}
+			}
+			if err := sS.roundCost(s, sRunIdx); err != nil { // will round the cost and refund the extra increment
+				utils.Logger.Warning(
+					fmt.Sprintf("<%s> failed rounding  session cost for <%s>, srIdx: <%d>, error: <%s>",
+						utils.SessionS, s.CGRID, sRunIdx, err.Error()))
+			}
+			// }
+			// compute the event cost before saving the SessionCost
+			// add here to be applied for messages also
+			sr.EventCost.Compute()
+			if sS.cgrCfg.SessionSCfg().StoreSCosts {
+				if err := sS.storeSCost(s, sRunIdx); err != nil {
+					utils.Logger.Warning(
+						fmt.Sprintf("<%s> failed storing session cost for <%s>, srIdx: <%d>, error: <%s>",
+							utils.SessionS, s.CGRID, sRunIdx, err.Error()))
+				}
+			}
 
-		// 	// set cost fields
-		// 	sr.Event[utils.Cost] = sr.EventCost.GetCost()
-		// 	sr.Event[utils.CostDetails] = utils.ToJSON(sr.EventCost) // avoid map[string]interface{} when decoding
-		// 	sr.Event[utils.CostSource] = utils.MetaSessionS
-		// }
+			// set cost fields
+			sr.Event[utils.Cost] = sr.EventCost.GetCost()
+			sr.Event[utils.CostDetails] = utils.ToJSON(sr.EventCost) // avoid map[string]interface{} when decoding
+			sr.Event[utils.CostSource] = utils.MetaSessionS
+		}
 		// Set Usage field
 		if sRunIdx == 0 {
 			s.EventStart[utils.Usage] = sr.TotalUsage
@@ -1368,7 +1643,7 @@ func (sS *SessionS) endSession(ctx *context.Context, s *Session, tUsage, lastUsa
 			sr.Event[utils.AnswerTime] = *aTime
 		}
 	}
-	if errCh := engine.Cache.Set(ctx, utils.CacheClosedSessions, utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), s,
+	if errCh := engine.Cache.Set(utils.CacheClosedSessions, s.CGRID, s,
 		nil, true, utils.NonTransactional); errCh != nil {
 		return errCh
 	}
@@ -1376,21 +1651,21 @@ func (sS *SessionS) endSession(ctx *context.Context, s *Session, tUsage, lastUsa
 }
 
 // chargeEvent will charge a single event (ie: SMS)
-func (sS *SessionS) chargeEvent(ctx *context.Context, cgrEv *utils.CGREvent, forceDuration bool) (maxUsage time.Duration, err error) {
+func (sS *SessionS) chargeEvent(cgrEv *utils.CGREvent, forceDuration bool) (maxUsage time.Duration, err error) {
 	var s *Session
-	if s, err = sS.initSession(ctx, cgrEv, "", "", 0, true, forceDuration); err != nil {
+	if s, err = sS.initSession(cgrEv, "", "", 0, true, forceDuration); err != nil {
 		return
 	}
-	originID := utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])
+	cgrID := s.CGRID
 	var sRunsUsage map[string]time.Duration
-	if sRunsUsage, err = sS.updateSession(ctx, s, nil, nil, true); err != nil {
-		if errEnd := sS.terminateSession(ctx, s,
+	if sRunsUsage, err = sS.updateSession(s, nil, nil, true); err != nil {
+		if errEnd := sS.terminateSession(s,
 			utils.DurationPointer(time.Duration(0)), nil, nil, true); errEnd != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error when force-ending charged event: <%s>, err: <%s>",
-					utils.SessionS, originID, errEnd.Error()))
+					utils.SessionS, cgrID, errEnd.Error()))
 		}
-		// err = utils.NewErrRALs(err)
+		err = utils.NewErrRALs(err)
 		return
 	}
 	var maxUsageSet bool // so we know if we have set the 0 on purpose
@@ -1406,40 +1681,34 @@ func (sS *SessionS) chargeEvent(ctx *context.Context, cgrEv *utils.CGREvent, for
 		usage = ev.GetDurationIgnoreErrors(utils.Usage)
 	}
 	//in case of postpaid and rated maxUsage = usage from event
-	if errEnd := sS.terminateSession(ctx, s, utils.DurationPointer(usage), nil, nil, true); errEnd != nil {
+	if errEnd := sS.terminateSession(s, utils.DurationPointer(usage), nil, nil, true); errEnd != nil {
 		utils.Logger.Warning(
 			fmt.Sprintf("<%s> error when ending charged event: <%s>, err: <%s>",
-				utils.SessionS, originID, errEnd.Error()))
+				utils.SessionS, cgrID, errEnd.Error()))
 	}
 	return // returns here the maxUsage from update
 }
 
-// accounSMaxAbstracts computes the maximum abstract units for the events provided as reply from the ChargerS
-func (sS *SessionS) accounSMaxAbstracts(ctx *context.Context, cgrEvs map[string]*utils.CGREvent) (maxAbstracts map[string]*utils.Decimal, err error) {
-	if len(sS.cfg.SessionSCfg().AttributeSConns) == 0 {
-		return nil, utils.NewErrNotConnected(utils.AccountS)
-	}
-	maxAbstracts = make(map[string]*utils.Decimal)
-	for runID, cgrEv := range cgrEvs {
-		acntCost := new(utils.EventCharges)
-		if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().AttributeSConns, // Fix Here with AccountS
-			utils.AccountSv1MaxAbstracts, cgrEv, &acntCost); err != nil {
-			return
-		}
-		maxAbstracts[runID] = acntCost.Abstracts // did not optimize here since we need to remove floats from acntCost
-	}
-	return
-}
-
 // APIs start here
 
+// Call is part of RpcClientConnection interface
+func (sS *SessionS) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	return sS.CallBiRPC(nil, serviceMethod, args, reply)
+}
+
+// CallBiRPC is part of utils.BiRPCServer interface to help internal connections do calls over rpcclient.ClientConnector interface
+func (sS *SessionS) CallBiRPC(clnt rpcclient.ClientConnector,
+	serviceMethod string, args interface{}, reply interface{}) error {
+	return utils.BiRPCCall(sS, clnt, serviceMethod, args, reply)
+}
+
 // BiRPCv1GetActiveSessions returns the list of active sessions based on filter
-func (sS *SessionS) BiRPCv1GetActiveSessions(ctx *context.Context,
+func (sS *SessionS) BiRPCv1GetActiveSessions(clnt rpcclient.ClientConnector,
 	args *utils.SessionFilter, reply *[]*ExternalSession) (err error) {
 	if args == nil { //protection in case on nil
 		args = &utils.SessionFilter{}
 	}
-	aSs := sS.filterSessions(ctx, args, false)
+	aSs := sS.filterSessions(args, false)
 	if len(aSs) == 0 {
 		return utils.ErrNotFound
 	}
@@ -1448,22 +1717,22 @@ func (sS *SessionS) BiRPCv1GetActiveSessions(ctx *context.Context,
 }
 
 // BiRPCv1GetActiveSessionsCount counts the active sessions
-func (sS *SessionS) BiRPCv1GetActiveSessionsCount(ctx *context.Context,
+func (sS *SessionS) BiRPCv1GetActiveSessionsCount(clnt rpcclient.ClientConnector,
 	args *utils.SessionFilter, reply *int) error {
 	if args == nil { //protection in case on nil
 		args = &utils.SessionFilter{}
 	}
-	*reply = sS.filterSessionsCount(ctx, args, false)
+	*reply = sS.filterSessionsCount(args, false)
 	return nil
 }
 
 // BiRPCv1GetPassiveSessions returns the passive sessions handled by SessionS
-func (sS *SessionS) BiRPCv1GetPassiveSessions(ctx *context.Context,
+func (sS *SessionS) BiRPCv1GetPassiveSessions(clnt rpcclient.ClientConnector,
 	args *utils.SessionFilter, reply *[]*ExternalSession) error {
 	if args == nil { //protection in case on nil
 		args = &utils.SessionFilter{}
 	}
-	pSs := sS.filterSessions(ctx, args, true)
+	pSs := sS.filterSessions(args, true)
 	if len(pSs) == 0 {
 		return utils.ErrNotFound
 	}
@@ -1472,31 +1741,31 @@ func (sS *SessionS) BiRPCv1GetPassiveSessions(ctx *context.Context,
 }
 
 // BiRPCv1GetPassiveSessionsCount counts the passive sessions handled by the system
-func (sS *SessionS) BiRPCv1GetPassiveSessionsCount(ctx *context.Context,
+func (sS *SessionS) BiRPCv1GetPassiveSessionsCount(clnt rpcclient.ClientConnector,
 	args *utils.SessionFilter, reply *int) error {
 	if args == nil { //protection in case on nil
 		args = &utils.SessionFilter{}
 	}
-	*reply = sS.filterSessionsCount(ctx, args, true)
+	*reply = sS.filterSessionsCount(args, true)
 	return nil
 }
 
 // BiRPCv1SetPassiveSession used for replicating Sessions
-func (sS *SessionS) BiRPCv1SetPassiveSession(ctx *context.Context,
+func (sS *SessionS) BiRPCv1SetPassiveSession(clnt rpcclient.ClientConnector,
 	s *Session, reply *string) (err error) {
-	if _, has := s.OptsStart[utils.MetaOriginID]; has {
-		return utils.NewErrMandatoryIeMissing(utils.MetaOriginID)
+	if s.CGRID == "" {
+		return utils.NewErrMandatoryIeMissing(utils.CGRID)
 	}
 	if s.EventStart == nil { // remove
-		if ureg := sS.unregisterSession(utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), true); !ureg {
+		if ureg := sS.unregisterSession(s.CGRID, true); !ureg {
 			return utils.ErrNotFound
 		}
 		*reply = utils.OK
 		return
 	}
-	if aSs := sS.getSessions(utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false); len(aSs) != 0 { // found active session, transit to passive
+	if aSs := sS.getSessions(s.CGRID, false); len(aSs) != 0 { // found active session, transit to passive
 		aSs[0].Lock()
-		sS.unregisterSession(utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false)
+		sS.unregisterSession(s.CGRID, false)
 		aSs[0].stopSTerminator()
 		aSs[0].stopDebitLoops()
 		aSs[0].Unlock()
@@ -1507,37 +1776,196 @@ func (sS *SessionS) BiRPCv1SetPassiveSession(ctx *context.Context,
 	return
 }
 
+// ArgsReplicateSessions used to specify wich Session to replicate over the given connections
+type ArgsReplicateSessions struct {
+	CGRID   string
+	Passive bool
+	ConnIDs []string
+}
+
 // BiRPCv1ReplicateSessions will replicate active sessions to either args.Connections or the internal configured ones
-// args.Filter is used to filter the sessions which are replicated, originID is the only one possible for now
-func (sS *SessionS) BiRPCv1ReplicateSessions(ctx *context.Context,
+// args.Filter is used to filter the sessions which are replicated, CGRID is the only one possible for now
+func (sS *SessionS) BiRPCv1ReplicateSessions(clnt rpcclient.ClientConnector,
 	args ArgsReplicateSessions, reply *string) (err error) {
-	sS.replicateSessions(ctx, utils.IfaceAsString(args.APIOpts[utils.MetaOriginID]), args.Passive, args.ConnIDs)
+	sS.replicateSessions(args.CGRID, args.Passive, args.ConnIDs)
 	*reply = utils.OK
 	return
 }
 
+// NewV1AuthorizeArgs is a constructor for V1AuthorizeArgs
+func NewV1AuthorizeArgs(attrs bool, attributeIDs []string,
+	thrslds bool, thresholdIDs []string, statQueues bool, statIDs []string,
+	res, maxUsage, routes, routesIgnoreErrs, routesEventCost bool,
+	cgrEv *utils.CGREvent, routePaginator utils.Paginator,
+	forceDuration bool, routesMaxCost string) (args *V1AuthorizeArgs) {
+	args = &V1AuthorizeArgs{
+		GetAttributes:      attrs,
+		AuthorizeResources: res,
+		GetMaxUsage:        maxUsage,
+		ProcessThresholds:  thrslds,
+		ProcessStats:       statQueues,
+		RoutesIgnoreErrors: routesIgnoreErrs,
+		GetRoutes:          routes,
+		CGREvent:           cgrEv,
+		ForceDuration:      forceDuration,
+	}
+	if routesEventCost {
+		args.RoutesMaxCost = utils.MetaEventCost
+	} else {
+		args.RoutesMaxCost = routesMaxCost
+	}
+	args.Paginator = routePaginator
+	if len(attributeIDs) != 0 {
+		args.AttributeIDs = attributeIDs
+	}
+	if len(thresholdIDs) != 0 {
+		args.ThresholdIDs = thresholdIDs
+	}
+	if len(statIDs) != 0 {
+		args.StatIDs = statIDs
+	}
+
+	return
+}
+
+// V1AuthorizeArgs are options available in auth request
+type V1AuthorizeArgs struct {
+	GetAttributes      bool
+	AuthorizeResources bool
+	GetMaxUsage        bool
+	ForceDuration      bool
+	ProcessThresholds  bool
+	ProcessStats       bool
+	GetRoutes          bool
+	RoutesMaxCost      string
+	RoutesIgnoreErrors bool
+	AttributeIDs       []string
+	ThresholdIDs       []string
+	StatIDs            []string
+	*utils.CGREvent
+	utils.Paginator
+}
+
+func (V1AuthorizeArgs) RPCClone() {}
+
+// ParseFlags will populate the V1AuthorizeArgs flags
+func (args *V1AuthorizeArgs) ParseFlags(flags, sep string) {
+	for _, subsystem := range strings.Split(flags, sep) {
+		switch {
+		case subsystem == utils.MetaAccounts:
+			args.GetMaxUsage = true
+		case subsystem == utils.MetaResources:
+			args.AuthorizeResources = true
+		case subsystem == utils.MetaRoutes:
+			args.GetRoutes = true
+		case subsystem == utils.MetaRoutesIgnoreErrors:
+			args.RoutesIgnoreErrors = true
+		case subsystem == utils.MetaRoutesEventCost:
+			args.RoutesMaxCost = utils.MetaEventCost
+		case strings.HasPrefix(subsystem, utils.MetaRoutesMaxCost):
+			args.RoutesMaxCost = strings.TrimPrefix(subsystem, utils.MetaRoutesMaxCost+utils.InInFieldSep)
+		case strings.HasPrefix(subsystem, utils.MetaAttributes):
+			args.GetAttributes = true
+			args.AttributeIDs = getFlagIDs(subsystem)
+		case strings.HasPrefix(subsystem, utils.MetaThresholds):
+			args.ProcessThresholds = true
+			args.ThresholdIDs = getFlagIDs(subsystem)
+		case strings.HasPrefix(subsystem, utils.MetaStats):
+			args.ProcessStats = true
+			args.StatIDs = getFlagIDs(subsystem)
+		case subsystem == utils.MetaFD:
+			args.ForceDuration = true
+		}
+	}
+	args.Paginator, _ = utils.GetRoutePaginatorFromOpts(args.APIOpts)
+}
+
+// V1AuthorizeReply are options available in auth reply
+type V1AuthorizeReply struct {
+	Attributes         *engine.AttrSProcessEventReply `json:",omitempty"`
+	ResourceAllocation *string                        `json:",omitempty"`
+	MaxUsage           *time.Duration                 `json:",omitempty"`
+	RouteProfiles      engine.SortedRoutesList        `json:",omitempty"`
+	ThresholdIDs       *[]string                      `json:",omitempty"`
+	StatQueueIDs       *[]string                      `json:",omitempty"`
+
+	needsMaxUsage bool // for gob encoding only
+}
+
+// SetMaxUsageNeeded used by agent that use the reply as NavigableMapper
+// only used for gob encoding
+func (v1AuthReply *V1AuthorizeReply) SetMaxUsageNeeded(getMaxUsage bool) {
+	if v1AuthReply == nil {
+		return
+	}
+	v1AuthReply.needsMaxUsage = getMaxUsage
+}
+
+// AsNavigableMap is part of engine.NavigableMapper interface
+func (v1AuthReply *V1AuthorizeReply) AsNavigableMap() map[string]*utils.DataNode {
+	cgrReply := make(map[string]*utils.DataNode)
+	if v1AuthReply.Attributes != nil {
+		attrs := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for _, fldName := range v1AuthReply.Attributes.AlteredFields {
+			fldName = strings.TrimPrefix(fldName, utils.MetaReq+utils.NestingSep)
+			if v1AuthReply.Attributes.CGREvent.HasField(fldName) {
+				attrs.Map[fldName] = utils.NewLeafNode(v1AuthReply.Attributes.CGREvent.Event[fldName])
+			}
+		}
+		cgrReply[utils.CapAttributes] = attrs
+	}
+	if v1AuthReply.ResourceAllocation != nil {
+		cgrReply[utils.CapResourceAllocation] = utils.NewLeafNode(*v1AuthReply.ResourceAllocation)
+	}
+	if v1AuthReply.MaxUsage != nil {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(*v1AuthReply.MaxUsage)
+	} else if v1AuthReply.needsMaxUsage {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(0)
+	}
+
+	if v1AuthReply.RouteProfiles != nil {
+		nm := v1AuthReply.RouteProfiles.AsNavigableMap()
+		cgrReply[utils.CapRouteProfiles] = nm
+	}
+	if v1AuthReply.ThresholdIDs != nil {
+		thIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(*v1AuthReply.ThresholdIDs))}
+		for i, v := range *v1AuthReply.ThresholdIDs {
+			thIDs.Slice[i] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapThresholds] = thIDs
+	}
+	if v1AuthReply.StatQueueIDs != nil {
+		stIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(*v1AuthReply.StatQueueIDs))}
+		for i, v := range *v1AuthReply.StatQueueIDs {
+			stIDs.Slice[i] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapStatQueues] = stIDs
+	}
+	return cgrReply
+}
+
 // BiRPCv1AuthorizeEvent performs authorization for CGREvent based on specific components
-func (sS *SessionS) BiRPCv1AuthorizeEvent(ctx *context.Context,
-	args *utils.CGREvent, authReply *V1AuthorizeReply) (err error) {
-	if args == nil {
+func (sS *SessionS) BiRPCv1AuthorizeEvent(clnt rpcclient.ClientConnector,
+	args *V1AuthorizeArgs, authReply *V1AuthorizeReply) (err error) {
+	if args.CGREvent == nil {
 		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
 	}
-	if args.Event == nil {
+	if args.CGREvent.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	var withErrors bool
-	if args.ID == "" {
-		args.ID = utils.GenUUID()
+	if args.CGREvent.ID == utils.EmptyString {
+		args.CGREvent.ID = utils.GenUUID()
 	}
-	if args.Tenant == "" {
-		args.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+	if args.CGREvent.Tenant == utils.EmptyString {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
-		cacheKey := utils.ConcatenatedKey(utils.SessionSv1AuthorizeEvent, args.ID)
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1AuthorizeEvent, args.CGREvent.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -1547,98 +1975,64 @@ func (sS *SessionS) BiRPCv1AuthorizeEvent(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: authReply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
-	dP := args.AsDataProvider()
-	var attrS bool
-	if attrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Attributes,
-		config.SessionsAttributesDftOpt, utils.MetaAttributes); err != nil {
-		return
+
+	if !args.GetAttributes && !args.AuthorizeResources &&
+		!args.GetMaxUsage && !args.GetRoutes {
+		return utils.NewErrMandatoryIeMissing("subsystems")
 	}
-	var routeS bool
-	if routeS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Routes,
-		config.SessionsRoutesDftOpt, utils.MetaRoutes); err != nil {
-		return
-	}
-	var maxUsage bool
-	if maxUsage, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.MaxUsage,
-		config.SessionsMaxUsageDftOpt, utils.OptsSesMaxUsage); err != nil {
-		return
-	}
-	var resAuthorize bool
-	if resAuthorize, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ResourcesAuthorize,
-		config.SessionsResourcesAuthorizeDftOpt, utils.OptsSesResourceSAuthorize); err != nil {
-		return
-	}
-	if !(attrS || maxUsage || resAuthorize || routeS) {
-		return // Nothing to do
-	}
-	if args.APIOpts == nil {
-		args.APIOpts = make(map[string]interface{})
-	}
-	if attrS {
-		if args.APIOpts == nil {
-			args.APIOpts = make(map[string]interface{})
-		}
-		rplyAttr, err := sS.processAttributes(ctx, args)
+	if args.GetAttributes {
+		rplyAttr, err := sS.processAttributes(args.CGREvent, args.AttributeIDs, false)
 		if err == nil {
-			args = rplyAttr.CGREvent
+			args.CGREvent = rplyAttr.CGREvent
 			authReply.Attributes = &rplyAttr
 		} else if err.Error() != utils.ErrNotFound.Error() {
 			return utils.NewErrAttributeS(err)
 		}
 	}
-	runEvents := make(map[string]*utils.CGREvent)
+	if args.GetMaxUsage {
+		var sRunsUsage map[string]time.Duration
+		if sRunsUsage, err = sS.authEvent(args.CGREvent, args.ForceDuration); err != nil {
+			return err
+		}
 
-	var chrgS bool
-	if chrgS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Chargers,
-		config.SessionsChargersDftOpt, utils.MetaChargers); err != nil {
-		return
-	}
-	if chrgS {
-		var chrgrs []*engine.ChrgSProcessEventReply
-		if chrgrs, err = sS.processChargerS(ctx, args); err != nil {
-			return
+		var maxUsage time.Duration
+		var maxUsageSet bool // so we know if we have set the 0 on purpose
+		for _, rplyMaxUsage := range sRunsUsage {
+			if !maxUsageSet || rplyMaxUsage < maxUsage {
+				maxUsage = rplyMaxUsage
+				maxUsageSet = true
+			}
 		}
-		for _, chrgr := range chrgrs {
-			runEvents[chrgr.ChargerSProfile] = chrgr.CGREvent
-		}
-	} else {
-		runEvents[utils.MetaRaw] = args
+		authReply.MaxUsage = &maxUsage
 	}
-	var acntS bool
-	if acntS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Accounts,
-		config.SessionsAccountsDftOpt, utils.MetaAccounts); err != nil {
-		return
-	}
-	if acntS {
-		var maxAbstracts map[string]*utils.Decimal
-		if maxAbstracts, err = sS.accounSMaxAbstracts(ctx, runEvents); err != nil {
-			authReply.MaxUsage = getMaxUsageFromRuns(maxAbstracts)
-		}
-	}
-	if utils.OptAsBool(args.APIOpts, utils.OptsSesResourceSAuthorize) {
-		if len(sS.cfg.SessionSCfg().ResourceSConns) == 0 {
+	if args.AuthorizeResources {
+		if len(sS.cgrCfg.SessionSCfg().ResSConns) == 0 {
 			return utils.NewErrNotConnected(utils.ResourceS)
 		}
-		originID, _ := args.FieldAsString(utils.OriginID)
+		originID, _ := args.CGREvent.FieldAsString(utils.OriginID)
 		if originID == "" {
 			originID = utils.UUIDSha1Prefix()
 		}
-		args.APIOpts[utils.OptsResourcesUsageID] = originID
-		args.APIOpts[utils.OptsResourcesUnits] = 1
 		var allocMsg string
-		if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ResourceSConns, utils.ResourceSv1AuthorizeResources,
-			args, &allocMsg); err != nil {
+		if args.APIOpts == nil {
+			args.APIOpts = make(map[string]interface{})
+		}
+		args.CGREvent.APIOpts[utils.OptsResourcesUsageID] = originID
+		args.CGREvent.APIOpts[utils.OptsResourcesUnits] = 1
+		if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil, utils.ResourceSv1AuthorizeResources,
+			args.CGREvent, &allocMsg); err != nil {
 			return utils.NewErrResourceS(err)
 		}
 		authReply.ResourceAllocation = &allocMsg
 	}
-	if routeS {
-		routesReply, err := sS.getRoutes(ctx, args.Clone())
+	if args.GetRoutes {
+		routesReply, err := sS.getRoutes(args.CGREvent.Clone(), args.Paginator,
+			args.RoutesIgnoreErrors, args.RoutesMaxCost, false)
 		if err != nil {
 			return err
 		}
@@ -1646,33 +2040,23 @@ func (sS *SessionS) BiRPCv1AuthorizeEvent(ctx *context.Context,
 			authReply.RouteProfiles = routesReply
 		}
 	}
-	var thdS bool
-	if thdS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Thresholds,
-		config.SessionsThresholdsDftOpt, utils.MetaThresholds); err != nil {
-		return
-	}
-	if thdS {
-		tIDs, err := sS.processThreshold(ctx, args, true)
+	if args.ProcessThresholds {
+		tIDs, err := sS.processThreshold(args.CGREvent, args.ThresholdIDs, true)
 		if err != nil && err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with ThresholdS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 		authReply.ThresholdIDs = &tIDs
 	}
-	var stS bool
-	if stS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Stats,
-		config.SessionsStatsDftOpt, utils.MetaStats); err != nil {
-		return
-	}
-	if stS {
-		sIDs, err := sS.processStats(ctx, args, false)
+	if args.ProcessStats {
+		sIDs, err := sS.processStats(args.CGREvent, args.StatIDs, false)
 		if err != nil &&
 			err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with StatS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 		authReply.StatQueueIDs = &sIDs
@@ -1683,91 +2067,192 @@ func (sS *SessionS) BiRPCv1AuthorizeEvent(ctx *context.Context,
 	return
 }
 
+// V1AuthorizeReplyWithDigest contains return options for auth with digest
+type V1AuthorizeReplyWithDigest struct {
+	AttributesDigest   *string
+	ResourceAllocation *string
+	MaxUsage           float64 // special treat returning time.Duration.Seconds()
+	RoutesDigest       *string
+	Thresholds         *string
+	StatQueues         *string
+}
+
 // BiRPCv1AuthorizeEventWithDigest performs authorization for CGREvent based on specific components
 // returning one level fields instead of multiple ones returned by BiRPCv1AuthorizeEvent
-func (sS *SessionS) BiRPCv1AuthorizeEventWithDigest(ctx *context.Context,
-	args *utils.CGREvent, authReply *V1AuthorizeReplyWithDigest) (err error) {
+func (sS *SessionS) BiRPCv1AuthorizeEventWithDigest(clnt rpcclient.ClientConnector,
+	args *V1AuthorizeArgs, authReply *V1AuthorizeReplyWithDigest) (err error) {
 	var initAuthRply V1AuthorizeReply
-	if err = sS.BiRPCv1AuthorizeEvent(ctx, args, &initAuthRply); err != nil {
+	if err = sS.BiRPCv1AuthorizeEvent(clnt, args, &initAuthRply); err != nil {
 		return
 	}
-	dP := args.AsDataProvider()
-	var attrS bool
-	if attrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Attributes,
-		config.SessionsAttributesDftOpt, utils.MetaAttributes); err != nil {
-		return
-	}
-	if attrS && initAuthRply.Attributes != nil {
+	if args.GetAttributes && initAuthRply.Attributes != nil {
 		authReply.AttributesDigest = utils.StringPointer(initAuthRply.Attributes.Digest())
 	}
-	var resourcesAuthorize bool
-	if resourcesAuthorize, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ResourcesAuthorize,
-		config.SessionsResourcesAuthorizeDftOpt, utils.OptsSesResourceSAuthorize); err != nil {
-		return
-	}
-	if resourcesAuthorize {
+	if args.AuthorizeResources {
 		authReply.ResourceAllocation = initAuthRply.ResourceAllocation
 	}
-	var acntS bool
-	if acntS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Accounts,
-		config.SessionsAccountsDftOpt, utils.MetaAccounts); err != nil {
-		return
+	if args.GetMaxUsage {
+		authReply.MaxUsage = initAuthRply.MaxUsage.Seconds()
 	}
-	if acntS {
-		maxDur, _ := initAuthRply.MaxUsage.Duration()
-		authReply.MaxUsage = maxDur.Seconds()
-	}
-	var routeS bool
-	if routeS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Routes,
-		config.SessionsRoutesDftOpt, utils.MetaRoutes); err != nil {
-		return
-	}
-	if routeS {
+	if args.GetRoutes {
 		authReply.RoutesDigest = utils.StringPointer(initAuthRply.RouteProfiles.Digest())
 	}
-	var thdS bool
-	if thdS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Thresholds,
-		config.SessionsThresholdsDftOpt, utils.MetaThresholds); err != nil {
-		return
-	}
-	if thdS {
+	if args.ProcessThresholds {
 		authReply.Thresholds = utils.StringPointer(
 			strings.Join(*initAuthRply.ThresholdIDs, utils.FieldsSep))
 	}
-	var stS bool
-	if stS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Stats,
-		config.SessionsStatsDftOpt, utils.MetaStats); err != nil {
-		return
-	}
-	if stS {
+	if args.ProcessStats {
 		authReply.StatQueues = utils.StringPointer(
 			strings.Join(*initAuthRply.StatQueueIDs, utils.FieldsSep))
+	}
+	return nil
+}
+
+// NewV1InitSessionArgs is a constructor for V1InitSessionArgs
+func NewV1InitSessionArgs(attrs bool, attributeIDs []string,
+	thrslds bool, thresholdIDs []string, stats bool, statIDs []string,
+	resrc, acnt bool, cgrEv *utils.CGREvent, forceDuration bool) (args *V1InitSessionArgs) {
+	args = &V1InitSessionArgs{
+		GetAttributes:     attrs,
+		AllocateResources: resrc,
+		InitSession:       acnt,
+		ProcessThresholds: thrslds,
+		ProcessStats:      stats,
+		CGREvent:          cgrEv,
+		ForceDuration:     forceDuration,
+	}
+	if len(attributeIDs) != 0 {
+		args.AttributeIDs = attributeIDs
+	}
+	if len(thresholdIDs) != 0 {
+		args.ThresholdIDs = thresholdIDs
+	}
+	if len(statIDs) != 0 {
+		args.StatIDs = statIDs
 	}
 	return
 }
 
+// V1InitSessionArgs are options for session initialization request
+type V1InitSessionArgs struct {
+	GetAttributes     bool
+	AllocateResources bool
+	InitSession       bool
+	ForceDuration     bool
+	ProcessThresholds bool
+	ProcessStats      bool
+	AttributeIDs      []string
+	ThresholdIDs      []string
+	StatIDs           []string
+	*utils.CGREvent
+}
+
+func (V1InitSessionArgs) RPCClone() {}
+
+// ParseFlags will populate the V1InitSessionArgs flags
+func (args *V1InitSessionArgs) ParseFlags(flags, sep string) {
+	for _, subsystem := range strings.Split(flags, sep) {
+		switch {
+		case subsystem == utils.MetaAccounts:
+			args.InitSession = true
+		case subsystem == utils.MetaResources:
+			args.AllocateResources = true
+		case strings.HasPrefix(subsystem, utils.MetaAttributes):
+			args.GetAttributes = true
+			args.AttributeIDs = getFlagIDs(subsystem)
+		case strings.HasPrefix(subsystem, utils.MetaThresholds):
+			args.ProcessThresholds = true
+			args.ThresholdIDs = getFlagIDs(subsystem)
+		case strings.HasPrefix(subsystem, utils.MetaStats):
+			args.ProcessStats = true
+			args.StatIDs = getFlagIDs(subsystem)
+		case subsystem == utils.MetaFD:
+			args.ForceDuration = true
+		}
+	}
+}
+
+// V1InitSessionReply are options for initialization reply
+type V1InitSessionReply struct {
+	Attributes         *engine.AttrSProcessEventReply `json:",omitempty"`
+	ResourceAllocation *string                        `json:",omitempty"`
+	MaxUsage           *time.Duration                 `json:",omitempty"`
+	ThresholdIDs       *[]string                      `json:",omitempty"`
+	StatQueueIDs       *[]string                      `json:",omitempty"`
+
+	needsMaxUsage bool // for gob encoding only
+}
+
+// SetMaxUsageNeeded used by agent that use the reply as NavigableMapper
+// only used for gob encoding
+func (v1Rply *V1InitSessionReply) SetMaxUsageNeeded(getMaxUsage bool) {
+	if v1Rply == nil {
+		return
+	}
+	v1Rply.needsMaxUsage = getMaxUsage
+}
+
+// AsNavigableMap is part of engine.NavigableMapper interface
+func (v1Rply *V1InitSessionReply) AsNavigableMap() map[string]*utils.DataNode {
+	cgrReply := make(map[string]*utils.DataNode)
+	if v1Rply.Attributes != nil {
+		attrs := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for _, fldName := range v1Rply.Attributes.AlteredFields {
+			fldName = strings.TrimPrefix(fldName, utils.MetaReq+utils.NestingSep)
+			if v1Rply.Attributes.CGREvent.HasField(fldName) {
+				attrs.Map[fldName] = utils.NewLeafNode(v1Rply.Attributes.CGREvent.Event[fldName])
+			}
+		}
+		cgrReply[utils.CapAttributes] = attrs
+	}
+	if v1Rply.ResourceAllocation != nil {
+		cgrReply[utils.CapResourceAllocation] = utils.NewLeafNode(*v1Rply.ResourceAllocation)
+	}
+	if v1Rply.MaxUsage != nil {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(*v1Rply.MaxUsage)
+	} else if v1Rply.needsMaxUsage {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(0)
+	}
+
+	if v1Rply.ThresholdIDs != nil {
+		thIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(*v1Rply.ThresholdIDs))}
+		for i, v := range *v1Rply.ThresholdIDs {
+			thIDs.Slice[i] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapThresholds] = thIDs
+	}
+	if v1Rply.StatQueueIDs != nil {
+		stIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(*v1Rply.StatQueueIDs))}
+		for i, v := range *v1Rply.StatQueueIDs {
+			stIDs.Slice[i] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapStatQueues] = stIDs
+	}
+	return cgrReply
+}
+
 // BiRPCv1InitiateSession initiates a new session
-func (sS *SessionS) BiRPCv1InitiateSession(ctx *context.Context,
-	args *utils.CGREvent, rply *V1InitSessionReply) (err error) {
-	if args == nil {
+func (sS *SessionS) BiRPCv1InitiateSession(clnt rpcclient.ClientConnector,
+	args *V1InitSessionArgs, rply *V1InitSessionReply) (err error) {
+	if args.CGREvent == nil {
 		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
 	}
-	if args.Event == nil {
+	if args.CGREvent.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	var withErrors bool
-	if args.ID == "" {
-		args.ID = utils.GenUUID()
+	if args.CGREvent.ID == "" {
+		args.CGREvent.ID = utils.GenUUID()
 	}
-	if args.Tenant == "" {
-		args.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+	if args.CGREvent.Tenant == "" {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
-		cacheKey := utils.ConcatenatedKey(utils.SessionSv1InitiateSession, args.ID)
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1InitiateSession, args.CGREvent.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -1777,84 +2262,67 @@ func (sS *SessionS) BiRPCv1InitiateSession(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: rply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
-	rply.MaxUsage = utils.DurationPointer(time.Duration(utils.InvalidUsage)) // temp
-	dP := args.AsDataProvider()
 
-	var attrS bool
-	if attrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Attributes,
-		config.SessionsAttributesDftOpt, utils.MetaAttributes); err != nil {
-		return
+	if !args.GetAttributes && !args.AllocateResources && !args.InitSession {
+		return utils.NewErrMandatoryIeMissing("subsystems")
 	}
-	var initS bool
-	if initS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Initiate,
-		config.SessionsInitiateDftOpt, utils.OptsSesInitiate); err != nil {
-		return
-	}
-	var resourcesAllocate bool
-	if resourcesAllocate, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ResourcesAllocate,
-		config.SessionsResourcesAllocateDftOpt, utils.OptsSesResourceSAllocate); err != nil {
-		return
-	}
-	if !(attrS || initS || resourcesAllocate) {
-		return // nothing to do
-	}
-	originID, _ := args.FieldAsString(utils.OriginID)
-	if attrS {
-		rplyAttr, err := sS.processAttributes(ctx, args)
+	originID, _ := args.CGREvent.FieldAsString(utils.OriginID)
+	if args.GetAttributes {
+		rplyAttr, err := sS.processAttributes(args.CGREvent, args.AttributeIDs, false)
 		if err == nil {
-			args = rplyAttr.CGREvent
+			args.CGREvent = rplyAttr.CGREvent
 			rply.Attributes = &rplyAttr
 		} else if err.Error() != utils.ErrNotFound.Error() {
 			return utils.NewErrAttributeS(err)
 		}
 	}
-	if resourcesAllocate {
-		if len(sS.cfg.SessionSCfg().ResourceSConns) == 0 {
+	if args.AllocateResources {
+		if len(sS.cgrCfg.SessionSCfg().ResSConns) == 0 {
 			return utils.NewErrNotConnected(utils.ResourceS)
 		}
 		if originID == "" {
 			return utils.NewErrMandatoryIeMissing(utils.OriginID)
 		}
-		args.APIOpts[utils.OptsResourcesUsageID] = originID
-		args.APIOpts[utils.OptsResourcesUnits] = 1
+		if args.APIOpts == nil {
+			args.APIOpts = make(map[string]interface{})
+		}
+		args.CGREvent.APIOpts[utils.OptsResourcesUsageID] = originID
+		args.CGREvent.APIOpts[utils.OptsResourcesUnits] = 1
 		var allocMessage string
-		if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ResourceSConns,
-			utils.ResourceSv1AllocateResources, args, &allocMessage); err != nil {
+		if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil,
+			utils.ResourceSv1AllocateResources, args.CGREvent, &allocMessage); err != nil {
 			return utils.NewErrResourceS(err)
 		}
 		rply.ResourceAllocation = &allocMessage
 	}
-	if initS {
-		var dbtItvl time.Duration
-		if dbtItvl, err = engine.GetDurationOpts(ctx, args.Tenant, args, sS.fltrS, sS.cfg.SessionSCfg().Opts.DebitInterval,
-			config.SessionsDebitIntervalDftOpt, utils.OptsSesDebitInterval); err != nil {
-			return
+	if args.InitSession {
+		var err error
+		opts := engine.MapEvent(args.APIOpts)
+		dbtItvl := sS.cgrCfg.SessionSCfg().DebitInterval
+		if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
+			if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
+				return utils.NewErrRALs(err)
+			}
 		}
-		var forceDuration bool
-		if forceDuration, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ForceDuration,
-			config.SessionsForceDurationDftOpt, utils.OptsSesForceDuration); err != nil {
-			return
-		}
-		var s *Session
-		s, err = sS.initSession(ctx, args, sS.biJClntID(ctx.Client), originID, dbtItvl,
-			false, forceDuration)
+		s, err := sS.initSession(args.CGREvent, sS.biJClntID(clnt), originID, dbtItvl,
+			false, args.ForceDuration)
 		if err != nil {
-			return
+			return err
 		}
 		s.RLock() // avoid concurrency with activeDebit
 		isPrepaid := s.debitStop != nil
 		s.RUnlock()
 		if isPrepaid { //active debit
-			rply.MaxUsage = utils.DurationPointer(sS.cfg.SessionSCfg().GetDefaultUsage(utils.IfaceAsString(args.Event[utils.ToR])))
+			rply.MaxUsage = utils.DurationPointer(sS.cgrCfg.SessionSCfg().GetDefaultUsage(utils.IfaceAsString(args.CGREvent.Event[utils.ToR])))
 		} else {
 			var sRunsUsage map[string]time.Duration
-			if sRunsUsage, err = sS.updateSession(ctx, s, nil, args.APIOpts, false); err != nil {
-				return //utils.NewErrRALs(err)
+			if sRunsUsage, err = sS.updateSession(s, nil, args.APIOpts, false); err != nil {
+				return utils.NewErrRALs(err)
 			}
 
 			var maxUsage time.Duration
@@ -1868,33 +2336,23 @@ func (sS *SessionS) BiRPCv1InitiateSession(ctx *context.Context,
 			rply.MaxUsage = &maxUsage
 		}
 	}
-	var thdS bool
-	if thdS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Thresholds,
-		config.SessionsThresholdsDftOpt, utils.MetaThresholds); err != nil {
-		return
-	}
-	if thdS {
-		tIDs, err := sS.processThreshold(ctx, args, true)
+	if args.ProcessThresholds {
+		tIDs, err := sS.processThreshold(args.CGREvent, args.ThresholdIDs, true)
 		if err != nil && err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with ThresholdS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 		rply.ThresholdIDs = &tIDs
 	}
-	var stS bool
-	if stS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Stats,
-		config.SessionsStatsDftOpt, utils.MetaStats); err != nil {
-		return
-	}
-	if stS {
-		sIDs, err := sS.processStats(ctx, args, false)
+	if args.ProcessStats {
+		sIDs, err := sS.processStats(args.CGREvent, args.StatIDs, false)
 		if err != nil &&
 			err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with StatS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 		rply.StatQueueIDs = &sIDs
@@ -1905,57 +2363,132 @@ func (sS *SessionS) BiRPCv1InitiateSession(ctx *context.Context,
 	return
 }
 
+// V1InitReplyWithDigest is the formated reply
+type V1InitReplyWithDigest struct {
+	AttributesDigest   *string
+	ResourceAllocation *string
+	MaxUsage           float64
+	Thresholds         *string
+	StatQueues         *string
+}
+
 // BiRPCv1InitiateSessionWithDigest returns the formated result of InitiateSession
-func (sS *SessionS) BiRPCv1InitiateSessionWithDigest(ctx *context.Context,
-	args *utils.CGREvent, initReply *V1InitReplyWithDigest) (err error) {
+func (sS *SessionS) BiRPCv1InitiateSessionWithDigest(clnt rpcclient.ClientConnector,
+	args *V1InitSessionArgs, initReply *V1InitReplyWithDigest) (err error) {
 	var initSessionRply V1InitSessionReply
-	if err = sS.BiRPCv1InitiateSession(ctx, args, &initSessionRply); err != nil {
+	if err = sS.BiRPCv1InitiateSession(clnt, args, &initSessionRply); err != nil {
 		return
 	}
 
-	if initSessionRply.Attributes != nil {
+	if args.GetAttributes &&
+		initSessionRply.Attributes != nil {
 		initReply.AttributesDigest = utils.StringPointer(initSessionRply.Attributes.Digest())
 	}
 
-	initReply.ResourceAllocation = initSessionRply.ResourceAllocation
+	if args.AllocateResources {
+		initReply.ResourceAllocation = initSessionRply.ResourceAllocation
+	}
 
-	//if initSessionRply.MaxUsage != nil {
-	//	initReply.MaxUsage = initSessionRply.MaxUsage.Seconds()
-	//}
-	initReply.MaxUsage = utils.InvalidUsage // temp
+	if args.InitSession {
+		initReply.MaxUsage = initSessionRply.MaxUsage.Seconds()
+	}
 
-	if initSessionRply.ThresholdIDs != nil {
+	if args.ProcessThresholds {
 		initReply.Thresholds = utils.StringPointer(
 			strings.Join(*initSessionRply.ThresholdIDs, utils.FieldsSep))
 	}
-	if initSessionRply.StatQueueIDs != nil {
+	if args.ProcessStats {
 		initReply.StatQueues = utils.StringPointer(
 			strings.Join(*initSessionRply.StatQueueIDs, utils.FieldsSep))
+	}
+	return nil
+}
+
+// NewV1UpdateSessionArgs is a constructor for update session arguments
+func NewV1UpdateSessionArgs(attrs bool, attributeIDs []string,
+	acnts bool, cgrEv *utils.CGREvent, forceDuration bool) (args *V1UpdateSessionArgs) {
+	args = &V1UpdateSessionArgs{
+		GetAttributes: attrs,
+		UpdateSession: acnts,
+		CGREvent:      cgrEv,
+		ForceDuration: forceDuration,
+	}
+	if len(attributeIDs) != 0 {
+		args.AttributeIDs = attributeIDs
 	}
 	return
 }
 
+// V1UpdateSessionArgs contains options for session update
+type V1UpdateSessionArgs struct {
+	GetAttributes bool
+	UpdateSession bool
+	ForceDuration bool
+	AttributeIDs  []string
+	*utils.CGREvent
+}
+
+func (V1UpdateSessionArgs) RPCClone() {}
+
+// V1UpdateSessionReply contains options for session update reply
+type V1UpdateSessionReply struct {
+	Attributes *engine.AttrSProcessEventReply `json:",omitempty"`
+	MaxUsage   *time.Duration                 `json:",omitempty"`
+
+	needsMaxUsage bool // for gob encoding only
+}
+
+// SetMaxUsageNeeded used by agent that use the reply as NavigableMapper
+// only used for gob encoding
+func (v1Rply *V1UpdateSessionReply) SetMaxUsageNeeded(getMaxUsage bool) {
+	if v1Rply == nil {
+		return
+	}
+	v1Rply.needsMaxUsage = getMaxUsage
+}
+
+// AsNavigableMap is part of engine.NavigableMapper interface
+func (v1Rply *V1UpdateSessionReply) AsNavigableMap() map[string]*utils.DataNode {
+	cgrReply := make(map[string]*utils.DataNode)
+	if v1Rply.Attributes != nil {
+		attrs := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for _, fldName := range v1Rply.Attributes.AlteredFields {
+			fldName = strings.TrimPrefix(fldName, utils.MetaReq+utils.NestingSep)
+			if v1Rply.Attributes.CGREvent.HasField(fldName) {
+				attrs.Map[fldName] = utils.NewLeafNode(v1Rply.Attributes.CGREvent.Event[fldName])
+			}
+		}
+		cgrReply[utils.CapAttributes] = attrs
+	}
+	if v1Rply.MaxUsage != nil {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(*v1Rply.MaxUsage)
+	} else if v1Rply.needsMaxUsage {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(0)
+	}
+	return cgrReply
+}
+
 // BiRPCv1UpdateSession updates an existing session, returning the duration which the session can still last
-func (sS *SessionS) BiRPCv1UpdateSession(ctx *context.Context,
-	args *utils.CGREvent, rply *V1UpdateSessionReply) (err error) {
-	if args == nil {
+func (sS *SessionS) BiRPCv1UpdateSession(clnt rpcclient.ClientConnector,
+	args *V1UpdateSessionArgs, rply *V1UpdateSessionReply) (err error) {
+	if args.CGREvent == nil {
 		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
 	}
-	if args.Event == nil {
+	if args.CGREvent.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
-	if args.ID == utils.EmptyString {
-		args.ID = utils.GenUUID()
+	if args.CGREvent.ID == utils.EmptyString {
+		args.CGREvent.ID = utils.GenUUID()
 	}
-	if args.Tenant == utils.EmptyString {
-		args.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+	if args.CGREvent.Tenant == utils.EmptyString {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
-		cacheKey := utils.ConcatenatedKey(utils.SessionSv1UpdateSession, args.ID)
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1UpdateSession, args.CGREvent.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -1965,61 +2498,48 @@ func (sS *SessionS) BiRPCv1UpdateSession(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: rply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
-	dP := args.AsDataProvider()
-	var attrS bool
-	if attrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Attributes,
-		config.SessionsAttributesDftOpt, utils.MetaAttributes); err != nil {
-		return
-	}
-	var updS bool
-	if updS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Update,
-		config.SessionsUpdateDftOpt, utils.OptsSesUpdate); err != nil {
-		return
-	}
-	if !(attrS || updS) {
-		return // nothing to do
+
+	if !args.GetAttributes && !args.UpdateSession {
+		return utils.NewErrMandatoryIeMissing("subsystems")
 	}
 
-	if attrS {
-		rplyAttr, err := sS.processAttributes(ctx, args)
+	if args.GetAttributes {
+		rplyAttr, err := sS.processAttributes(args.CGREvent, args.AttributeIDs, false)
 		if err == nil {
-			args = rplyAttr.CGREvent
+			args.CGREvent = rplyAttr.CGREvent
 			rply.Attributes = &rplyAttr
 		} else if err.Error() != utils.ErrNotFound.Error() {
 			return utils.NewErrAttributeS(err)
 		}
 	}
-	if updS {
-		ev := engine.MapEvent(args.Event)
-		var dbtItvl time.Duration
-		if dbtItvl, err = engine.GetDurationOpts(ctx, args.Tenant, args, sS.fltrS, sS.cfg.SessionSCfg().Opts.DebitInterval,
-			config.SessionsDebitIntervalDftOpt, utils.OptsSesDebitInterval); err != nil {
-			return err
+	if args.UpdateSession {
+		ev := engine.MapEvent(args.CGREvent.Event)
+		opts := engine.MapEvent(args.APIOpts)
+		dbtItvl := sS.cgrCfg.SessionSCfg().DebitInterval
+		if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
+			if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
+				return utils.NewErrRALs(err)
+			}
 		}
-		optOriginID := GetSetOptsOriginID(ev, args.APIOpts)
-		s := sS.getRelocateSession(ctx, optOriginID,
+		cgrID := GetSetCGRID(ev)
+		s := sS.getRelocateSession(cgrID,
 			ev.GetStringIgnoreErrors(utils.InitialOriginID),
 			ev.GetStringIgnoreErrors(utils.OriginID),
 			ev.GetStringIgnoreErrors(utils.OriginHost))
 		if s == nil {
-			var forceDuration bool
-			if forceDuration, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ForceDuration,
-				config.SessionsForceDurationDftOpt, utils.OptsSesForceDuration); err != nil {
-				return
-			}
-			if s, err = sS.initSession(ctx, args, sS.biJClntID(ctx.Client), ev.GetStringIgnoreErrors(utils.OriginID),
-				dbtItvl, false, forceDuration); err != nil {
+			if s, err = sS.initSession(args.CGREvent, sS.biJClntID(clnt), ev.GetStringIgnoreErrors(utils.OriginID),
+				dbtItvl, false, args.ForceDuration); err != nil {
 				return err
 			}
 		}
 		var sRunsUsage map[string]time.Duration
-		if sRunsUsage, err = sS.updateSession(ctx, s, ev, args.APIOpts, false); err != nil {
-			return err //utils.NewErrRALs(err)
+		if sRunsUsage, err = sS.updateSession(s, ev, args.APIOpts, false); err != nil {
+			return utils.NewErrRALs(err)
 		}
 		var maxUsage time.Duration
 		var maxUsageSet bool // so we know if we have set the 0 on purpose
@@ -2034,27 +2554,82 @@ func (sS *SessionS) BiRPCv1UpdateSession(ctx *context.Context,
 	return
 }
 
+// NewV1TerminateSessionArgs creates a new V1TerminateSessionArgs using the given arguments
+func NewV1TerminateSessionArgs(acnts, resrc,
+	thrds bool, thresholdIDs []string, stats bool,
+	statIDs []string, cgrEv *utils.CGREvent, forceDuration bool) (args *V1TerminateSessionArgs) {
+	args = &V1TerminateSessionArgs{
+		TerminateSession:  acnts,
+		ReleaseResources:  resrc,
+		ProcessThresholds: thrds,
+		ProcessStats:      stats,
+		CGREvent:          cgrEv,
+		ForceDuration:     forceDuration,
+	}
+	if len(thresholdIDs) != 0 {
+		args.ThresholdIDs = thresholdIDs
+	}
+	if len(statIDs) != 0 {
+		args.StatIDs = statIDs
+	}
+	return
+}
+
+// V1TerminateSessionArgs is used as argumen for TerminateSession
+type V1TerminateSessionArgs struct {
+	TerminateSession  bool
+	ForceDuration     bool
+	ReleaseResources  bool
+	ProcessThresholds bool
+	ProcessStats      bool
+	ThresholdIDs      []string
+	StatIDs           []string
+	*utils.CGREvent
+}
+
+func (V1TerminateSessionArgs) RPCClone() {}
+
+// ParseFlags will populate the V1TerminateSessionArgs flags
+func (args *V1TerminateSessionArgs) ParseFlags(flags, sep string) {
+	for _, subsystem := range strings.Split(flags, sep) {
+		switch {
+		case subsystem == utils.MetaAccounts:
+			args.TerminateSession = true
+		case subsystem == utils.MetaResources:
+			args.ReleaseResources = true
+		case strings.Index(subsystem, utils.MetaThresholds) != -1:
+			args.ProcessThresholds = true
+			args.ThresholdIDs = getFlagIDs(subsystem)
+		case strings.Index(subsystem, utils.MetaStats) != -1:
+			args.ProcessStats = true
+			args.StatIDs = getFlagIDs(subsystem)
+		case subsystem == utils.MetaFD:
+			args.ForceDuration = true
+		}
+	}
+}
+
 // BiRPCv1TerminateSession will stop debit loops as well as release any used resources
-func (sS *SessionS) BiRPCv1TerminateSession(ctx *context.Context,
-	args *utils.CGREvent, rply *string) (err error) {
-	if args == nil {
+func (sS *SessionS) BiRPCv1TerminateSession(clnt rpcclient.ClientConnector,
+	args *V1TerminateSessionArgs, rply *string) (err error) {
+	if args.CGREvent == nil {
 		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
 	}
-	if args.Event == nil {
+	if args.CGREvent.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	var withErrors bool
-	if args.ID == "" {
-		args.ID = utils.GenUUID()
+	if args.CGREvent.ID == "" {
+		args.CGREvent.ID = utils.GenUUID()
 	}
-	if args.Tenant == "" {
-		args.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+	if args.CGREvent.Tenant == "" {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
-		cacheKey := utils.ConcatenatedKey(utils.SessionSv1TerminateSession, args.ID)
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1TerminateSession, args.CGREvent.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -2064,127 +2639,102 @@ func (sS *SessionS) BiRPCv1TerminateSession(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: rply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
-	dP := args.AsDataProvider()
-	var resourcesRelease bool
-	if resourcesRelease, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ResourcesRelease,
-		config.SessionsResourcesReleaseDftOpt, utils.OptsSesResourceSRelease); err != nil {
-		return
-	}
-	var termS bool
-	if termS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Terminate,
-		config.SessionsTerminateDftOpt, utils.OptsSesTerminate); err != nil {
-		return
-	}
-	if !(resourcesRelease || termS) {
-		return // nothing to do
+	if !args.TerminateSession && !args.ReleaseResources {
+		return utils.NewErrMandatoryIeMissing("subsystems")
 	}
 
-	ev := engine.MapEvent(args.Event)
+	ev := engine.MapEvent(args.CGREvent.Event)
 	opts := engine.MapEvent(args.APIOpts)
-	optOriginID := GetSetOptsOriginID(ev, opts)
+	cgrID := GetSetCGRID(ev)
 	originID := ev.GetStringIgnoreErrors(utils.OriginID)
-	if termS {
+	if args.TerminateSession {
 		if originID == "" {
 			return utils.NewErrMandatoryIeMissing(utils.OriginID)
 		}
-		var dbtItvl time.Duration
-		if dbtItvl, err = engine.GetDurationOpts(ctx, args.Tenant, args, sS.fltrS, sS.cfg.SessionSCfg().Opts.DebitInterval,
-			config.SessionsDebitIntervalDftOpt, utils.OptsSesDebitInterval); err != nil {
-			return err
+		dbtItvl := sS.cgrCfg.SessionSCfg().DebitInterval
+		if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
+			if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
+				return utils.NewErrRALs(err)
+			}
 		}
 		var s *Session
 		fib := utils.FibDuration(time.Millisecond, 0)
 		var isMsg bool // one time charging, do not perform indexing and sTerminator
-		var forceDuration bool
-		if forceDuration, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ForceDuration,
-			config.SessionsForceDurationDftOpt, utils.OptsSesForceDuration); err != nil {
-			return
-		}
-		for i := 0; i < sS.cfg.SessionSCfg().TerminateAttempts; i++ {
-			if s = sS.getRelocateSession(ctx, optOriginID,
+		for i := 0; i < sS.cgrCfg.SessionSCfg().TerminateAttempts; i++ {
+			if s = sS.getRelocateSession(cgrID,
 				ev.GetStringIgnoreErrors(utils.InitialOriginID),
 				ev.GetStringIgnoreErrors(utils.OriginID),
 				ev.GetStringIgnoreErrors(utils.OriginHost)); s != nil {
 				break
 			}
-			if i+1 < sS.cfg.SessionSCfg().TerminateAttempts { // not last iteration
+			if i+1 < sS.cgrCfg.SessionSCfg().TerminateAttempts { // not last iteration
 				time.Sleep(fib())
 				continue
 			}
 			isMsg = true
-			if s, err = sS.initSession(ctx, args, sS.biJClntID(ctx.Client), ev.GetStringIgnoreErrors(utils.OriginID),
-				dbtItvl, isMsg, forceDuration); err != nil {
-				return err //utils.NewErrRALs(err)
+			if s, err = sS.initSession(args.CGREvent, sS.biJClntID(clnt), ev.GetStringIgnoreErrors(utils.OriginID),
+				dbtItvl, isMsg, args.ForceDuration); err != nil {
+				return utils.NewErrRALs(err)
 			}
-			if _, err = sS.updateSession(ctx, s, ev, opts, isMsg); err != nil {
+			if _, err = sS.updateSession(s, ev, opts, isMsg); err != nil {
 				return err
 			}
 			break
 		}
 		if !isMsg {
-			s.UpdateSRuns(ev, sS.cfg.SessionSCfg().AlterableFields)
+			s.UpdateSRuns(ev, sS.cgrCfg.SessionSCfg().AlterableFields)
 		}
 		s.Lock()
-		if s.Chargeable, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Chargeable,
-			config.SessionsChargeableDftOpt, utils.OptsSesChargeable); err != nil {
-			return
-		}
+		s.Chargeable = opts.GetBoolOrDefault(utils.OptsChargeable, true)
 		s.Unlock()
-		if err = sS.terminateSession(ctx, s,
+		if err = sS.terminateSession(s,
 			ev.GetDurationPtrIgnoreErrors(utils.Usage),
 			ev.GetDurationPtrIgnoreErrors(utils.LastUsed),
 			ev.GetTimePtrIgnoreErrors(utils.AnswerTime, utils.EmptyString),
 			isMsg); err != nil {
-			return err //utils.NewErrRALs(err)
+			return utils.NewErrRALs(err)
 		}
 	}
-	if resourcesRelease {
-		if len(sS.cfg.SessionSCfg().ResourceSConns) == 0 {
+	if args.ReleaseResources {
+		if len(sS.cgrCfg.SessionSCfg().ResSConns) == 0 {
 			return utils.NewErrNotConnected(utils.ResourceS)
 		}
 		if originID == "" {
 			return utils.NewErrMandatoryIeMissing(utils.OriginID)
 		}
-		args.APIOpts[utils.OptsResourcesUsageID] = originID
-		args.APIOpts[utils.OptsResourcesUnits] = 1
 		var reply string
-		if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ResourceSConns, utils.ResourceSv1ReleaseResources,
-			args, &reply); err != nil {
+		if args.APIOpts == nil {
+			args.APIOpts = make(map[string]interface{})
+		}
+		args.CGREvent.APIOpts[utils.OptsResourcesUsageID] = originID // same ID should be accepted by first group since the previous resource should be expired
+		args.CGREvent.APIOpts[utils.OptsResourcesUnits] = 1
+		if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil, utils.ResourceSv1ReleaseResources,
+			args.CGREvent, &reply); err != nil {
 			return utils.NewErrResourceS(err)
 		}
 	}
-	var thdS bool
-	if thdS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Thresholds,
-		config.SessionsThresholdsDftOpt, utils.MetaThresholds); err != nil {
-		return
-	}
-	if thdS {
-		_, err := sS.processThreshold(ctx, args, true)
+	if args.ProcessThresholds {
+		_, err := sS.processThreshold(args.CGREvent, args.ThresholdIDs, true)
 		if err != nil &&
 			err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with ThresholdS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 	}
-	var stS bool
-	if stS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Stats,
-		config.SessionsStatsDftOpt, utils.MetaStats); err != nil {
-		return
-	}
-	if stS {
-		_, err := sS.processStats(ctx, args, false)
+	if args.ProcessStats {
+		_, err := sS.processStats(args.CGREvent, args.StatIDs, false)
 		if err != nil &&
 			err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with StatS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 	}
@@ -2196,7 +2746,7 @@ func (sS *SessionS) BiRPCv1TerminateSession(ctx *context.Context,
 }
 
 // BiRPCv1ProcessCDR sends the CDR to CDRs
-func (sS *SessionS) BiRPCv1ProcessCDR(ctx *context.Context,
+func (sS *SessionS) BiRPCv1ProcessCDR(clnt rpcclient.ClientConnector,
 	cgrEv *utils.CGREvent, rply *string) (err error) {
 	if cgrEv.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
@@ -2205,14 +2755,14 @@ func (sS *SessionS) BiRPCv1ProcessCDR(ctx *context.Context,
 		cgrEv.ID = utils.GenUUID()
 	}
 	if cgrEv.Tenant == utils.EmptyString {
-		cgrEv.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+		cgrEv.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
 		cacheKey := utils.ConcatenatedKey(utils.SessionSv1ProcessCDR, cgrEv.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -2222,7 +2772,7 @@ func (sS *SessionS) BiRPCv1ProcessCDR(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: rply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
@@ -2232,31 +2782,179 @@ func (sS *SessionS) BiRPCv1ProcessCDR(ctx *context.Context,
 		cgrEv.Event[utils.Source] = utils.MetaSessionS
 	}
 
-	return sS.processCDR(ctx, cgrEv, rply)
+	return sS.processCDR(cgrEv, []string{utils.MetaRALs}, rply, false)
+}
+
+// NewV1ProcessMessageArgs is a constructor for MessageArgs used by ProcessMessage
+func NewV1ProcessMessageArgs(attrs bool, attributeIDs []string,
+	thds bool, thresholdIDs []string, stats bool, statIDs []string, resrc, acnts,
+	routes, routesIgnoreErrs, routesEventCost bool, cgrEv *utils.CGREvent,
+	routePaginator utils.Paginator, forceDuration bool, routesMaxCost string) (args *V1ProcessMessageArgs) {
+	args = &V1ProcessMessageArgs{
+		AllocateResources:  resrc,
+		Debit:              acnts,
+		GetAttributes:      attrs,
+		ProcessThresholds:  thds,
+		ProcessStats:       stats,
+		RoutesIgnoreErrors: routesIgnoreErrs,
+		GetRoutes:          routes,
+		CGREvent:           cgrEv,
+		ForceDuration:      forceDuration,
+	}
+	if routesEventCost {
+		args.RoutesMaxCost = utils.MetaEventCost
+	} else {
+		args.RoutesMaxCost = routesMaxCost
+	}
+	args.Paginator = routePaginator
+	if len(attributeIDs) != 0 {
+		args.AttributeIDs = attributeIDs
+	}
+	if len(thresholdIDs) != 0 {
+		args.ThresholdIDs = thresholdIDs
+	}
+	if len(statIDs) != 0 {
+		args.StatIDs = statIDs
+	}
+	return
+}
+
+// V1ProcessMessageArgs are the options passed to ProcessMessage API
+type V1ProcessMessageArgs struct {
+	GetAttributes      bool
+	AllocateResources  bool
+	Debit              bool
+	ForceDuration      bool
+	ProcessThresholds  bool
+	ProcessStats       bool
+	GetRoutes          bool
+	RoutesMaxCost      string
+	RoutesIgnoreErrors bool
+	AttributeIDs       []string
+	ThresholdIDs       []string
+	StatIDs            []string
+	*utils.CGREvent
+	utils.Paginator
+}
+
+func (V1ProcessMessageArgs) RPCClone() {}
+
+// ParseFlags will populate the V1ProcessMessageArgs flags
+func (args *V1ProcessMessageArgs) ParseFlags(flags, sep string) {
+	for _, subsystem := range strings.Split(flags, sep) {
+		switch {
+		case subsystem == utils.MetaAccounts:
+			args.Debit = true
+		case subsystem == utils.MetaResources:
+			args.AllocateResources = true
+		case subsystem == utils.MetaRoutes:
+			args.GetRoutes = true
+		case subsystem == utils.MetaRoutesIgnoreErrors:
+			args.RoutesIgnoreErrors = true
+		case subsystem == utils.MetaRoutesEventCost:
+			args.RoutesMaxCost = utils.MetaEventCost
+		case strings.HasPrefix(subsystem, utils.MetaRoutesMaxCost):
+			args.RoutesMaxCost = strings.TrimPrefix(subsystem, utils.MetaRoutesMaxCost+utils.InInFieldSep)
+		case strings.Index(subsystem, utils.MetaAttributes) != -1:
+			args.GetAttributes = true
+			args.AttributeIDs = getFlagIDs(subsystem)
+		case strings.Index(subsystem, utils.MetaThresholds) != -1:
+			args.ProcessThresholds = true
+			args.ThresholdIDs = getFlagIDs(subsystem)
+		case strings.Index(subsystem, utils.MetaStats) != -1:
+			args.ProcessStats = true
+			args.StatIDs = getFlagIDs(subsystem)
+		case subsystem == utils.MetaFD:
+			args.ForceDuration = true
+		}
+	}
+	args.Paginator, _ = utils.GetRoutePaginatorFromOpts(args.APIOpts)
+}
+
+// V1ProcessMessageReply is the reply for the ProcessMessage API
+type V1ProcessMessageReply struct {
+	MaxUsage           *time.Duration                 `json:",omitempty"`
+	ResourceAllocation *string                        `json:",omitempty"`
+	Attributes         *engine.AttrSProcessEventReply `json:",omitempty"`
+	RouteProfiles      engine.SortedRoutesList        `json:",omitempty"`
+	ThresholdIDs       *[]string                      `json:",omitempty"`
+	StatQueueIDs       *[]string                      `json:",omitempty"`
+
+	needsMaxUsage bool // for gob encoding only
+}
+
+// SetMaxUsageNeeded used by agent that use the reply as NavigableMapper
+// only used for gob encoding
+func (v1Rply *V1ProcessMessageReply) SetMaxUsageNeeded(getMaxUsage bool) {
+	if v1Rply == nil {
+		return
+	}
+	v1Rply.needsMaxUsage = getMaxUsage
+}
+
+// AsNavigableMap is part of engine.NavigableMapper interface
+func (v1Rply *V1ProcessMessageReply) AsNavigableMap() map[string]*utils.DataNode {
+	cgrReply := make(map[string]*utils.DataNode)
+	if v1Rply.MaxUsage != nil {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(*v1Rply.MaxUsage)
+	} else if v1Rply.needsMaxUsage {
+		cgrReply[utils.CapMaxUsage] = utils.NewLeafNode(0)
+	}
+	if v1Rply.ResourceAllocation != nil {
+		cgrReply[utils.CapResourceAllocation] = utils.NewLeafNode(*v1Rply.ResourceAllocation)
+	}
+	if v1Rply.Attributes != nil {
+		attrs := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for _, fldName := range v1Rply.Attributes.AlteredFields {
+			fldName = strings.TrimPrefix(fldName, utils.MetaReq+utils.NestingSep)
+			if v1Rply.Attributes.CGREvent.HasField(fldName) {
+				attrs.Map[fldName] = utils.NewLeafNode(v1Rply.Attributes.CGREvent.Event[fldName])
+			}
+		}
+		cgrReply[utils.CapAttributes] = attrs
+	}
+	if v1Rply.RouteProfiles != nil {
+		cgrReply[utils.CapRouteProfiles] = v1Rply.RouteProfiles.AsNavigableMap()
+	}
+	if v1Rply.ThresholdIDs != nil {
+		thIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(*v1Rply.ThresholdIDs))}
+		for i, v := range *v1Rply.ThresholdIDs {
+			thIDs.Slice[i] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapThresholds] = thIDs
+	}
+	if v1Rply.StatQueueIDs != nil {
+		stIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(*v1Rply.StatQueueIDs))}
+		for i, v := range *v1Rply.StatQueueIDs {
+			stIDs.Slice[i] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapStatQueues] = stIDs
+	}
+	return cgrReply
 }
 
 // BiRPCv1ProcessMessage processes one event with the right subsystems based on arguments received
-func (sS *SessionS) BiRPCv1ProcessMessage(ctx *context.Context,
-	args *utils.CGREvent, rply *V1ProcessMessageReply) (err error) {
-	if args == nil {
+func (sS *SessionS) BiRPCv1ProcessMessage(clnt rpcclient.ClientConnector,
+	args *V1ProcessMessageArgs, rply *V1ProcessMessageReply) (err error) {
+	if args.CGREvent == nil {
 		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
 	}
-	if args.Event == nil {
+	if args.CGREvent.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	var withErrors bool
-	if args.ID == utils.EmptyString {
-		args.ID = utils.GenUUID()
+	if args.CGREvent.ID == utils.EmptyString {
+		args.CGREvent.ID = utils.GenUUID()
 	}
-	if args.Tenant == utils.EmptyString {
-		args.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+	if args.CGREvent.Tenant == utils.EmptyString {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
-		cacheKey := utils.ConcatenatedKey(utils.SessionSv1ProcessMessage, args.ID)
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1ProcessMessage, args.CGREvent.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -2266,58 +2964,46 @@ func (sS *SessionS) BiRPCv1ProcessMessage(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: rply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
 
-	me := engine.MapEvent(args.Event)
+	me := engine.MapEvent(args.CGREvent.Event)
 	originID := me.GetStringIgnoreErrors(utils.OriginID)
-	dP := args.AsDataProvider()
 
-	var attrS bool
-	if attrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Attributes,
-		config.SessionsAttributesDftOpt, utils.MetaAttributes); err != nil {
-		return
-	}
-	if attrS {
-		rplyAttr, err := sS.processAttributes(ctx, args)
+	if args.GetAttributes {
+		rplyAttr, err := sS.processAttributes(args.CGREvent, args.AttributeIDs, false)
 		if err == nil {
-			args = rplyAttr.CGREvent
+			args.CGREvent = rplyAttr.CGREvent
 			rply.Attributes = &rplyAttr
 		} else if err.Error() != utils.ErrNotFound.Error() {
 			return utils.NewErrAttributeS(err)
 		}
 	}
-	var resourcesAllocate bool
-	if resourcesAllocate, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ResourcesAllocate,
-		config.SessionsResourcesAllocateDftOpt, utils.OptsSesResourceSAllocate); err != nil {
-		return
-	}
-	if resourcesAllocate {
-		if len(sS.cfg.SessionSCfg().ResourceSConns) == 0 {
+	if args.AllocateResources {
+		if len(sS.cgrCfg.SessionSCfg().ResSConns) == 0 {
 			return utils.NewErrNotConnected(utils.ResourceS)
 		}
 		if originID == "" {
 			return utils.NewErrMandatoryIeMissing(utils.OriginID)
 		}
-		args.APIOpts[utils.OptsResourcesUsageID] = originID
-		args.APIOpts[utils.OptsResourcesUnits] = 1
+		if args.APIOpts == nil {
+			args.APIOpts = make(map[string]interface{})
+		}
+		args.CGREvent.APIOpts[utils.OptsResourcesUsageID] = originID
+		args.CGREvent.APIOpts[utils.OptsResourcesUnits] = 1
 		var allocMessage string
-		if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ResourceSConns, utils.ResourceSv1AllocateResources,
-			args, &allocMessage); err != nil {
+		if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil, utils.ResourceSv1AllocateResources,
+			args.CGREvent, &allocMessage); err != nil {
 			return utils.NewErrResourceS(err)
 		}
 		rply.ResourceAllocation = &allocMessage
 	}
-	var routeS bool
-	if routeS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Routes,
-		config.SessionsRoutesDftOpt, utils.MetaRoutes); err != nil {
-		return
-	}
-	if routeS {
-		routesReply, err := sS.getRoutes(ctx, args.Clone())
+	if args.GetRoutes {
+		routesReply, err := sS.getRoutes(args.CGREvent.Clone(), args.Paginator,
+			args.RoutesIgnoreErrors, args.RoutesMaxCost, false)
 		if err != nil {
 			return err
 		}
@@ -2325,50 +3011,30 @@ func (sS *SessionS) BiRPCv1ProcessMessage(ctx *context.Context,
 			rply.RouteProfiles = routesReply
 		}
 	}
-	var message bool
-	if message, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Message,
-		config.SessionsMessageDftOpt, utils.OptsSesMessage); err != nil {
-		return
-	}
-	if message {
-		var forceDuration bool
-		if forceDuration, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ForceDuration,
-			config.SessionsForceDurationDftOpt, utils.OptsSesForceDuration); err != nil {
-			return
-		}
+	if args.Debit {
 		var maxUsage time.Duration
-		if maxUsage, err = sS.chargeEvent(ctx, args, forceDuration); err != nil {
+		if maxUsage, err = sS.chargeEvent(args.CGREvent, args.ForceDuration); err != nil {
 			return err
 		}
 		rply.MaxUsage = &maxUsage
 	}
-	var thdS bool
-	if thdS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Thresholds,
-		config.SessionsThresholdsDftOpt, utils.MetaThresholds); err != nil {
-		return
-	}
-	if thdS {
-		tIDs, err := sS.processThreshold(ctx, args, true)
+	if args.ProcessThresholds {
+		tIDs, err := sS.processThreshold(args.CGREvent, args.ThresholdIDs, true)
 		if err != nil && err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with ThresholdS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 		rply.ThresholdIDs = &tIDs
 	}
-	var stS bool
-	if stS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Stats,
-		config.SessionsStatsDftOpt, utils.MetaStats); err != nil {
-		return
-	}
-	if stS {
-		sIDs, err := sS.processStats(ctx, args, false)
+	if args.ProcessStats {
+		sIDs, err := sS.processStats(args.CGREvent, args.StatIDs, false)
 		if err != nil &&
 			err.Error() != utils.ErrNotFound.Error() {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with StatS.",
-					utils.SessionS, err.Error(), args))
+					utils.SessionS, err.Error(), args.CGREvent))
 			withErrors = true
 		}
 		rply.StatQueueIDs = &sIDs
@@ -2380,28 +3046,126 @@ func (sS *SessionS) BiRPCv1ProcessMessage(ctx *context.Context,
 	return
 }
 
+// V1ProcessEventArgs are the options passed to ProcessEvent API
+type V1ProcessEventArgs struct {
+	Flags []string
+	*utils.CGREvent
+	utils.Paginator
+}
+
+// RPCClone implements rpcclient.RPCCloner interface
+func (V1ProcessEventArgs) RPCClone() {}
+
+// V1ProcessEventReply is the reply for the ProcessEvent API
+type V1ProcessEventReply struct {
+	MaxUsage           map[string]time.Duration                  `json:",omitempty"`
+	Cost               map[string]float64                        `json:",omitempty"` // Cost is the cost received from Rater, ignoring accounting part
+	ResourceAllocation map[string]string                         `json:",omitempty"`
+	Attributes         map[string]*engine.AttrSProcessEventReply `json:",omitempty"`
+	RouteProfiles      map[string]engine.SortedRoutesList        `json:",omitempty"`
+	ThresholdIDs       map[string][]string                       `json:",omitempty"`
+	StatQueueIDs       map[string][]string                       `json:",omitempty"`
+	STIRIdentity       map[string]string                         `json:",omitempty"`
+}
+
+// AsNavigableMap is part of engine.NavigableMapper interface
+func (v1Rply *V1ProcessEventReply) AsNavigableMap() map[string]*utils.DataNode {
+	cgrReply := make(map[string]*utils.DataNode)
+	if v1Rply.MaxUsage != nil {
+		usage := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, v := range v1Rply.MaxUsage {
+			usage.Map[k] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapMaxUsage] = usage
+	}
+	if v1Rply.ResourceAllocation != nil {
+		res := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, v := range v1Rply.ResourceAllocation {
+			res.Map[k] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.CapResourceAllocation] = res
+	}
+	if v1Rply.Attributes != nil {
+		atts := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, att := range v1Rply.Attributes {
+			attrs := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+			for _, fldName := range att.AlteredFields {
+				fldName = strings.TrimPrefix(fldName, utils.MetaReq+utils.NestingSep)
+				if att.CGREvent.HasField(fldName) {
+					attrs.Map[fldName] = utils.NewLeafNode(att.CGREvent.Event[fldName])
+				}
+			}
+			atts.Map[k] = attrs
+		}
+		cgrReply[utils.CapAttributes] = atts
+	}
+	if v1Rply.RouteProfiles != nil {
+		routes := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, route := range v1Rply.RouteProfiles {
+			routes.Map[k] = route.AsNavigableMap()
+		}
+		cgrReply[utils.CapRouteProfiles] = routes
+	}
+	if v1Rply.ThresholdIDs != nil {
+		th := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, thr := range v1Rply.ThresholdIDs {
+			thIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(thr))}
+			for i, v := range thr {
+				thIDs.Slice[i] = utils.NewLeafNode(v)
+			}
+			th.Map[k] = thIDs
+		}
+		cgrReply[utils.CapThresholds] = th
+	}
+	if v1Rply.StatQueueIDs != nil {
+		st := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, sts := range v1Rply.StatQueueIDs {
+			stIDs := &utils.DataNode{Type: utils.NMSliceType, Slice: make([]*utils.DataNode, len(sts))}
+			for i, v := range sts {
+				stIDs.Slice[i] = utils.NewLeafNode(v)
+			}
+			st.Map[k] = stIDs
+		}
+		cgrReply[utils.CapStatQueues] = st
+	}
+	if v1Rply.Cost != nil {
+		costs := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, cost := range v1Rply.Cost {
+			costs.Map[k] = utils.NewLeafNode(cost)
+		}
+	}
+	if v1Rply.STIRIdentity != nil {
+		stir := &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
+		for k, v := range v1Rply.STIRIdentity {
+			stir.Map[k] = utils.NewLeafNode(v)
+		}
+		cgrReply[utils.OptsStirIdentity] = stir
+	}
+	return cgrReply
+}
+
 // BiRPCv1ProcessEvent processes one event with the right subsystems based on arguments received
-func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
-	args *utils.CGREvent, rply *V1ProcessEventReply) (err error) {
-	if args == nil {
+func (sS *SessionS) BiRPCv1ProcessEvent(clnt rpcclient.ClientConnector,
+	args *V1ProcessEventArgs, rply *V1ProcessEventReply) (err error) {
+	if args.CGREvent == nil {
 		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
 	}
-	if args.Event == nil {
+	if args.CGREvent.Event == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	var withErrors bool
-	if args.ID == "" {
-		args.ID = utils.GenUUID()
+	if args.CGREvent.ID == "" {
+		args.CGREvent.ID = utils.GenUUID()
 	}
-	if args.Tenant == "" {
-		args.Tenant = sS.cfg.GeneralCfg().DefaultTenant
+	if args.CGREvent.Tenant == "" {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
-	if sS.cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
-		cacheKey := utils.ConcatenatedKey(utils.SessionSv1ProcessEvent, args.ID)
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1ProcessEvent, args.CGREvent.ID)
 		refID := guardian.Guardian.GuardIDs("",
-			sS.cfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
 		defer guardian.Guardian.UnguardIDs(refID)
 
 		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
@@ -2411,51 +3175,36 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 			}
 			return cachedResp.Error
 		}
-		defer engine.Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: rply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
 
-	dP := args.AsDataProvider()
-	var blockError bool
-	if blockError, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.BlockerError,
-		config.SessionsBlockerErrorDftOpt, utils.OptsSesBlockerError); err != nil {
-		return
-	}
+	//convert from Flags []string to utils.FlagsWithParams
+	argsFlagsWithParams := utils.FlagsWithParamsFromSlice(args.Flags)
+
+	blockError := argsFlagsWithParams.GetBool(utils.MetaBlockerError)
 	events := map[string]*utils.CGREvent{
-		utils.MetaRaw: args,
+		utils.MetaRaw: args.CGREvent,
 	}
-	var chrgS bool
-	if chrgS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Chargers,
-		config.SessionsChargersDftOpt, utils.MetaChargers); err != nil {
-		return
-	}
-	if chrgS {
+	if argsFlagsWithParams.GetBool(utils.MetaChargers) {
 		var chrgrs []*engine.ChrgSProcessEventReply
-		if chrgrs, err = sS.processChargerS(ctx, args); err != nil {
+		if chrgrs, err = sS.processChargerS(args.CGREvent); err != nil {
 			return
 		}
 		for _, chrgr := range chrgrs {
-			events[utils.IfaceAsString(chrgr.CGREvent.APIOpts[utils.MetaRunID])] = chrgr.CGREvent
+			events[utils.IfaceAsString(chrgr.CGREvent.Event[utils.RunID])] = chrgr.CGREvent
 		}
 	}
 
 	// check for *attribute
-	var attrS bool
-	if attrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Attributes,
-		config.SessionsAttributesDftOpt, utils.MetaAttributes); err != nil {
-		return
-	}
-	if attrS {
+	if argsFlagsWithParams.GetBool(utils.MetaAttributes) {
+		attrIDs := argsFlagsWithParams.ParamsSlice(utils.MetaAttributes, utils.MetaIDs)
 		rply.Attributes = make(map[string]*engine.AttrSProcessEventReply)
-		var attrsDerivedReply bool
-		if attrsDerivedReply, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.AttributesDerivedReply,
-			config.SessionsAttributesDerivedReplyDftOpt, utils.OptsSesAttributeSDerivedReply); err != nil {
-			return
-		}
-		for runID, cgrEv := range getDerivedEvents(events, attrsDerivedReply) {
-			rplyAttr, err := sS.processAttributes(ctx, cgrEv)
+
+		for runID, cgrEv := range getDerivedEvents(events, argsFlagsWithParams[utils.MetaAttributes].Has(utils.MetaDerivedReply)) {
+			rplyAttr, err := sS.processAttributes(cgrEv, attrIDs, false)
 			if err != nil {
 				if err.Error() != utils.ErrNotFound.Error() {
 					return utils.NewErrAttributeS(err)
@@ -2465,25 +3214,23 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 				rply.Attributes[runID] = &rplyAttr
 			}
 		}
-		args = events[utils.MetaRaw]
+		args.CGREvent = events[utils.MetaRaw]
 	}
 
 	// get routes if required
-	var routeS bool
-	if routeS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Routes,
-		config.SessionsRoutesDftOpt, utils.MetaRoutes); err != nil {
-		return
-	}
-	if routeS {
-		var routesDerivedReply bool
-		if routesDerivedReply, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.RoutesDerivedReply,
-			config.SessionsRoutesDerivedReplyDftOpt, utils.OptsSesRouteSDerivedReply); err != nil {
-			return
-		}
+	if argsFlagsWithParams.GetBool(utils.MetaRoutes) {
 		rply.RouteProfiles = make(map[string]engine.SortedRoutesList)
 		// check in case we have options for suppliers
-		for runID, cgrEv := range getDerivedEvents(events, routesDerivedReply) {
-			routesReply, err := sS.getRoutes(ctx, cgrEv.Clone())
+		flags := argsFlagsWithParams[utils.MetaRoutes]
+		ignoreErrors := flags.Has(utils.MetaIgnoreErrors)
+		var maxCost string
+		if flags.Has(utils.MetaEventCost) {
+			maxCost = utils.MetaEventCost
+		} else {
+			maxCost = flags.ParamValue(utils.MetaMaxCost)
+		}
+		for runID, cgrEv := range getDerivedEvents(events, flags.Has(utils.MetaDerivedReply)) {
+			routesReply, err := sS.getRoutes(cgrEv.Clone(), args.Paginator, ignoreErrors, maxCost, false)
 			if err != nil {
 				return err
 			}
@@ -2494,20 +3241,11 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 	}
 
 	// process thresholds if required
-	var thdS bool
-	if thdS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Thresholds,
-		config.SessionsThresholdsDftOpt, utils.MetaThresholds); err != nil {
-		return
-	}
-	if thdS {
-		var thdsDerivedReply bool
-		if thdsDerivedReply, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ThresholdsDerivedReply,
-			config.SessionsThresholdsDerivedReplyDftOpt, utils.OptsSesThresholdSDerivedReply); err != nil {
-			return
-		}
+	if argsFlagsWithParams.GetBool(utils.MetaThresholds) {
 		rply.ThresholdIDs = make(map[string][]string)
-		for runID, cgrEv := range getDerivedEvents(events, thdsDerivedReply) {
-			tIDs, err := sS.processThreshold(ctx, cgrEv, true)
+		thIDs := argsFlagsWithParams.ParamsSlice(utils.MetaThresholds, utils.MetaIDs)
+		for runID, cgrEv := range getDerivedEvents(events, argsFlagsWithParams[utils.MetaThresholds].Has(utils.MetaDerivedReply)) {
+			tIDs, err := sS.processThreshold(cgrEv, thIDs, true)
 			if err != nil && err.Error() != utils.ErrNotFound.Error() {
 				if blockError {
 					return utils.NewErrThresholdS(err)
@@ -2522,20 +3260,11 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 	}
 
 	// process stats if required
-	var stS bool
-	if stS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.Stats,
-		config.SessionsStatsDftOpt, utils.MetaStats); err != nil {
-		return
-	}
-	if stS {
-		var stsDerivedReply bool
-		if stsDerivedReply, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.StatsDerivedReply,
-			config.SessionsStatsDerivedReplyDftOpt, utils.OptsSesStatSDerivedReply); err != nil {
-			return
-		}
+	if argsFlagsWithParams.GetBool(utils.MetaStats) {
 		rply.StatQueueIDs = make(map[string][]string)
-		for runID, cgrEv := range getDerivedEvents(events, stsDerivedReply) {
-			sIDs, err := sS.processStats(ctx, cgrEv, true)
+		stIDs := argsFlagsWithParams.ParamsSlice(utils.MetaStats, utils.MetaIDs)
+		for runID, cgrEv := range getDerivedEvents(events, argsFlagsWithParams[utils.MetaStats].Has(utils.MetaDerivedReply)) {
+			sIDs, err := sS.processStats(cgrEv, stIDs, true)
 			if err != nil &&
 				err.Error() != utils.ErrNotFound.Error() {
 				if blockError {
@@ -2550,19 +3279,19 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 		}
 	}
 
-	if utils.OptAsBool(args.APIOpts, utils.OptsSesSTIRAuthenticate) {
-		for _, cgrEv := range getDerivedEvents(events, utils.OptAsBool(args.APIOpts, utils.OptsSesSTIRDerivedReply)) {
+	if argsFlagsWithParams.GetBool(utils.MetaSTIRAuthenticate) {
+		for _, cgrEv := range getDerivedEvents(events, argsFlagsWithParams[utils.MetaSTIRAuthenticate].Has(utils.MetaDerivedReply)) {
 			ev := engine.MapEvent(cgrEv.Event)
 			opts := engine.MapEvent(cgrEv.APIOpts)
-			attest := sS.cfg.SessionSCfg().STIRCfg.AllowedAttest
+			attest := sS.cgrCfg.SessionSCfg().STIRCfg.AllowedAttest
 			if uattest := opts.GetStringIgnoreErrors(utils.OptsStirATest); uattest != utils.EmptyString {
 				attest = utils.NewStringSet(strings.Split(uattest, utils.InfieldSep))
 			}
 			var stirMaxDur time.Duration
 			if stirMaxDur, err = opts.GetDuration(utils.OptsStirPayloadMaxDuration); err != nil {
-				stirMaxDur = sS.cfg.SessionSCfg().STIRCfg.PayloadMaxduration
+				stirMaxDur = sS.cgrCfg.SessionSCfg().STIRCfg.PayloadMaxduration
 			}
-			if err = AuthStirShaken(ctx, opts.GetStringIgnoreErrors(utils.OptsStirIdentity),
+			if err = AuthStirShaken(opts.GetStringIgnoreErrors(utils.OptsStirIdentity),
 				utils.FirstNonEmpty(opts.GetStringIgnoreErrors(utils.OptsStirOriginatorTn), ev.GetStringIgnoreErrors(utils.AccountField)),
 				opts.GetStringIgnoreErrors(utils.OptsStirOriginatorURI),
 				utils.FirstNonEmpty(opts.GetStringIgnoreErrors(utils.OptsStirDestinationTn), ev.GetStringIgnoreErrors(utils.Destination)),
@@ -2571,12 +3300,12 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 				return utils.NewSTIRError(err.Error())
 			}
 		}
-	} else if utils.OptAsBool(args.APIOpts, utils.OptsSesSTIRInitiate) {
+	} else if argsFlagsWithParams.GetBool(utils.MetaSTIRInitiate) {
 		rply.STIRIdentity = make(map[string]string)
-		for runID, cgrEv := range getDerivedEvents(events, utils.OptAsBool(args.APIOpts, utils.OptsSesSTIRDerivedReply)) {
+		for runID, cgrEv := range getDerivedEvents(events, argsFlagsWithParams[utils.MetaSTIRInitiate].Has(utils.MetaDerivedReply)) {
 			ev := engine.MapEvent(cgrEv.Event)
 			opts := engine.MapEvent(cgrEv.APIOpts)
-			attest := sS.cfg.SessionSCfg().STIRCfg.DefaultAttest
+			attest := sS.cgrCfg.SessionSCfg().STIRCfg.DefaultAttest
 			if uattest := opts.GetStringIgnoreErrors(utils.OptsStirATest); uattest != utils.EmptyString {
 				attest = uattest
 			}
@@ -2595,220 +3324,226 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 						ev.GetStringIgnoreErrors(utils.AccountField)),
 					utils.EmptyString)
 			}
-			pubkeyPath := utils.FirstNonEmpty(opts.GetStringIgnoreErrors(utils.OptsStirPublicKeyPath), sS.cfg.SessionSCfg().STIRCfg.PublicKeyPath)
-			prvkeyPath := utils.FirstNonEmpty(opts.GetStringIgnoreErrors(utils.OptsStirPrivateKeyPath), sS.cfg.SessionSCfg().STIRCfg.PrivateKeyPath)
+			pubkeyPath := utils.FirstNonEmpty(opts.GetStringIgnoreErrors(utils.OptsStirPublicKeyPath), sS.cgrCfg.SessionSCfg().STIRCfg.PublicKeyPath)
+			prvkeyPath := utils.FirstNonEmpty(opts.GetStringIgnoreErrors(utils.OptsStirPrivateKeyPath), sS.cgrCfg.SessionSCfg().STIRCfg.PrivateKeyPath)
 
 			payload := utils.NewPASSporTPayload(attest, cgrEv.ID, *dest, *orig)
 			header := utils.NewPASSporTHeader(pubkeyPath)
-			if rply.STIRIdentity[runID], err = NewSTIRIdentity(ctx, header, payload, prvkeyPath, sS.cfg.GeneralCfg().ReplyTimeout); err != nil {
+			if rply.STIRIdentity[runID], err = NewSTIRIdentity(header, payload, prvkeyPath, sS.cgrCfg.GeneralCfg().ReplyTimeout); err != nil {
 				return utils.NewSTIRError(err.Error())
 			}
 		}
 	}
 
 	// check for *resources
-	if opt, has := args.APIOpts[utils.MetaResources]; has {
-		if len(sS.cfg.SessionSCfg().ResourceSConns) == 0 {
+	if argsFlagsWithParams.GetBool(utils.MetaResources) {
+		if len(sS.cgrCfg.SessionSCfg().ResSConns) == 0 {
 			return utils.NewErrNotConnected(utils.ResourceS)
 		}
-		var method string
-		// check what we need to do for resources (*authorization/*allocation)
-		switch optStr := utils.IfaceAsString(opt); optStr {
-		case utils.MetaAuthorize:
-			method = utils.ResourceSv1AuthorizeResources
-		case utils.MetaAllocate:
-			method = utils.ResourceSv1AllocateResources
-		case utils.MetaRelease:
-			method = utils.ResourceSv1ReleaseResources
-		default:
-			return fmt.Errorf("unsuported value for %s option: %q ", utils.MetaResources, optStr)
-		}
-		var resourcesDerivedReply bool
-		if resourcesDerivedReply, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.ResourcesDerivedReply,
-			config.SessionsResourcesDerivedReplyDftOpt, utils.OptsSesResourceSDerivedReply); err != nil {
-			return
-		}
 		rply.ResourceAllocation = make(map[string]string)
-		for runID, cgrEv := range getDerivedEvents(events, resourcesDerivedReply) {
-			originID := engine.MapEvent(cgrEv.Event).GetStringIgnoreErrors(utils.OriginID)
-			if originID == "" {
-				return utils.NewErrMandatoryIeMissing(utils.OriginID)
-			}
-
-			cgrEv.APIOpts[utils.OptsResourcesUsageID] = originID
-			cgrEv.APIOpts[utils.OptsResourcesUnits] = 1
-			var resMessage string
-			if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ResourceSConns, method,
-				cgrEv, &resMessage); err != nil {
-				if blockError {
-					return utils.NewErrResourceS(err)
+		if resOpt := argsFlagsWithParams[utils.MetaResources]; len(resOpt) != 0 {
+			for runID, cgrEv := range getDerivedEvents(events, resOpt.Has(utils.MetaDerivedReply)) {
+				originID := engine.MapEvent(cgrEv.Event).GetStringIgnoreErrors(utils.OriginID)
+				if originID == "" {
+					return utils.NewErrMandatoryIeMissing(utils.OriginID)
 				}
-				utils.Logger.Warning(
-					fmt.Sprintf("<%s> error: <%s> processing event %+v for RunID <%s>  with ResourceS.",
-						utils.SessionS, err.Error(), cgrEv, runID))
-				withErrors = true
+				if args.APIOpts == nil {
+					args.APIOpts = make(map[string]interface{})
+				}
+				args.CGREvent.APIOpts[utils.OptsResourcesUsageID] = originID
+				args.CGREvent.APIOpts[utils.OptsResourcesUnits] = 1
+				cgrEv.SetCloneable(true)
+				var resMessage string
+				// check what we need to do for resources (*authorization/*allocation)
+				//check for subflags and convert them into utils.FlagsWithParams
+				switch {
+				case resOpt.Has(utils.MetaAuthorize):
+					if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil, utils.ResourceSv1AuthorizeResources,
+						args.CGREvent, &resMessage); err != nil {
+						if blockError {
+							return utils.NewErrResourceS(err)
+						}
+						utils.Logger.Warning(
+							fmt.Sprintf("<%s> error: <%s> processing event %+v for RunID <%s>  with ResourceS.",
+								utils.SessionS, err.Error(), cgrEv, runID))
+						withErrors = true
+					}
+				case resOpt.Has(utils.MetaAllocate):
+					if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil, utils.ResourceSv1AllocateResources,
+						args.CGREvent, &resMessage); err != nil {
+						if blockError {
+							return utils.NewErrResourceS(err)
+						}
+						utils.Logger.Warning(
+							fmt.Sprintf("<%s> error: <%s> processing event %+v for RunID <%s>  with ResourceS.",
+								utils.SessionS, err.Error(), cgrEv, runID))
+						withErrors = true
+					}
+				case resOpt.Has(utils.MetaRelease):
+					if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ResSConns, nil, utils.ResourceSv1ReleaseResources,
+						args.CGREvent, &resMessage); err != nil {
+						if blockError {
+							return utils.NewErrResourceS(err)
+						}
+						utils.Logger.Warning(
+							fmt.Sprintf("<%s> error: <%s> processing event %+v for RunID <%s>  with ResourceS.",
+								utils.SessionS, err.Error(), cgrEv, runID))
+						withErrors = true
+					}
+				}
+				rply.ResourceAllocation[runID] = resMessage
 			}
-			rply.ResourceAllocation[runID] = resMessage
 		}
 	}
 
 	// check what we need to do for RALs (*authorize/*initiate/*update/*terminate)
-	// dbtItvl := sS.cgrCfg.SessionSCfg().DebitInterval
-	// if argsFlagsWithParams.GetBool(utils.MetaRALs) {
-	// 	if ralsOpts := argsFlagsWithParams[utils.MetaRALs]; len(ralsOpts) != 0 {
-	// 		//check for subflags and convert them into utils.FlagsWithParams
-	// 		// check for *cost
-	// 		if ralsOpts.Has(utils.MetaCost) {
-	// 			rply.Cost = make(map[string]float64)
-	// 			for runID, cgrEv := range getDerivedEvents(events, ralsOpts.Has(utils.MetaDerivedReply)) {
-	// 				ev := engine.MapEvent(cgrEv.Event)
-	// 				//compose the CallDescriptor with Args
-	// 				startTime := ev.GetTimeIgnoreErrors(utils.AnswerTime,
-	// 					sS.cgrCfg.GeneralCfg().DefaultTimezone)
-	// 				if startTime.IsZero() { // AnswerTime not parsable, try SetupTime
-	// 					startTime = ev.GetTimeIgnoreErrors(utils.SetupTime,
-	// 						sS.cgrCfg.GeneralCfg().DefaultTimezone)
-	// 				}
-	// 				category := ev.GetStringIgnoreErrors(utils.Category)
-	// 				if len(category) == 0 {
-	// 					category = sS.cgrCfg.GeneralCfg().DefaultCategory
-	// 				}
-	// 				subject := ev.GetStringIgnoreErrors(utils.Subject)
-	// 				if len(subject) == 0 {
-	// 					subject = ev.GetStringIgnoreErrors(utils.AccountField)
-	// 				}
+	dbtItvl := sS.cgrCfg.SessionSCfg().DebitInterval
+	if argsFlagsWithParams.GetBool(utils.MetaRALs) {
+		if ralsOpts := argsFlagsWithParams[utils.MetaRALs]; len(ralsOpts) != 0 {
+			//check for subflags and convert them into utils.FlagsWithParams
+			// check for *cost
+			if ralsOpts.Has(utils.MetaCost) {
+				rply.Cost = make(map[string]float64)
+				for runID, cgrEv := range getDerivedEvents(events, ralsOpts.Has(utils.MetaDerivedReply)) {
+					ev := engine.MapEvent(cgrEv.Event)
+					//compose the CallDescriptor with Args
+					startTime := ev.GetTimeIgnoreErrors(utils.AnswerTime,
+						sS.cgrCfg.GeneralCfg().DefaultTimezone)
+					if startTime.IsZero() { // AnswerTime not parsable, try SetupTime
+						startTime = ev.GetTimeIgnoreErrors(utils.SetupTime,
+							sS.cgrCfg.GeneralCfg().DefaultTimezone)
+					}
+					category := ev.GetStringIgnoreErrors(utils.Category)
+					if len(category) == 0 {
+						category = sS.cgrCfg.GeneralCfg().DefaultCategory
+					}
+					subject := ev.GetStringIgnoreErrors(utils.Subject)
+					if len(subject) == 0 {
+						subject = ev.GetStringIgnoreErrors(utils.AccountField)
+					}
 
-	// 				cd := &engine.CallDescriptor{
-	// 					//CgrID:         cgrEv.ID,
-	// 					RunID:         ev.GetStringIgnoreErrors(utils.RunID),
-	// 					ToR:           ev.GetStringIgnoreErrors(utils.ToR),
-	// 					Tenant:        cgrEv.Tenant,
-	// 					Category:      category,
-	// 					Subject:       subject,
-	// 					Account:       ev.GetStringIgnoreErrors(utils.AccountField),
-	// 					Destination:   ev.GetStringIgnoreErrors(utils.Destination),
-	// 					TimeStart:     startTime,
-	// 					TimeEnd:       startTime.Add(ev.GetDurationIgnoreErrors(utils.Usage)),
-	// 					ForceDuration: ralsOpts.Has(utils.MetaFD),
-	// 				}
-	// 				var cc engine.CallCost
-	// 				if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
-	// 					utils.ResponderGetCost,
-	// 					&engine.CallDescriptorWithAPIOpts{
-	// 						CallDescriptor: cd,
-	// 						APIOpts:        cgrEv.APIOpts,
-	// 					}, &cc); err != nil {
-	// 					return err
-	// 				}
-	// 				rply.Cost[runID] = cc.Cost
-	// 			}
-	// 		}
-	// 		opts := engine.MapEvent(args.APIOpts)
-	// 		ev := engine.MapEvent(args.CGREvent.Event)
-	// 		originID := ev.GetStringIgnoreErrors(utils.OriginID)
-	// 		switch {
-	// 		//check for auth session
-	// 		case ralsOpts.Has(utils.MetaAuthorize):
-	// 			var sRunsMaxUsage map[string]time.Duration
-	// 			if sRunsMaxUsage, err = sS.authEvent(args.CGREvent, ralsOpts.Has(utils.MetaFD)); err != nil {
-	// 				return err
-	// 			}
-	// 			rply.MaxUsage = getDerivedMaxUsage(sRunsMaxUsage, ralsOpts.Has(utils.MetaDerivedReply))
-	// 		// check for init session
-	// 		case ralsOpts.Has(utils.MetaInitiate):
-	// 			if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
-	// 				if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
-	// 					return err //utils.NewErrRALs(err)
-	// 				}
-	// 			}
-	// 			s, err := sS.initSession(args.CGREvent, sS.biJClntID(clnt), originID, dbtItvl, false,
-	// 				ralsOpts.Has(utils.MetaFD))
-	// 			if err != nil {
-	// 				return err
-	// 			}
-	// 			sRunsMaxUsage := make(map[string]time.Duration)
-	// 			s.RLock()
-	// 			isPrepaid := s.debitStop != nil
-	// 			s.RUnlock()
-	// 			if isPrepaid { //active debit
-	// 				for _, sr := range s.SRuns {
-	// 					sRunsMaxUsage[sr.CD.RunID] = sS.cgrCfg.SessionSCfg().GetDefaultUsage(ev.GetStringIgnoreErrors(utils.ToR))
-	// 				}
-	// 			} else if sRunsMaxUsage, err = sS.updateSession(s, nil, args.APIOpts, false); err != nil {
-	// 				return err //utils.NewErrRALs(err)
-	// 			}
-	// 			rply.MaxUsage = getDerivedMaxUsage(sRunsMaxUsage, ralsOpts.Has(utils.MetaDerivedReply))
-	// 			//check for update session
-	// 		case ralsOpts.Has(utils.MetaUpdate):
-	// 			if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
-	// 				if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
-	// 					return err //utils.NewErrRALs(err)
-	// 				}
-	// 			}
-	// 			s := sS.getRelocateSession(GetSetOptsOriginID(ev),
-	// 				ev.GetStringIgnoreErrors(utils.InitialOriginID),
-	// 				ev.GetStringIgnoreErrors(utils.OriginID),
-	// 				ev.GetStringIgnoreErrors(utils.OriginHost))
-	// 			if s == nil {
-	// 				if s, err = sS.initSession(args.CGREvent, sS.biJClntID(clnt), ev.GetStringIgnoreErrors(utils.OriginID),
-	// 					dbtItvl, false, ralsOpts.Has(utils.MetaFD)); err != nil {
-	// 					return err
-	// 				}
-	// 			}
-	// 			var sRunsMaxUsage map[string]time.Duration
-	// 			if sRunsMaxUsage, err = sS.updateSession(s, ev, args.APIOpts, false); err != nil {
-	// 				return err //utils.NewErrRALs(err)
-	// 			}
-	// 			rply.MaxUsage = getDerivedMaxUsage(sRunsMaxUsage, ralsOpts.Has(utils.MetaDerivedReply))
-	// 			// check for terminate session
-	// 		case ralsOpts.Has(utils.MetaTerminate):
-	// 			if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
-	// 				if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
-	// 					return err //utils.NewErrRALs(err)
-	// 				}
-	// 			}
-	// 			s := sS.getRelocateSession(GetSetOptsOriginID(ev),
-	// 				ev.GetStringIgnoreErrors(utils.InitialOriginID),
-	// 				ev.GetStringIgnoreErrors(utils.OriginID),
-	// 				ev.GetStringIgnoreErrors(utils.OriginHost))
-	// 			if s == nil {
-	// 				if s, err = sS.initSession(args.CGREvent, sS.biJClntID(clnt), ev.GetStringIgnoreErrors(utils.OriginID),
-	// 					dbtItvl, false, ralsOpts.Has(utils.MetaFD)); err != nil {
-	// 					return err
-	// 				}
-	// 			} else {
-	// 				s.Lock()
-	// 				s.Chargeable = opts.GetBoolOrDefault(utils.OptsChargeable, true)
-	// 				s.Unlock()
-	// 			}
-	// 			if err = sS.terminateSession(s,
-	// 				ev.GetDurationPtrIgnoreErrors(utils.Usage),
-	// 				ev.GetDurationPtrIgnoreErrors(utils.LastUsed),
-	// 				ev.GetTimePtrIgnoreErrors(utils.AnswerTime, utils.EmptyString),
-	// 				false); err != nil {
-	// 				return err //utils.NewErrRALs(err)
-	// 			}
-	// 		}
-	// 	}
-	// }
-
-	var cdrS bool
-	if cdrS, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.CDRs,
-		config.SessionsCDRsDftOpt, utils.MetaCDRs); err != nil {
-		return
+					cd := &engine.CallDescriptor{
+						CgrID:         cgrEv.ID,
+						RunID:         ev.GetStringIgnoreErrors(utils.RunID),
+						ToR:           ev.GetStringIgnoreErrors(utils.ToR),
+						Tenant:        cgrEv.Tenant,
+						Category:      category,
+						Subject:       subject,
+						Account:       ev.GetStringIgnoreErrors(utils.AccountField),
+						Destination:   ev.GetStringIgnoreErrors(utils.Destination),
+						TimeStart:     startTime,
+						TimeEnd:       startTime.Add(ev.GetDurationIgnoreErrors(utils.Usage)),
+						ForceDuration: ralsOpts.Has(utils.MetaFD),
+					}
+					var cc engine.CallCost
+					if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
+						utils.ResponderGetCost,
+						&engine.CallDescriptorWithAPIOpts{
+							CallDescriptor: cd,
+							APIOpts:        cgrEv.APIOpts,
+						}, &cc); err != nil {
+						return err
+					}
+					rply.Cost[runID] = cc.Cost
+				}
+			}
+			opts := engine.MapEvent(args.APIOpts)
+			ev := engine.MapEvent(args.CGREvent.Event)
+			originID := ev.GetStringIgnoreErrors(utils.OriginID)
+			switch {
+			//check for auth session
+			case ralsOpts.Has(utils.MetaAuthorize):
+				var sRunsMaxUsage map[string]time.Duration
+				if sRunsMaxUsage, err = sS.authEvent(args.CGREvent, ralsOpts.Has(utils.MetaFD)); err != nil {
+					return err
+				}
+				rply.MaxUsage = getDerivedMaxUsage(sRunsMaxUsage, ralsOpts.Has(utils.MetaDerivedReply))
+			// check for init session
+			case ralsOpts.Has(utils.MetaInitiate):
+				if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
+					if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
+						return utils.NewErrRALs(err)
+					}
+				}
+				s, err := sS.initSession(args.CGREvent, sS.biJClntID(clnt), originID, dbtItvl, false,
+					ralsOpts.Has(utils.MetaFD))
+				if err != nil {
+					return err
+				}
+				sRunsMaxUsage := make(map[string]time.Duration)
+				s.RLock()
+				isPrepaid := s.debitStop != nil
+				s.RUnlock()
+				if isPrepaid { //active debit
+					for _, sr := range s.SRuns {
+						sRunsMaxUsage[sr.CD.RunID] = sS.cgrCfg.SessionSCfg().GetDefaultUsage(ev.GetStringIgnoreErrors(utils.ToR))
+					}
+				} else if sRunsMaxUsage, err = sS.updateSession(s, nil, args.APIOpts, false); err != nil {
+					return utils.NewErrRALs(err)
+				}
+				rply.MaxUsage = getDerivedMaxUsage(sRunsMaxUsage, ralsOpts.Has(utils.MetaDerivedReply))
+				//check for update session
+			case ralsOpts.Has(utils.MetaUpdate):
+				if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
+					if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
+						return utils.NewErrRALs(err)
+					}
+				}
+				s := sS.getRelocateSession(GetSetCGRID(ev),
+					ev.GetStringIgnoreErrors(utils.InitialOriginID),
+					ev.GetStringIgnoreErrors(utils.OriginID),
+					ev.GetStringIgnoreErrors(utils.OriginHost))
+				if s == nil {
+					if s, err = sS.initSession(args.CGREvent, sS.biJClntID(clnt), ev.GetStringIgnoreErrors(utils.OriginID),
+						dbtItvl, false, ralsOpts.Has(utils.MetaFD)); err != nil {
+						return err
+					}
+				}
+				var sRunsMaxUsage map[string]time.Duration
+				if sRunsMaxUsage, err = sS.updateSession(s, ev, args.APIOpts, false); err != nil {
+					return utils.NewErrRALs(err)
+				}
+				rply.MaxUsage = getDerivedMaxUsage(sRunsMaxUsage, ralsOpts.Has(utils.MetaDerivedReply))
+				// check for terminate session
+			case ralsOpts.Has(utils.MetaTerminate):
+				if opts.HasField(utils.OptsDebitInterval) { // dynamic DebitInterval via CGRDebitInterval
+					if dbtItvl, err = opts.GetDuration(utils.OptsDebitInterval); err != nil {
+						return utils.NewErrRALs(err)
+					}
+				}
+				s := sS.getRelocateSession(GetSetCGRID(ev),
+					ev.GetStringIgnoreErrors(utils.InitialOriginID),
+					ev.GetStringIgnoreErrors(utils.OriginID),
+					ev.GetStringIgnoreErrors(utils.OriginHost))
+				if s == nil {
+					if s, err = sS.initSession(args.CGREvent, sS.biJClntID(clnt), ev.GetStringIgnoreErrors(utils.OriginID),
+						dbtItvl, false, ralsOpts.Has(utils.MetaFD)); err != nil {
+						return err
+					}
+				} else {
+					s.Lock()
+					s.Chargeable = opts.GetBoolOrDefault(utils.OptsChargeable, true)
+					s.Unlock()
+				}
+				if err = sS.terminateSession(s,
+					ev.GetDurationPtrIgnoreErrors(utils.Usage),
+					ev.GetDurationPtrIgnoreErrors(utils.LastUsed),
+					ev.GetTimePtrIgnoreErrors(utils.AnswerTime, utils.EmptyString),
+					false); err != nil {
+					return utils.NewErrRALs(err)
+				}
+			}
+		}
 	}
-	if cdrS {
-		if len(sS.cfg.SessionSCfg().CDRsConns) == 0 {
+
+	if argsFlagsWithParams.GetBool(utils.MetaCDRs) {
+		if len(sS.cgrCfg.SessionSCfg().CDRsConns) == 0 {
 			return utils.NewErrNotConnected(utils.CDRs)
 		}
-		var cdrsDerivedReply bool
-		if cdrsDerivedReply, err = engine.GetBoolOpts(ctx, args.Tenant, dP, sS.fltrS, sS.cfg.SessionSCfg().Opts.CDRsDerivedReply,
-			config.SessionsCDRsDerivedReplyDftOpt, utils.OptsSesCDRsDerivedReply); err != nil {
-			return
-		}
+		flgs := argsFlagsWithParams[utils.MetaCDRs].SliceFlags()
 		var cdrRply string
-		for _, cgrEv := range getDerivedEvents(events, cdrsDerivedReply) {
-			if err := sS.processCDR(ctx, cgrEv, &cdrRply); err != nil {
+		for _, cgrEv := range getDerivedEvents(events, argsFlagsWithParams[utils.MetaCDRs].Has(utils.MetaDerivedReply)) {
+			if err := sS.processCDR(cgrEv, flgs, &cdrRply, false); err != nil {
 				if blockError {
 					return utils.NewErrCDRS(err)
 				}
@@ -2825,16 +3560,115 @@ func (sS *SessionS) BiRPCv1ProcessEvent(ctx *context.Context,
 	return
 }
 
+// V1GetCostReply is the reply for the GetCost API
+type V1GetCostReply struct {
+	Attributes *engine.AttrSProcessEventReply
+	EventCost  *engine.EventCost
+}
+
+// BiRPCv1GetCost processes one event with the right subsystems based on arguments received
+func (sS *SessionS) BiRPCv1GetCost(clnt rpcclient.ClientConnector,
+	args *V1ProcessEventArgs, rply *V1GetCostReply) (err error) {
+	if args.CGREvent == nil {
+		return utils.NewErrMandatoryIeMissing(utils.CGREventString)
+	}
+	if args.CGREvent.Event == nil {
+		return utils.NewErrMandatoryIeMissing(utils.Event)
+	}
+	if args.CGREvent.ID == "" {
+		args.CGREvent.ID = utils.GenUUID()
+	}
+	if args.CGREvent.Tenant == "" {
+		args.CGREvent.Tenant = sS.cgrCfg.GeneralCfg().DefaultTenant
+	}
+
+	// RPC caching
+	if sS.cgrCfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit != 0 {
+		cacheKey := utils.ConcatenatedKey(utils.SessionSv1GetCost, args.CGREvent.ID)
+		refID := guardian.Guardian.GuardIDs("",
+			sS.cgrCfg.GeneralCfg().LockingTimeout, cacheKey) // RPC caching needs to be atomic
+		defer guardian.Guardian.UnguardIDs(refID)
+
+		if itm, has := engine.Cache.Get(utils.CacheRPCResponses, cacheKey); has {
+			cachedResp := itm.(*utils.CachedRPCResponse)
+			if cachedResp.Error == nil {
+				*rply = *cachedResp.Result.(*V1GetCostReply)
+			}
+			return cachedResp.Error
+		}
+		defer engine.Cache.Set(utils.CacheRPCResponses, cacheKey,
+			&utils.CachedRPCResponse{Result: rply, Error: err},
+			nil, true, utils.NonTransactional)
+	}
+	// end of RPC caching
+
+	//convert from Flags []string to utils.FlagsWithParams
+	argsFlagsWithParams := utils.FlagsWithParamsFromSlice(args.Flags)
+	// check for *attribute
+	if argsFlagsWithParams.Has(utils.MetaAttributes) {
+		rplyAttr, err := sS.processAttributes(args.CGREvent,
+			argsFlagsWithParams.ParamsSlice(utils.MetaAttributes, utils.MetaIDs), false)
+		if err == nil {
+			args.CGREvent = rplyAttr.CGREvent
+			rply.Attributes = &rplyAttr
+		} else if err.Error() != utils.ErrNotFound.Error() {
+			return utils.NewErrAttributeS(err)
+		}
+	}
+	//compose the CallDescriptor with Args
+	me := engine.MapEvent(args.CGREvent.Event)
+	startTime := me.GetTimeIgnoreErrors(utils.AnswerTime,
+		sS.cgrCfg.GeneralCfg().DefaultTimezone)
+	if startTime.IsZero() { // AnswerTime not parsable, try SetupTime
+		startTime = me.GetTimeIgnoreErrors(utils.SetupTime,
+			sS.cgrCfg.GeneralCfg().DefaultTimezone)
+	}
+	category := me.GetStringIgnoreErrors(utils.Category)
+	if len(category) == 0 {
+		category = sS.cgrCfg.GeneralCfg().DefaultCategory
+	}
+	subject := me.GetStringIgnoreErrors(utils.Subject)
+	if len(subject) == 0 {
+		subject = me.GetStringIgnoreErrors(utils.AccountField)
+	}
+
+	cd := &engine.CallDescriptor{
+		CgrID:       args.CGREvent.ID,
+		RunID:       me.GetStringIgnoreErrors(utils.RunID),
+		ToR:         me.GetStringIgnoreErrors(utils.ToR),
+		Tenant:      args.CGREvent.Tenant,
+		Category:    category,
+		Subject:     subject,
+		Account:     me.GetStringIgnoreErrors(utils.AccountField),
+		Destination: me.GetStringIgnoreErrors(utils.Destination),
+		TimeStart:   startTime,
+		TimeEnd:     startTime.Add(me.GetDurationIgnoreErrors(utils.Usage)),
+	}
+	var cc engine.CallCost
+	if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RALsConns, nil,
+		utils.ResponderGetCost,
+		&engine.CallDescriptorWithAPIOpts{
+			CallDescriptor: cd,
+			APIOpts:        args.APIOpts,
+		}, &cc); err != nil {
+		return
+	}
+	ec := engine.NewEventCostFromCallCost(&cc, args.CGREvent.ID, me.GetStringIgnoreErrors(utils.RunID))
+	ec.Compute()
+	rply.EventCost = ec
+	return
+}
+
 // BiRPCv1SyncSessions will sync sessions on demand
-func (sS *SessionS) BiRPCv1SyncSessions(ctx *context.Context,
+func (sS *SessionS) BiRPCv1SyncSessions(clnt rpcclient.ClientConnector,
 	ignParam *utils.TenantWithAPIOpts, reply *string) error {
-	sS.syncSessions(ctx)
+	sS.syncSessions()
 	*reply = utils.OK
 	return nil
 }
 
 // BiRPCv1ForceDisconnect will force disconnecting sessions matching sessions
-func (sS *SessionS) BiRPCv1ForceDisconnect(ctx *context.Context,
+func (sS *SessionS) BiRPCv1ForceDisconnect(clnt rpcclient.ClientConnector,
 	args *utils.SessionFilter, reply *string) (err error) {
 	if args == nil { //protection in case on nil
 		args = &utils.SessionFilter{}
@@ -2842,25 +3676,25 @@ func (sS *SessionS) BiRPCv1ForceDisconnect(ctx *context.Context,
 	if len(args.Filters) != 0 && sS.dm == nil {
 		return utils.ErrNoDatabaseConn
 	}
-	aSs := sS.filterSessions(ctx, args, false)
+	aSs := sS.filterSessions(args, false)
 	if len(aSs) == 0 {
 		return utils.ErrNotFound
 	}
-	// for _, as := range aSs {
-	// 	ss := sS.getSessions(as.CGRID, false)
-	// 	if len(ss) == 0 {
-	// 		continue
-	// 	}
-	// 	ss[0].Lock()
-	// 	if errTerm := sS.forceSTerminate(ctx, ss[0], 0, nil, nil); errTerm != nil {
-	// 		utils.Logger.Warning(
-	// 			fmt.Sprintf(
-	// 				"<%s> failed force-terminating session with id: <%s>, err: <%s>",
-	// 				utils.SessionS, ss[0].originID(), errTerm.Error()))
-	// 		err = utils.ErrPartiallyExecuted
-	// 	}
-	// 	ss[0].Unlock()
-	// }
+	for _, as := range aSs {
+		ss := sS.getSessions(as.CGRID, false)
+		if len(ss) == 0 {
+			continue
+		}
+		ss[0].Lock()
+		if errTerm := sS.forceSTerminate(ss[0], 0, nil, nil); errTerm != nil {
+			utils.Logger.Warning(
+				fmt.Sprintf(
+					"<%s> failed force-terminating session with id: <%s>, err: <%s>",
+					utils.SessionS, ss[0].cgrID(), errTerm.Error()))
+			err = utils.ErrPartiallyExecuted
+		}
+		ss[0].Unlock()
+	}
 	if err == nil {
 		*reply = utils.OK
 	} else {
@@ -2870,17 +3704,17 @@ func (sS *SessionS) BiRPCv1ForceDisconnect(ctx *context.Context,
 }
 
 // BiRPCv1RegisterInternalBiJSONConn will register the client for a bidirectional comunication
-func (sS *SessionS) BiRPCv1RegisterInternalBiJSONConn(ctx *context.Context,
+func (sS *SessionS) BiRPCv1RegisterInternalBiJSONConn(clnt rpcclient.ClientConnector,
 	connID string, reply *string) error {
-	sS.RegisterIntBiJConn(ctx.Client, connID)
+	sS.RegisterIntBiJConn(clnt, connID)
 	*reply = utils.OK
 	return nil
 }
 
 // BiRPCv1ActivateSessions is called to activate a list/all sessions
 // returns utils.ErrPartiallyExecuted in case of errors
-func (sS *SessionS) BiRPCv1ActivateSessions(ctx *context.Context,
-	sIDs *utils.SessionIDsWithAPIOpts, reply *string) (err error) {
+func (sS *SessionS) BiRPCv1ActivateSessions(clnt rpcclient.ClientConnector,
+	sIDs *utils.SessionIDsWithArgsDispatcher, reply *string) (err error) {
 	if len(sIDs.IDs) == 0 {
 		sS.pSsMux.RLock()
 		i := 0
@@ -2905,8 +3739,8 @@ func (sS *SessionS) BiRPCv1ActivateSessions(ctx *context.Context,
 
 // BiRPCv1DeactivateSessions is called to deactivate a list/all active sessios
 // returns utils.ErrPartiallyExecuted in case of errors
-func (sS *SessionS) BiRPCv1DeactivateSessions(ctx *context.Context,
-	sIDs *utils.SessionIDsWithAPIOpts, reply *string) (err error) {
+func (sS *SessionS) BiRPCv1DeactivateSessions(clnt rpcclient.ClientConnector,
+	sIDs *utils.SessionIDsWithArgsDispatcher, reply *string) (err error) {
 	if len(sIDs.IDs) == 0 {
 		sS.aSsMux.RLock()
 		i := 0
@@ -2929,45 +3763,51 @@ func (sS *SessionS) BiRPCv1DeactivateSessions(ctx *context.Context,
 	return
 }
 
-func (sS *SessionS) processCDR(ctx *context.Context, cgrEv *utils.CGREvent, rply *string) (err error) {
+func (sS *SessionS) processCDR(cgrEv *utils.CGREvent, flags []string, rply *string, clnb bool) (err error) {
 	ev := engine.MapEvent(cgrEv.Event)
-	originID := GetSetOptsOriginID(ev, cgrEv.APIOpts)
-	s := sS.getRelocateSession(ctx, originID,
+	cgrID := GetSetCGRID(ev)
+	s := sS.getRelocateSession(cgrID,
 		ev.GetStringIgnoreErrors(utils.InitialOriginID),
 		ev.GetStringIgnoreErrors(utils.OriginID),
 		ev.GetStringIgnoreErrors(utils.OriginHost))
 	if s != nil {
 		utils.Logger.Warning(
-			fmt.Sprintf("<%s> ProcessCDR called for active session with originID: <%s>",
-				utils.SessionS, originID))
+			fmt.Sprintf("<%s> ProcessCDR called for active session with CGRID: <%s>",
+				utils.SessionS, cgrID))
 		s.Lock() // events update session panic
 		defer s.Unlock()
-	} else if sIface, has := engine.Cache.Get(utils.CacheClosedSessions, originID); has {
+	} else if sIface, has := engine.Cache.Get(utils.CacheClosedSessions, cgrID); has {
 		// found in cache
 		s = sIface.(*Session)
 	} else { // no cached session, CDR will be handled by CDRs
-		return sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().CDRsConns, utils.CDRsV1ProcessEvent,
-			cgrEv, rply)
+		argsProc := &engine.ArgV1ProcessEvent{
+			Flags:    flags,
+			CGREvent: *cgrEv,
+		}
+		argsProc.SetCloneable(clnb)
+		return sS.connMgr.Call(sS.cgrCfg.SessionSCfg().CDRsConns, nil, utils.CDRsV1ProcessEvent,
+			argsProc, rply)
 	}
 
 	// Use previously stored Session to generate CDRs
-	s.updateSRuns(ev, sS.cfg.SessionSCfg().AlterableFields)
+	s.updateSRuns(ev, sS.cgrCfg.SessionSCfg().AlterableFields)
 	// create one CGREvent for each session run
 	var withErrors bool
 	for _, cgrEv := range s.asCGREvents() {
-		if cgrEv.APIOpts == nil {
-			cgrEv.APIOpts = make(map[string]interface{})
+		argsProc := &engine.ArgV1ProcessEvent{
+			Flags: []string{fmt.Sprintf("%s:false", utils.MetaChargers),
+				fmt.Sprintf("%s:false", utils.MetaAttributes)},
+			CGREvent: *cgrEv,
 		}
-		cgrEv.APIOpts[utils.MetaAttributes] = false
-		cgrEv.APIOpts[utils.MetaChargers] = false
+		argsProc.SetCloneable(clnb)
 		if mp := engine.MapEvent(cgrEv.Event); unratedReqs.HasField(mp.GetStringIgnoreErrors(utils.RequestType)) { // order additional rating for unrated request types
-			// argsProc.Flags = append(argsProc.Flags, fmt.Sprintf("%s:true", utils.MetaRALs))
+			argsProc.Flags = append(argsProc.Flags, fmt.Sprintf("%s:true", utils.MetaRALs))
 		}
-		if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().CDRsConns, utils.CDRsV1ProcessEvent,
-			cgrEv, rply); err != nil {
+		if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().CDRsConns, nil, utils.CDRsV1ProcessEvent,
+			argsProc, rply); err != nil {
 			utils.Logger.Warning(
-				fmt.Sprintf("<%s> error <%s> posting CDR with originID: <%s>",
-					utils.SessionS, err.Error(), originID))
+				fmt.Sprintf("<%s> error <%s> posting CDR with CGRID: <%s>",
+					utils.SessionS, err.Error(), cgrID))
 			withErrors = true
 		}
 	}
@@ -2979,37 +3819,58 @@ func (sS *SessionS) processCDR(ctx *context.Context, cgrEv *utils.CGREvent, rply
 }
 
 // processThreshold will receive the event and send it to ThresholdS to be processed
-func (sS *SessionS) processThreshold(ctx *context.Context, cgrEv *utils.CGREvent, clnb bool) (tIDs []string, err error) {
-	if len(sS.cfg.SessionSCfg().ThresholdSConns) == 0 {
+func (sS *SessionS) processThreshold(cgrEv *utils.CGREvent, thIDs []string, clnb bool) (tIDs []string, err error) {
+	if len(sS.cgrCfg.SessionSCfg().ThreshSConns) == 0 {
 		return tIDs, utils.NewErrNotConnected(utils.ThresholdS)
+	}
+	if cgrEv.APIOpts == nil {
+		cgrEv.APIOpts = make(map[string]interface{})
+	}
+	// check if we have thresholdIDs
+	if len(thIDs) != 0 {
+		cgrEv.APIOpts[utils.OptsThresholdsProfileIDs] = thIDs
 	}
 	cgrEv.SetCloneable(clnb)
 	//initialize the returned variable
-	err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().ThresholdSConns, utils.ThresholdSv1ProcessEvent, cgrEv, &tIDs)
+	err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().ThreshSConns, nil, utils.ThresholdSv1ProcessEvent, cgrEv, &tIDs)
 	return
 }
 
 // processStats will receive the event and send it to StatS to be processed
-func (sS *SessionS) processStats(ctx *context.Context, cgrEv *utils.CGREvent, clnb bool) (sIDs []string, err error) {
-	if len(sS.cfg.SessionSCfg().StatSConns) == 0 {
+func (sS *SessionS) processStats(cgrEv *utils.CGREvent, stsIDs []string, clnb bool) (sIDs []string, err error) {
+	if len(sS.cgrCfg.SessionSCfg().StatSConns) == 0 {
 		return sIDs, utils.NewErrNotConnected(utils.StatS)
 	}
-
+	if cgrEv.APIOpts == nil {
+		cgrEv.APIOpts = make(map[string]interface{})
+	}
+	// check in case we have StatIDs inside flags
+	if len(stsIDs) != 0 {
+		cgrEv.APIOpts[utils.OptsStatsProfileIDs] = stsIDs
+	}
 	cgrEv.SetCloneable(clnb)
 	//initialize the returned variable
-	err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().StatSConns, utils.StatSv1ProcessEvent, cgrEv, &sIDs)
+	err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().StatSConns, nil, utils.StatSv1ProcessEvent, cgrEv, &sIDs)
 	return
 }
 
 // getRoutes will receive the event and send it to SupplierS to find the suppliers
-func (sS *SessionS) getRoutes(ctx *context.Context, cgrEv *utils.CGREvent) (routesReply engine.SortedRoutesList, err error) {
-	if len(sS.cfg.SessionSCfg().RouteSConns) == 0 {
+func (sS *SessionS) getRoutes(cgrEv *utils.CGREvent, pag utils.Paginator, ignoreErrors bool,
+	maxCost string, clnb bool) (routesReply engine.SortedRoutesList, err error) {
+	if len(sS.cgrCfg.SessionSCfg().RouteSConns) == 0 {
 		return routesReply, utils.NewErrNotConnected(utils.RouteS)
 	}
 	if acd, has := cgrEv.Event[utils.ACD]; has {
 		cgrEv.Event[utils.Usage] = acd
 	}
-	if err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().RouteSConns, utils.RouteSv1GetRoutes,
+	if maxCost != utils.EmptyString {
+		cgrEv.APIOpts[utils.OptsRoutesMaxCost] = maxCost
+	}
+	if ignoreErrors {
+		cgrEv.APIOpts[utils.OptsRoutesIgnoreErrors] = ignoreErrors
+	}
+	cgrEv.SetCloneable(clnb)
+	if err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().RouteSConns, nil, utils.RouteSv1GetRoutes,
 		cgrEv, &routesReply); err != nil {
 		return routesReply, utils.NewErrRouteS(err)
 	}
@@ -3017,23 +3878,140 @@ func (sS *SessionS) getRoutes(ctx *context.Context, cgrEv *utils.CGREvent) (rout
 }
 
 // processAttributes will receive the event and send it to AttributeS to be processed
-func (sS *SessionS) processAttributes(ctx *context.Context, cgrEv *utils.CGREvent) (rplyEv engine.AttrSProcessEventReply, err error) {
-	if len(sS.cfg.SessionSCfg().AttributeSConns) == 0 {
+func (sS *SessionS) processAttributes(cgrEv *utils.CGREvent, attrIDs []string,
+	clnb bool) (rplyEv engine.AttrSProcessEventReply, err error) {
+	if len(sS.cgrCfg.SessionSCfg().AttrSConns) == 0 {
 		return rplyEv, utils.NewErrNotConnected(utils.AttributeS)
 	}
 	if cgrEv.APIOpts == nil {
 		cgrEv.APIOpts = make(engine.MapEvent)
 	}
 	cgrEv.APIOpts[utils.MetaSubsys] = utils.MetaSessionS
+	cgrEv.APIOpts[utils.OptsAttributesProfileIDs] = attrIDs
+	ctx, has := cgrEv.APIOpts[utils.OptsContext]
 	cgrEv.APIOpts[utils.OptsContext] = utils.FirstNonEmpty(
-		utils.IfaceAsString(cgrEv.APIOpts[utils.OptsContext]),
+		utils.IfaceAsString(ctx),
 		utils.MetaSessionS)
-	err = sS.connMgr.Call(ctx, sS.cfg.SessionSCfg().AttributeSConns, utils.AttributeSv1ProcessEvent,
+	cgrEv.SetCloneable(clnb)
+	err = sS.connMgr.Call(sS.cgrCfg.SessionSCfg().AttrSConns, nil, utils.AttributeSv1ProcessEvent,
 		cgrEv, &rplyEv)
+	if err == nil && !has && utils.IfaceAsString(rplyEv.APIOpts[utils.OptsContext]) == utils.MetaSessionS {
+		delete(rplyEv.APIOpts, utils.OptsContext)
+	}
 	return
 }
 
-func (sS *SessionS) sendRar(ctx *context.Context, s *Session) (err error) {
+// BiRPCV1GetMaxUsage returns the maximum usage as seconds, compatible with OpenSIPS 2.3
+// DEPRECATED, it will be removed in future versions
+func (sS *SessionS) BiRPCV1GetMaxUsage(clnt rpcclient.ClientConnector,
+	ev engine.MapEvent, maxUsage *float64) (err error) {
+	var rply *V1AuthorizeReply
+	if err = sS.BiRPCv1AuthorizeEvent(
+		clnt,
+		&V1AuthorizeArgs{
+			GetMaxUsage: true,
+			CGREvent: &utils.CGREvent{
+				Tenant: utils.FirstNonEmpty(
+					ev.GetStringIgnoreErrors(utils.Tenant),
+					sS.cgrCfg.GeneralCfg().DefaultTenant),
+				ID:    utils.UUIDSha1Prefix(),
+				Event: ev,
+			},
+		},
+		rply); err != nil {
+		return
+	}
+	*maxUsage = rply.MaxUsage.Seconds()
+	return nil
+}
+
+// BiRPCV1InitiateSession is called on session start, returns the maximum number of seconds the session can last
+// DEPRECATED, it will be removed in future versions
+// Kept for compatibility with OpenSIPS 2.3
+func (sS *SessionS) BiRPCV1InitiateSession(clnt rpcclient.ClientConnector,
+	ev engine.MapEvent, maxUsage *float64) (err error) {
+	var rply *V1InitSessionReply
+	if err = sS.BiRPCv1InitiateSession(
+		clnt,
+		&V1InitSessionArgs{
+			InitSession: true,
+			CGREvent: &utils.CGREvent{
+				Tenant: utils.FirstNonEmpty(
+					ev.GetStringIgnoreErrors(utils.Tenant),
+					sS.cgrCfg.GeneralCfg().DefaultTenant),
+				ID:    utils.UUIDSha1Prefix(),
+				Event: ev,
+			},
+		},
+		rply); err != nil {
+		return
+	}
+	*maxUsage = rply.MaxUsage.Seconds()
+	return
+}
+
+// BiRPCV1UpdateSession processes interim updates, returns remaining duration from the RALs
+// DEPRECATED, it will be removed in future versions
+// Kept for compatibility with OpenSIPS 2.3
+func (sS *SessionS) BiRPCV1UpdateSession(clnt rpcclient.ClientConnector,
+	ev engine.MapEvent, maxUsage *float64) (err error) {
+	var rply *V1UpdateSessionReply
+	if err = sS.BiRPCv1UpdateSession(
+		clnt,
+		&V1UpdateSessionArgs{
+			UpdateSession: true,
+			CGREvent: &utils.CGREvent{
+				Tenant: utils.FirstNonEmpty(
+					ev.GetStringIgnoreErrors(utils.Tenant),
+					sS.cgrCfg.GeneralCfg().DefaultTenant),
+				ID:    utils.UUIDSha1Prefix(),
+				Event: ev,
+			},
+		},
+		rply); err != nil {
+		return
+	}
+	*maxUsage = rply.MaxUsage.Seconds()
+	return
+}
+
+// BiRPCV1TerminateSession is called on session end, should stop debit loop
+// DEPRECATED, it will be removed in future versions
+// Kept for compatibility with OpenSIPS 2.3
+func (sS *SessionS) BiRPCV1TerminateSession(clnt rpcclient.ClientConnector,
+	ev engine.MapEvent, rply *string) (err error) {
+	return sS.BiRPCv1TerminateSession(
+		clnt,
+		&V1TerminateSessionArgs{
+			TerminateSession: true,
+			CGREvent: &utils.CGREvent{
+				Tenant: utils.FirstNonEmpty(
+					ev.GetStringIgnoreErrors(utils.Tenant),
+					sS.cgrCfg.GeneralCfg().DefaultTenant),
+				ID:    utils.UUIDSha1Prefix(),
+				Event: ev,
+			},
+		},
+		rply)
+}
+
+// BiRPCV1ProcessCDR should send the CDR to CDRS
+// DEPRECATED, it will be removed in future versions
+// Kept for compatibility with OpenSIPS 2.3
+func (sS *SessionS) BiRPCV1ProcessCDR(clnt rpcclient.ClientConnector,
+	ev engine.MapEvent, rply *string) (err error) {
+	return sS.BiRPCv1ProcessCDR(
+		clnt,
+		&utils.CGREvent{
+			Tenant: utils.FirstNonEmpty(
+				ev.GetStringIgnoreErrors(utils.Tenant),
+				sS.cgrCfg.GeneralCfg().DefaultTenant),
+			ID:    utils.UUIDSha1Prefix(),
+			Event: ev},
+		rply)
+}
+
+func (sS *SessionS) sendRar(s *Session) (err error) {
 	clnt := sS.biJClnt(s.ClientConnID)
 	if clnt == nil {
 		return fmt.Errorf("calling %s requires bidirectional JSON connection, connID: <%s>",
@@ -3044,40 +4022,40 @@ func (sS *SessionS) sendRar(ctx *context.Context, s *Session) (err error) {
 		return
 	}
 	var rply string
-	if err = clnt.conn.Call(ctx, utils.SessionSv1ReAuthorize, originID, &rply); err == utils.ErrNotImplemented {
+	if err = clnt.conn.Call(utils.SessionSv1ReAuthorize, originID, &rply); err == utils.ErrNotImplemented {
 		err = nil
 	}
 	return
 }
 
 // BiRPCv1ReAuthorize sends a RAR for the matching sessions
-func (sS *SessionS) BiRPCv1ReAuthorize(ctx *context.Context,
+func (sS *SessionS) BiRPCv1ReAuthorize(clnt rpcclient.ClientConnector,
 	args *utils.SessionFilter, reply *string) (err error) {
 	if args == nil { //protection in case on nil
 		args = &utils.SessionFilter{}
 	}
-	aSs := sS.filterSessions(ctx, args, false)
+	aSs := sS.filterSessions(args, false)
 	if len(aSs) == 0 {
 		return utils.ErrNotFound
 	}
-	// cache := utils.NewStringSet(nil)
-	// for _, as := range aSs {
-	// 	if cache.Has(as.CGRID) {
-	// 		continue
-	// 	}
-	// 	cache.Add(as.CGRID)
-	// 	ss := sS.getSessions(as.CGRID, false)
-	// 	if len(ss) == 0 {
-	// 		continue
-	// 	}
-	// 	if errTerm := sS.sendRar(ctx, ss[0]); errTerm != nil {
-	// 		utils.Logger.Warning(
-	// 			fmt.Sprintf(
-	// 				"<%s> failed sending RAR for session with id: <%s>, err: <%s>",
-	// 				utils.SessionS, ss[0].originID(), errTerm.Error()))
-	// 		err = utils.ErrPartiallyExecuted
-	// 	}
-	// }
+	cache := utils.NewStringSet(nil)
+	for _, as := range aSs {
+		if cache.Has(as.CGRID) {
+			continue
+		}
+		cache.Add(as.CGRID)
+		ss := sS.getSessions(as.CGRID, false)
+		if len(ss) == 0 {
+			continue
+		}
+		if errTerm := sS.sendRar(ss[0]); errTerm != nil {
+			utils.Logger.Warning(
+				fmt.Sprintf(
+					"<%s> failed sending RAR for session with id: <%s>, err: <%s>",
+					utils.SessionS, ss[0].cgrID(), errTerm.Error()))
+			err = utils.ErrPartiallyExecuted
+		}
+	}
 	if err != nil {
 		return
 	}
@@ -3086,7 +4064,7 @@ func (sS *SessionS) BiRPCv1ReAuthorize(ctx *context.Context,
 }
 
 // BiRPCv1DisconnectPeer sends a DPR for the given OriginHost and OriginRealm
-func (sS *SessionS) BiRPCv1DisconnectPeer(ctx *context.Context,
+func (sS *SessionS) BiRPCv1DisconnectPeer(clnt rpcclient.ClientConnector,
 	args *utils.DPRArgs, reply *string) (err error) {
 	hasErrors := false
 	clients := make(map[string]*biJClient)
@@ -3096,7 +4074,7 @@ func (sS *SessionS) BiRPCv1DisconnectPeer(ctx *context.Context,
 	}
 	sS.biJMux.RUnlock()
 	for ID, clnt := range clients {
-		if err = clnt.conn.Call(ctx, utils.SessionSv1DisconnectPeer, args, reply); err != nil && err != utils.ErrNotImplemented {
+		if err = clnt.conn.Call(utils.SessionSv1DisconnectPeer, args, reply); err != nil && err != utils.ErrNotImplemented {
 			utils.Logger.Warning(
 				fmt.Sprintf(
 					"<%s> failed sending DPR for connection with id: <%s>, err: <%s>",
@@ -3112,19 +4090,19 @@ func (sS *SessionS) BiRPCv1DisconnectPeer(ctx *context.Context,
 }
 
 // BiRPCv1STIRAuthenticate the API for STIR checking
-func (sS *SessionS) BiRPCv1STIRAuthenticate(ctx *context.Context,
+func (sS *SessionS) BiRPCv1STIRAuthenticate(clnt rpcclient.ClientConnector,
 	args *V1STIRAuthenticateArgs, reply *string) (err error) {
-	attest := sS.cfg.SessionSCfg().STIRCfg.AllowedAttest
+	attest := sS.cgrCfg.SessionSCfg().STIRCfg.AllowedAttest
 	if len(args.Attest) != 0 {
 		attest = utils.NewStringSet(args.Attest)
 	}
-	stirMaxDur := sS.cfg.SessionSCfg().STIRCfg.PayloadMaxduration
+	stirMaxDur := sS.cgrCfg.SessionSCfg().STIRCfg.PayloadMaxduration
 	if args.PayloadMaxDuration != utils.EmptyString {
 		if stirMaxDur, err = utils.ParseDurationWithNanosecs(args.PayloadMaxDuration); err != nil {
 			return
 		}
 	}
-	if err = AuthStirShaken(ctx, args.Identity, args.OriginatorTn, args.OriginatorURI,
+	if err = AuthStirShaken(args.Identity, args.OriginatorTn, args.OriginatorURI,
 		args.DestinationTn, args.DestinationURI, attest, stirMaxDur); err != nil {
 		return utils.NewSTIRError(err.Error())
 	}
@@ -3133,25 +4111,105 @@ func (sS *SessionS) BiRPCv1STIRAuthenticate(ctx *context.Context,
 }
 
 // BiRPCv1STIRIdentity the API for STIR header creation
-func (sS *SessionS) BiRPCv1STIRIdentity(ctx *context.Context,
+func (sS *SessionS) BiRPCv1STIRIdentity(clnt rpcclient.ClientConnector,
 	args *V1STIRIdentityArgs, identity *string) (err error) {
 	if args == nil || args.Payload == nil {
 		return utils.NewErrMandatoryIeMissing("Payload")
 	}
 	if args.Payload.ATTest == utils.EmptyString {
-		args.Payload.ATTest = sS.cfg.SessionSCfg().STIRCfg.DefaultAttest
+		args.Payload.ATTest = sS.cgrCfg.SessionSCfg().STIRCfg.DefaultAttest
 	}
 	if args.OverwriteIAT {
 		args.Payload.IAT = time.Now().Unix()
 	}
 	if *identity, err = NewSTIRIdentity(
-		ctx,
 		utils.NewPASSporTHeader(utils.FirstNonEmpty(args.PublicKeyPath,
-			sS.cfg.SessionSCfg().STIRCfg.PublicKeyPath)),
+			sS.cgrCfg.SessionSCfg().STIRCfg.PublicKeyPath)),
 		args.Payload, utils.FirstNonEmpty(args.PrivateKeyPath,
-			sS.cfg.SessionSCfg().STIRCfg.PrivateKeyPath),
-		sS.cfg.GeneralCfg().ReplyTimeout); err != nil {
+			sS.cgrCfg.SessionSCfg().STIRCfg.PrivateKeyPath),
+		sS.cgrCfg.GeneralCfg().ReplyTimeout); err != nil {
 		return utils.NewSTIRError(err.Error())
 	}
 	return
+}
+
+// Handlers bidirectional methods following
+func (sS *SessionS) Handlers() map[string]interface{} {
+	return map[string]interface{}{
+		utils.SessionSv1AuthorizeEvent: func(clnt *rpc2.Client, args *V1AuthorizeArgs, rply *V1AuthorizeReply) (err error) {
+			return sS.BiRPCv1AuthorizeEvent(clnt, args, rply)
+		},
+		utils.SessionSv1AuthorizeEventWithDigest: func(clnt *rpc2.Client, args *V1AuthorizeArgs, rply *V1AuthorizeReplyWithDigest) (err error) {
+			return sS.BiRPCv1AuthorizeEventWithDigest(clnt, args, rply)
+		},
+		utils.SessionSv1InitiateSession: func(clnt *rpc2.Client, args *V1InitSessionArgs, rply *V1InitSessionReply) (err error) {
+			return sS.BiRPCv1InitiateSession(clnt, args, rply)
+		},
+		utils.SessionSv1InitiateSessionWithDigest: func(clnt *rpc2.Client, args *V1InitSessionArgs, rply *V1InitReplyWithDigest) (err error) {
+			return sS.BiRPCv1InitiateSessionWithDigest(clnt, args, rply)
+		},
+		utils.SessionSv1UpdateSession: func(clnt *rpc2.Client, args *V1UpdateSessionArgs, rply *V1UpdateSessionReply) (err error) {
+			return sS.BiRPCv1UpdateSession(clnt, args, rply)
+		},
+		utils.SessionSv1SyncSessions: func(clnt *rpc2.Client, args *utils.TenantWithAPIOpts, rply *string) (err error) {
+			return sS.BiRPCv1SyncSessions(clnt, args, rply)
+		},
+		utils.SessionSv1TerminateSession: func(clnt *rpc2.Client, args *V1TerminateSessionArgs, rply *string) (err error) {
+			return sS.BiRPCv1TerminateSession(clnt, args, rply)
+		},
+		utils.SessionSv1ProcessCDR: func(clnt *rpc2.Client, args *utils.CGREvent, rply *string) (err error) {
+			return sS.BiRPCv1ProcessCDR(clnt, args, rply)
+		},
+		utils.SessionSv1ProcessMessage: func(clnt *rpc2.Client, args *V1ProcessMessageArgs, rply *V1ProcessMessageReply) (err error) {
+			return sS.BiRPCv1ProcessMessage(clnt, args, rply)
+		},
+		utils.SessionSv1ProcessEvent: func(clnt *rpc2.Client, args *V1ProcessEventArgs, rply *V1ProcessEventReply) (err error) {
+			return sS.BiRPCv1ProcessEvent(clnt, args, rply)
+		},
+		utils.SessionSv1GetCost: func(clnt *rpc2.Client, args *V1ProcessEventArgs, rply *V1GetCostReply) (err error) {
+			return sS.BiRPCv1GetCost(clnt, args, rply)
+		},
+		utils.SessionSv1GetActiveSessions: func(clnt *rpc2.Client, args *utils.SessionFilter, rply *[]*ExternalSession) (err error) {
+			return sS.BiRPCv1GetActiveSessions(clnt, args, rply)
+		},
+		utils.SessionSv1GetActiveSessionsCount: func(clnt *rpc2.Client, args *utils.SessionFilter, rply *int) (err error) {
+			return sS.BiRPCv1GetActiveSessionsCount(clnt, args, rply)
+		},
+		utils.SessionSv1GetPassiveSessions: func(clnt *rpc2.Client, args *utils.SessionFilter, rply *[]*ExternalSession) (err error) {
+			return sS.BiRPCv1GetPassiveSessions(clnt, args, rply)
+		},
+		utils.SessionSv1GetPassiveSessionsCount: func(clnt *rpc2.Client, args *utils.SessionFilter, rply *int) (err error) {
+			return sS.BiRPCv1GetPassiveSessionsCount(clnt, args, rply)
+		},
+		utils.SessionSv1ForceDisconnect: func(clnt *rpc2.Client, args *utils.SessionFilter, rply *string) (err error) {
+			return sS.BiRPCv1ForceDisconnect(clnt, args, rply)
+		},
+		utils.SessionSv1RegisterInternalBiJSONConn: func(clnt *rpc2.Client, args string, rply *string) (err error) {
+			return sS.BiRPCv1RegisterInternalBiJSONConn(clnt, args, rply)
+		},
+		utils.SessionSv1ReplicateSessions: func(clnt *rpc2.Client, args ArgsReplicateSessions, rply *string) (err error) {
+			return sS.BiRPCv1ReplicateSessions(clnt, args, rply)
+		},
+		utils.SessionSv1SetPassiveSession: func(clnt *rpc2.Client, args *Session, rply *string) (err error) {
+			return sS.BiRPCv1SetPassiveSession(clnt, args, rply)
+		},
+		utils.SessionSv1ActivateSessions: func(clnt *rpc2.Client, args *utils.SessionIDsWithArgsDispatcher, rply *string) (err error) {
+			return sS.BiRPCv1ActivateSessions(clnt, args, rply)
+		},
+		utils.SessionSv1DeactivateSessions: func(clnt *rpc2.Client, args *utils.SessionIDsWithArgsDispatcher, rply *string) (err error) {
+			return sS.BiRPCv1DeactivateSessions(clnt, args, rply)
+		},
+		utils.SessionSv1ReAuthorize: func(clnt *rpc2.Client, args *utils.SessionFilter, rply *string) (err error) {
+			return sS.BiRPCv1ReAuthorize(clnt, args, rply)
+		},
+		utils.SessionSv1DisconnectPeer: func(clnt *rpc2.Client, args *utils.DPRArgs, rply *string) (err error) {
+			return sS.BiRPCv1DisconnectPeer(clnt, args, rply)
+		},
+		utils.SessionSv1STIRAuthenticate: func(clnt *rpc2.Client, args *V1STIRAuthenticateArgs, rply *string) (err error) {
+			return sS.BiRPCv1STIRAuthenticate(clnt, args, rply)
+		},
+		utils.SessionSv1STIRIdentity: func(clnt *rpc2.Client, args *V1STIRIdentityArgs, rply *string) (err error) {
+			return sS.BiRPCv1STIRIdentity(clnt, args, rply)
+		},
+	}
 }

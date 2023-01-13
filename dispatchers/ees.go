@@ -16,28 +16,16 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 
-// do not modify this code because it's generated
 package dispatchers
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/utils"
+	"time"
+
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
-func (dS *DispatcherService) EeSv1ArchiveEventsInReply(ctx *context.Context, args *ees.ArchiveEventsArgs, reply *[]uint8) (err error) {
-	tnt := dS.cfg.GeneralCfg().DefaultTenant
-	if args != nil && len(args.Tenant) != 0 {
-		tnt = args.Tenant
-	}
-	ev := make(map[string]interface{})
-	opts := make(map[string]interface{})
-	if args != nil {
-		opts = args.APIOpts
-	}
-	return dS.Dispatch(ctx, &utils.CGREvent{Tenant: tnt, Event: ev, APIOpts: opts}, utils.MetaEEs, utils.EeSv1ArchiveEventsInReply, args, reply)
-}
-func (dS *DispatcherService) EeSv1Ping(ctx *context.Context, args *utils.CGREvent, reply *string) (err error) {
+func (dS *DispatcherService) EeSv1Ping(args *utils.CGREvent, reply *string) (err error) {
 	tnt := dS.cfg.GeneralCfg().DefaultTenant
 	if args != nil && len(args.Tenant) != 0 {
 		tnt = args.Tenant
@@ -50,20 +38,33 @@ func (dS *DispatcherService) EeSv1Ping(ctx *context.Context, args *utils.CGREven
 	if args != nil {
 		opts = args.APIOpts
 	}
-	return dS.Dispatch(ctx, &utils.CGREvent{Tenant: tnt, Event: ev, APIOpts: opts}, utils.MetaEEs, utils.EeSv1Ping, args, reply)
+	if len(dS.cfg.DispatcherSCfg().AttributeSConns) != 0 {
+		if err = dS.authorize(utils.EeSv1Ping, tnt,
+			utils.IfaceAsString(opts[utils.OptsAPIKey]), utils.TimePointer(time.Now())); err != nil {
+			return
+		}
+	}
+	return dS.Dispatch(&utils.CGREvent{Tenant: tnt, Event: ev, APIOpts: opts}, utils.MetaCore, utils.EeSv1Ping, args, reply)
 }
-func (dS *DispatcherService) EeSv1ProcessEvent(ctx *context.Context, args *utils.CGREventWithEeIDs, reply *map[string]map[string]interface{}) (err error) {
+
+func (dS *DispatcherService) EeSv1ProcessEvent(args *engine.CGREventWithEeIDs, reply *map[string]map[string]interface{}) (err error) {
 	tnt := dS.cfg.GeneralCfg().DefaultTenant
-	if args != nil && (args.CGREvent != nil && len(args.CGREvent.Tenant) != 0) {
-		tnt = args.CGREvent.Tenant
+	if args != nil && len(args.Tenant) != 0 {
+		tnt = args.Tenant
 	}
 	ev := make(map[string]interface{})
-	if args != nil && args.CGREvent != nil {
-		ev = args.CGREvent.Event
+	if args != nil {
+		ev = args.Event
 	}
 	opts := make(map[string]interface{})
-	if args != nil && args.CGREvent != nil {
-		opts = args.CGREvent.APIOpts
+	if args != nil {
+		opts = args.APIOpts
 	}
-	return dS.Dispatch(ctx, &utils.CGREvent{Tenant: tnt, Event: ev, APIOpts: opts}, utils.MetaEEs, utils.EeSv1ProcessEvent, args, reply)
+	if len(dS.cfg.DispatcherSCfg().AttributeSConns) != 0 {
+		if err = dS.authorize(utils.EeSv1ProcessEvent, tnt,
+			utils.IfaceAsString(opts[utils.OptsAPIKey]), utils.TimePointer(time.Now())); err != nil {
+			return
+		}
+	}
+	return dS.Dispatch(&utils.CGREvent{Tenant: tnt, Event: ev, APIOpts: opts}, utils.MetaCore, utils.EeSv1ProcessEvent, args, reply)
 }

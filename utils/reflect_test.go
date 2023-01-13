@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package utils
 
 import (
+	"fmt"
 	"net"
 	"reflect"
 	"strings"
@@ -26,6 +27,101 @@ import (
 
 	"github.com/ericlagergren/decimal"
 )
+
+func TestReflectFieldAsStringOnStruct(t *testing.T) {
+	mystruct := struct {
+		Title       string
+		Count       int
+		Count64     int64
+		Val         float64
+		ExtraFields map[string]interface{}
+	}{"Title1", 5, 6, 7.3, map[string]interface{}{"a": "Title2", "b": 15, "c": int64(16), "d": 17.3}}
+	if strVal, err := ReflectFieldAsString(mystruct, "Title", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "Title1" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "Count", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "5" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "Count64", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "6" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "Val", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "7.3" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "a", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "Title2" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "b", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "15" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "c", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "16" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(mystruct, "d", "ExtraFields"); err != nil {
+		t.Error(err)
+	} else if strVal != "17.3" {
+		t.Errorf("Received: %s", strVal)
+	}
+}
+
+func TestReflectFieldAsStringOnMap(t *testing.T) {
+	myMap := map[string]interface{}{"Title": "Title1", "Count": 5, "Count64": int64(6), "Val": 7.3,
+		"a": "Title2", "b": 15, "c": int64(16), "d": 17.3}
+	if strVal, err := ReflectFieldAsString(myMap, "Title", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "Title1" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "Count", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "5" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "Count64", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "6" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "Val", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "7.3" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "a", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "Title2" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "b", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "15" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "c", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "16" {
+		t.Errorf("Received: %s", strVal)
+	}
+	if strVal, err := ReflectFieldAsString(myMap, "d", ""); err != nil {
+		t.Error(err)
+	} else if strVal != "17.3" {
+		t.Errorf("Received: %s", strVal)
+	}
+}
 
 func TestGreaterThan(t *testing.T) {
 	if gte, err := GreaterThan(1, 1.2, false); err != nil {
@@ -345,67 +441,42 @@ func TestIfaceAsBool(t *testing.T) {
 	val := interface{}(true)
 	if itmConvert, err := IfaceAsBool(val); err != nil {
 		t.Error(err)
-	} else if !itmConvert {
+	} else if itmConvert != true {
 		t.Errorf("received: %+v", itmConvert)
 	}
 	val = interface{}("true")
 	if itmConvert, err := IfaceAsBool(val); err != nil {
 		t.Error(err)
-	} else if !itmConvert {
+	} else if itmConvert != true {
 		t.Errorf("received: %+v", itmConvert)
 	}
 	val = interface{}(0)
 	if itmConvert, err := IfaceAsBool(val); err != nil {
 		t.Error(err)
-	} else if itmConvert {
-		t.Errorf("received: %+v", itmConvert)
-	}
-	val = interface{}(int32(2))
-	if itmConvert, err := IfaceAsBool(val); err != nil {
-		t.Error(err)
-	} else if !itmConvert {
+	} else if itmConvert != false {
 		t.Errorf("received: %+v", itmConvert)
 	}
 	val = interface{}(1)
 	if itmConvert, err := IfaceAsBool(val); err != nil {
 		t.Error(err)
-	} else if !itmConvert {
-		t.Errorf("received: %+v", itmConvert)
-	}
-	val = interface{}(uint32(2))
-	if itmConvert, err := IfaceAsBool(val); err != nil {
-		t.Error(err)
-	} else if !itmConvert {
-		t.Errorf("received: %+v", itmConvert)
-	}
-	val = interface{}(uint64(2))
-	if itmConvert, err := IfaceAsBool(val); err != nil {
-		t.Error(err)
-	} else if !itmConvert {
+	} else if itmConvert != true {
 		t.Errorf("received: %+v", itmConvert)
 	}
 	val = interface{}(0.0)
 	if itmConvert, err := IfaceAsBool(val); err != nil {
 		t.Error(err)
-	} else if itmConvert {
+	} else if itmConvert != false {
 		t.Errorf("received: %+v", itmConvert)
 	}
 	val = interface{}(1.0)
 	if itmConvert, err := IfaceAsBool(val); err != nil {
 		t.Error(err)
-	} else if !itmConvert {
+	} else if itmConvert != true {
 		t.Errorf("received: %+v", itmConvert)
 	}
 	val = interface{}("This is not a bool")
 	if _, err := IfaceAsBool(val); err == nil {
 		t.Error("expecting error")
-	}
-
-	val = interface{}("")
-	if itmConvert, err := IfaceAsBool(val); err != nil {
-		t.Error(err)
-	} else if itmConvert {
-		t.Errorf("received: %+v", itmConvert)
 	}
 }
 
@@ -553,16 +624,6 @@ func TestDifference(t *testing.T) {
 
 }
 
-func TestDifferenceTime(t *testing.T) {
-	if diff, err := Difference("", time.Date(2009, 11, 10, 23, 10, 0, 0, time.UTC),
-		time.Date(2009, 11, 10, 23, 13, 0, 0, time.UTC), 10*time.Second); err != nil {
-		t.Error(err)
-	} else if diff != -3*time.Minute+0*time.Second {
-		t.Errorf("Expected %v but received %v %T", "-3m0s", diff, diff)
-	}
-
-}
-
 func TestMultiply(t *testing.T) {
 	if _, err := Multiply(10); err == nil || err != ErrNotEnoughParameters {
 		t.Error(err)
@@ -687,6 +748,229 @@ func (*TestA) TestFuncWithError() (string, error) {
 }
 func (*TestA) TestFuncWithError2() (string, error) {
 	return "TestFuncWithError2", ErrPartiallyExecuted
+}
+
+func TestReflectFieldMethodInterface(t *testing.T) {
+	a := &TestA{StrField: "TestStructField"}
+	ifValue, err := ReflectFieldMethodInterface(a, "StrField")
+	if err != nil {
+		t.Error(err)
+	} else if ifValue != "TestStructField" {
+		t.Errorf("Expecting: TestStructField, received: %+v", ifValue)
+	}
+	_, err = ReflectFieldMethodInterface(a, "InexistentField")
+	if err != ErrNotFound {
+		t.Error(err)
+	}
+	ifValue, err = ReflectFieldMethodInterface(a, "TestFunc")
+	if err != nil {
+		t.Error(err)
+	} else if ifValue != "This is a test function on a structure" {
+		t.Errorf("Expecting: This is a test function on a structure, received: %+v", ifValue)
+	}
+	ifValue, err = ReflectFieldMethodInterface(a, "TestFuncWithError")
+	if err != nil {
+		t.Error(err)
+	} else if ifValue != "TestFuncWithError" {
+		t.Errorf("Expecting: TestFuncWithError, received: %+v", ifValue)
+	}
+	_, err = ReflectFieldMethodInterface(a, "TestFuncWithError2")
+	if err == nil || err != ErrPartiallyExecuted {
+		t.Error(err)
+	}
+}
+
+func TestIfaceAsSliceString(t *testing.T) {
+	var attrs interface{}
+	var expected []string
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+
+	attrs = []int{1, 2, 3}
+	expected = []string{"1", "2", "3"}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []int32{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []int64{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []uint{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []uint{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []uint32{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []uint64{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []float32{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []float64{1, 2, 3}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []string{"1", "2", "3"}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = [][]byte{[]byte("1"), []byte("2"), []byte("3")}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []bool{true, false}
+	expected = []string{"true", "false"}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+
+	attrs = []time.Duration{time.Second, time.Minute}
+	expected = []string{"1s", "1m0s"}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	tNow := time.Now()
+	attrs = []time.Time{tNow}
+	expected = []string{tNow.Format(time.RFC3339)}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []net.IP{net.ParseIP("127.0.0.1")}
+	expected = []string{"127.0.0.1"}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = []interface{}{true, 10, "two"}
+	expected = []string{"true", "10", "two"}
+	if rply, err := IfaceAsSliceString(attrs); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting: %s ,received: %s", expected, rply)
+	}
+	attrs = "notSlice"
+	expError := fmt.Errorf("cannot convert field: %T to []string", attrs)
+	if _, err := IfaceAsSliceString(attrs); err == nil || err.Error() != expError.Error() {
+		t.Errorf("Expected error %s ,received: %v", expError, err)
+	}
+}
+
+func TestReflectFieldInterfaceBadType(t *testing.T) {
+	_, err := ReflectFieldInterface(22, "22", "22")
+	if err == nil || err.Error() != "Unsupported field kind: int" {
+		t.Errorf("Expected <Unsupported field kind: int> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldInterfaceFieldNotValid(t *testing.T) {
+	var intf = map[string]int{
+		"field1": 22,
+		"field2": 35,
+	}
+	_, err := ReflectFieldInterface(intf, "", "")
+	if err == nil || err.Error() != "NOT_FOUND" {
+		t.Errorf("NOT_FOUND> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldInterfaceStructCase1(t *testing.T) {
+	type vStruct struct {
+		X int
+		Y int
+	}
+	intf := vStruct{22, 35}
+	_, err := ReflectFieldInterface(intf, "x", "")
+	if err == nil || err.Error() != "NOT_FOUND" {
+		t.Errorf("<NOT_FOUND> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldInterfaceStructCase2(t *testing.T) {
+	type v struct {
+		X int
+		Y int
+	}
+	intf := v{22, 35}
+	_, err := ReflectFieldInterface(intf, "x", "y")
+	if err == nil || err.Error() != "NOT_FOUND" {
+		t.Errorf("<NOT_FOUND> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldInterfaceStruct(t *testing.T) {
+	type Test struct {
+		StrField  string
+		StrField2 string
+	}
+	structTest := Test{
+		StrField:  "TestStructField",
+		StrField2: "TestStructField2",
+	}
+	result, _ := ReflectFieldInterface(structTest, "StrField", "StrField2")
+	if !reflect.DeepEqual(result, "TestStructField") {
+		t.Errorf("Expected <TestStructField> ,received: <%+v>", result)
+	}
+}
+
+func TestReflectFieldInterfaceStructError3(t *testing.T) {
+	type Test struct {
+		StrField  string
+		StrField2 string
+		StrField3 map[string]string
+	}
+	structTest := Test{
+		StrField:  "TestStructField",
+		StrField2: "TestStructField2",
+	}
+	_, err := ReflectFieldInterface(structTest, "StrField4", "StrField3")
+	if err != ErrNotFound {
+		t.Errorf("<NOT_FOUND> ,received: <%+v>", err)
+	}
 }
 
 func TestReflectFieldAsStringError(t *testing.T) {
@@ -850,17 +1134,6 @@ func TestIfaceAsTInt64Default(t *testing.T) {
 	}
 }
 
-func TestIfaceAsTIntDefault(t *testing.T) {
-	if _, err := IfaceAsInt(true); err == nil || err.Error() != "cannot convert field<bool>: true to int" {
-		t.Errorf("Expecting <cannot convert field<bool>: true to int> ,received: <%+v>", err)
-	}
-	var test time.Duration = 2147483647
-	response, _ := IfaceAsInt(test)
-	if !reflect.DeepEqual(response, int(test.Nanoseconds())) {
-		t.Errorf("Expected <%+v> ,received: <%+v>", test.Nanoseconds(), response)
-	}
-}
-
 func TestIfaceAsTInt64Nanosecs(t *testing.T) {
 	var test time.Duration = 2147483647
 	response, _ := IfaceAsTInt64(test)
@@ -878,10 +1151,10 @@ func TestIfaceAsBoolInt64(t *testing.T) {
 }
 
 func TestIfaceAsBoolDefault(t *testing.T) {
-	var test struct{}
+	var test uint64 = 2147483647
 	_, err := IfaceAsBool(test)
-	if err == nil || err.Error() != "cannot convert field: {} to bool" {
-		t.Errorf("Expecting <cannot convert field: {} to bool> ,received: <%+v>", err)
+	if err == nil || err.Error() != "cannot convert field: 2147483647 to bool" {
+		t.Errorf("Expecting <cannot convert field: 2147483647 to bool> ,received: <%+v>", err)
 	}
 }
 
@@ -957,6 +1230,51 @@ func TestGetBasicTypeUint(t *testing.T) {
 	}
 }
 
+func TestReflectFieldInterfacePointer(t *testing.T) {
+	type Test struct {
+		StrField  string
+		StrField2 string
+	}
+	structTest := Test{
+		StrField:  "TestStructField",
+		StrField2: "TestStructField2",
+	}
+	result, _ := ReflectFieldInterface(&structTest, "StrField", "StrField2")
+	if !reflect.DeepEqual(result, "TestStructField") {
+		t.Errorf("Expected <TestStructField> ,received: <%+v>", result)
+	}
+}
+
+func TestReflectFieldAsStringErrorCase(t *testing.T) {
+	type Test struct {
+		StrField  string
+		StrField2 string
+		StrField3 map[string]string
+	}
+	structTest := Test{
+		StrField:  "TestStructField",
+		StrField2: "TestStructField2",
+	}
+	_, err := ReflectFieldAsString(structTest, "StrField4", "StrField3")
+	if err != ErrNotFound {
+		t.Errorf("<NOT_FOUND> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldAsStringDefaultError(t *testing.T) {
+	type Test struct {
+		StrField  bool
+		StrField2 bool
+	}
+	structTest := Test{
+		StrField:  true,
+		StrField2: true,
+	}
+	_, err := ReflectFieldAsString(structTest, "StrField", "StrField2")
+	if err == nil || err.Error() != "Cannot convert to string field type: bool" {
+		t.Errorf("Expected <Cannot convert to string field type: bool> ,received: <%+v>", err)
+	}
+}
 func TestGreaterThanUint64(t *testing.T) {
 	var firstUint64 uint64
 	var secondUint64 uint64
@@ -1198,6 +1516,85 @@ func TestReflectDivideFloat64Error(t *testing.T) {
 	}
 }
 
+func TestReflectFieldMethodInterfaceArray(t *testing.T) {
+	obj := []int{2, 3, 5, 7, 11, 13}
+	fldName := "0"
+	result, _ := ReflectFieldMethodInterface(obj, fldName)
+	if !reflect.DeepEqual(result, 2) {
+		t.Errorf("Expected <2> ,received: <%+v>", result)
+	}
+}
+
+func TestReflectFieldMethodInterfaceMap(t *testing.T) {
+	var obj = map[string]string{"field1": "val1", "field2": "val2"}
+	fldName := "field1"
+	result, _ := ReflectFieldMethodInterface(obj, fldName)
+	if !reflect.DeepEqual(result, "val1") {
+		t.Errorf("Expected <val1> ,received: <%+v>", result)
+	}
+
+}
+
+func TestReflectFieldMethodInterfaceArrayError(t *testing.T) {
+	obj := []int{2, 3, 5, 7, 11, 13}
+	fldName := "test"
+	_, err := ReflectFieldMethodInterface(obj, fldName)
+	expected := ErrNotFound.Error()
+	if err == nil || err.Error() != expected {
+		t.Errorf("Expected <%s> ,received: <%+v>", expected, err)
+	}
+}
+
+func TestReflectFieldMethodInterfaceArrayError2(t *testing.T) {
+	obj := []int{2, 3, 5, 7, 11, 13}
+	fldName := "6"
+	_, err := ReflectFieldMethodInterface(obj, fldName)
+	if err == nil || err.Error() != "index out of range" {
+		t.Errorf("Expected <index out of range> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldMethodInterfaceArrayDefault(t *testing.T) {
+	obj := "test"
+	fldName := "test2"
+	_, err := ReflectFieldMethodInterface(obj, fldName)
+	if err == nil || err.Error() != "unsupported field kind: string" {
+		t.Errorf("Expected <unsupported field kind: string> ,received: <%+v>", err)
+	}
+}
+
+func (*TestA) TestFuncWithParamError2() (string, string, string) {
+	return "Invalid", "invalid2", "invalid3"
+}
+
+func TestReflectFieldMethodInterfaceElseError1(t *testing.T) {
+	a := &TestA{StrField: "TestStructField"}
+	_, err := ReflectFieldMethodInterface(a, "TestFuncWithParam")
+	if err == nil || err.Error() != "invalid function called" {
+		t.Errorf("Expected <invalid function called> ,received: <%+v>", err)
+	}
+}
+
+func TestReflectFieldMethodInterfaceElseError2(t *testing.T) {
+	a := &TestA{StrField: "TestStructField"}
+	_, err := ReflectFieldMethodInterface(a, "TestFuncWithParamError2")
+	if err == nil || err.Error() != "invalid function called" {
+		t.Errorf("Expected <invalid function called> ,received: <%+v>", err)
+	}
+}
+
+func (*TestA) TestFuncWithParamError3() (string, string) {
+	return "Invalid", "invalid2"
+}
+
+func TestReflectFieldMethodInterfaceElseError3(t *testing.T) {
+	a := &TestA{StrField: "TestStructField"}
+	_, err := ReflectFieldMethodInterface(a, "TestFuncWithParamError3")
+	if err == nil || err.Error() != "invalid function called" {
+		t.Errorf("Expected <invalid function called> ,received: <%+v>", err)
+	}
+}
+
 func TestSumTimeTimeError(t *testing.T) {
 	day1 := time.Now()
 	day2 := "testValue"
@@ -1246,537 +1643,352 @@ func TestMultiplyInt64Error(t *testing.T) {
 	}
 }
 
-func TestIfaceAsBig(t *testing.T) {
-	timeDur := time.Duration(1)
-	rcv, _ := IfaceAsBig(timeDur)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(1)) {
-		t.Errorf("Expected %v but received %v", 1, rcv)
+func TestIfaceAsBigTimeDuration(t *testing.T) {
+	itm := 5 * time.Second
+	exp := decimal.New(int64(itm), 0)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testInt := 2
-	rcv, _ = IfaceAsBig(testInt)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(2)) {
-		t.Errorf("Expected %v but received %v", 2, rcv)
+func TestIfaceAsBigInt(t *testing.T) {
+	itm := 20
+	exp := decimal.New(int64(itm), 0)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testInt8 := int8(3)
-	rcv, _ = IfaceAsBig(testInt8)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(3)) {
-		t.Errorf("Expected %v but received %v", 3, rcv)
+func TestIfaceAsBigInt8(t *testing.T) {
+	itm := int8(20)
+	exp := decimal.New(int64(itm), 0)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testInt16 := int16(4)
-	rcv, _ = IfaceAsBig(testInt16)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(4)) {
-		t.Errorf("Expected %v but received %v", 4, rcv)
+func TestIfaceAsBigInt16(t *testing.T) {
+	itm := int16(4363)
+	exp := decimal.New(int64(itm), 0)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testInt32 := int32(5)
-	rcv, _ = IfaceAsBig(testInt32)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(5)) {
-		t.Errorf("Expected %v but received %v", 5, rcv)
+func TestIfaceAsBigInt32(t *testing.T) {
+	itm := int32(4363)
+	exp := decimal.New(int64(itm), 0)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testInt64 := int64(6)
-	rcv, _ = IfaceAsBig(testInt64)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(6)) {
-		t.Errorf("Expected %v but received %v", 6, rcv)
+func TestIfaceAsBigInt64(t *testing.T) {
+	itm := int64(4363)
+	exp := decimal.New(int64(itm), 0)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	uTestInt := uint(2)
-	rcv, _ = IfaceAsBig(uTestInt)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(2)) {
-		t.Errorf("Expected %v but received %v", 2, rcv)
+func TestIfaceAsBigUint(t *testing.T) {
+	itm := uint(20)
+	exp := new(decimal.Big).SetUint64(uint64(itm))
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	uTestInt8 := uint8(3)
-	rcv, _ = IfaceAsBig(uTestInt8)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(3)) {
-		t.Errorf("Expected %v but received %v", 3, rcv)
+func TestIfaceAsBigUint8(t *testing.T) {
+	itm := uint8(20)
+	exp := new(decimal.Big).SetUint64(uint64(itm))
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	uTestInt16 := uint16(4)
-	rcv, _ = IfaceAsBig(uTestInt16)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(4)) {
-		t.Errorf("Expected %v but received %v", 4, rcv)
+func TestIfaceAsBigUint16(t *testing.T) {
+	itm := uint16(4363)
+	exp := new(decimal.Big).SetUint64(uint64(itm))
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	uTestInt32 := uint32(5)
-	rcv, _ = IfaceAsBig(uTestInt32)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(5)) {
-		t.Errorf("Expected %v but received %v", 5, rcv)
+func TestIfaceAsBigUint32(t *testing.T) {
+	itm := uint32(4363)
+	exp := new(decimal.Big).SetUint64(uint64(itm))
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	uTestInt64 := uint64(6)
-	rcv, _ = IfaceAsBig(uTestInt64)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(6)) {
-		t.Errorf("Expected %v but received %v", 6, rcv)
+func TestIfaceAsBigUint64(t *testing.T) {
+	itm := uint64(4363)
+	exp := new(decimal.Big).SetUint64(uint64(itm))
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testFloat64 := float64(12.2)
-	rcv, _ = IfaceAsBig(testFloat64)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetFloat64(12.2)) {
-		t.Errorf("Expected %v but received %v", 12.2, rcv)
+func TestIfaceAsBigFloat32(t *testing.T) {
+	itm := float32(42.2)
+	exp := new(decimal.Big).SetFloat64(float64(itm))
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	testFloat32 := float32(12)
-	rcv, _ = IfaceAsBig(testFloat32)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetFloat64(float64(12))) {
-		t.Errorf("Expected %v but received %v", decimal.WithContext(DecimalContext).SetFloat64(float64(12)), rcv)
+func TestIfaceAsBigFloat64(t *testing.T) {
+	itm := float64(42.2)
+	exp := new(decimal.Big).SetFloat64(itm)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
 	}
+}
 
-	timeSuffix := "not_valid_timems"
-	_, err := IfaceAsBig(timeSuffix)
-	errExpect := `time: invalid duration "not_valid_timems"`
+func TestIfaceAsBigString(t *testing.T) {
+	itm := "32ns"
+	exp := new(decimal.Big).SetUint64(32)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("Expected %v but received %v", exp, rcv)
+	}
+}
+
+func TestIfaceAsBigStringConvert(t *testing.T) {
+	itm := "1.234"
+	exp, _ := new(decimal.Big).SetString(itm)
+	rcv, err := IfaceAsBig(itm)
+	if err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, rcv) {
+		fmt.Printf("%T and %T", exp, rcv)
+		t.Errorf("Expected %v but received %v", exp, rcv)
+	}
+}
+
+func TestIfaceAsBigStringErr1(t *testing.T) {
+	itm := "32ps"
+	_, err := IfaceAsBig(itm)
+	errExpect := `time: unknown unit "ps" in duration "32ps"`
 	if err == nil || err.Error() != errExpect {
 		t.Errorf("Expected %v but received %v", errExpect, err)
 	}
+}
 
-	num := "123"
-	rcv, err = IfaceAsBig(num)
-	if err != nil {
+func TestIfaceAsBigStringErr2(t *testing.T) {
+	itm := "can't convert"
+	_, err := IfaceAsBig(itm)
+	errExpect := "can't convert <can't convert> to decimal"
+	if err == nil || err.Error() != errExpect {
+		t.Errorf("Expected %v but received %v", errExpect, err)
+	}
+}
+func TestIfaceAsBigDefault(t *testing.T) {
+	itm := []string{"defaultCase"}
+	_, err := IfaceAsBig(itm)
+	errExpect := "cannot convert field: [defaultCase] to time.Duration"
+	if err == nil || err.Error() != errExpect {
+		t.Errorf("Expected %v but received %v", errExpect, err)
+	}
+}
+
+func TestIfaceAsTFloat64(t *testing.T) {
+	eFloat := 6.0
+	val := interface{}(6.0)
+	if itmConvert, err := IfaceAsTFloat64(val); err != nil {
 		t.Error(err)
+	} else if itmConvert != eFloat {
+		t.Errorf("received: %+v", itmConvert)
 	}
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(123)) {
-		t.Errorf("Expected %v but received %v", decimal.WithContext(DecimalContext).SetUint64(123), rcv)
-	}
-
-	decBig := decimal.WithContext(DecimalContext).SetUint64(21)
-	rcv, _ = IfaceAsBig(decBig)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(21)) {
-		t.Errorf("Expected %v but received %v", decimal.WithContext(DecimalContext).SetUint64(21), rcv)
-	}
-
-	dec := NewDecimal(10, 0)
-	rcv, _ = IfaceAsBig(dec)
-	if !reflect.DeepEqual(rcv, decimal.WithContext(DecimalContext).SetUint64(10)) {
-		t.Errorf("Expected %v but received %v", decimal.WithContext(DecimalContext).SetUint64(10), rcv)
-	}
-
-	def := []string{"test"}
-	_, err = IfaceAsBig(def)
-	if err == nil || err.Error() != "cannot convert field: []string to decimal.Big" {
+	val = interface{}(6)
+	if itmConvert, err := IfaceAsTFloat64(val); err != nil {
 		t.Error(err)
+	} else if itmConvert != eFloat {
+		t.Errorf("received: %+v", itmConvert)
 	}
-
-}
-
-func TestReflectFieldMethodInterfaceStruct(t *testing.T) {
-	//Make obj a struct
-	type Obj struct {
-		Field1 string
-		Field2 string
-	}
-
-	obj := Obj{
-		Field1: "field1_string",
-	}
-
-	rcv, err := ReflectFieldMethodInterface(obj, "Field1")
-	if err != nil {
+	val = interface{}("6")
+	if itmConvert, err := IfaceAsTFloat64(val); err != nil {
 		t.Error(err)
+	} else if itmConvert != eFloat {
+		t.Errorf("received: %+v", itmConvert)
 	}
-	if rcv != "field1_string" {
-		t.Errorf("Expected %v but received %v", "field_string1", rcv)
-	}
-}
-
-func TestReflectFieldMethodInterfaceMap(t *testing.T) {
-	//Make obj a map[string]string
-	type Obj map[string]string
-
-	obj := &Obj{
-		"MapField1": "map_field_1",
-	}
-
-	rcv, err := ReflectFieldMethodInterface(obj, "MapField1")
-	if err != nil {
+	val = interface{}(int64(6))
+	if itmConvert, err := IfaceAsTFloat64(val); err != nil {
 		t.Error(err)
+	} else if itmConvert != eFloat {
+		t.Errorf("received: %+v", itmConvert)
 	}
-	if rcv != "map_field_1" {
-		t.Errorf("Expected %v but received %v", "map_field_1", rcv)
+	val = interface{}("This is not a float")
+	if _, err := IfaceAsTFloat64(val); err == nil {
+		t.Error("expecting error")
 	}
-}
-
-func TestReflectFieldMethodInterfaceSlice(t *testing.T) {
-	obj := []string{"sliceField1"}
-	rcv, err := ReflectFieldMethodInterface(obj, "0")
-	if err != nil {
+	val = interface{}(time.Duration(6))
+	if itmConvert, err := IfaceAsTFloat64(val); err != nil {
 		t.Error(err)
+	} else if itmConvert != eFloat {
+		t.Errorf("received: %+v", itmConvert)
 	}
-	if rcv != "sliceField1" {
-		t.Errorf("Expected %v but received %v", "sliceField1", rcv)
-	}
-
-	_, err = ReflectFieldMethodInterface(obj, "invalid_index")
-	if err == nil || err.Error() != `strconv.Atoi: parsing "invalid_index": invalid syntax` {
-		t.Errorf("Expected %v but received %v", `strconv.Atoi: parsing "invalid_index": invalid syntax`, err)
-	}
-
-	_, err = ReflectFieldMethodInterface(obj, "2")
-	if err == nil || err.Error() != "index out of range" {
-		t.Errorf("Expected %v but received %v", "index out of range", err)
-	}
-}
-
-func TestReflectFieldMethodInterfaceDefault(t *testing.T) {
-	invalidKind := 2
-	_, err := ReflectFieldMethodInterface(invalidKind, "2")
-	if err == nil || err.Error() != "unsupported field kind: int" {
-		t.Errorf("Expected %v but received %v", "unsupported field kind: int", err)
-	}
-}
-
-func TestReflectFieldMethodInterfaceInvalidField(t *testing.T) {
-	type Obj map[string][]string
-
-	obj := &Obj{
-		"MapField1": []string{""},
-	}
-	_, err := ReflectFieldMethodInterface(obj, "NotExistingField")
-	if err == nil || err != ErrNotFound {
-		t.Errorf("Expected %v but received %v", ErrNotFound, err)
-	}
-}
-
-type Object struct{}
-
-func (obj *Object) TestFunc1() string {
-	return "test"
-}
-
-func (obj *Object) TestFunc2() (string, string, error) {
-	return "test1", "test2", nil
-}
-
-func (obj *Object) TestFunc3(str string) {}
-
-func (obj *Object) TestFunc4() (string, error) {
-	return "test1", nil
-}
-
-func (obj *Object) TestFunc5() (error, string) {
-	return nil, "test1"
-}
-func (obj *Object) TestFunc6() (string, error) {
-	return "test1", ErrNotFound
-}
-
-func TestReflectFieldMethodInterfaceInvalidFieldMethod1(t *testing.T) {
-	myObj := new(Object)
-	rcv, err := ReflectFieldMethodInterface(myObj, "TestFunc1")
-	if err != nil {
+	eFloat = 6000000.
+	val = interface{}("6ms")
+	if itmConvert, err := IfaceAsTFloat64(val); err != nil {
 		t.Error(err)
+	} else if itmConvert != eFloat {
+		t.Errorf("received: %+v", itmConvert)
 	}
-	exp := "test"
-	if rcv != exp {
-		t.Errorf("Expected %v but received %v", exp, rcv)
+	val = interface{}("6sss")
+	experr := `time: unknown unit "sss" in duration "6sss"`
+	if _, err := IfaceAsTFloat64(val); err == nil || err.Error() != experr {
+		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
 	}
-}
-
-func TestReflectFieldMethodInterfaceInvalidFieldMethod2(t *testing.T) {
-	myObj := new(Object)
-	_, err := ReflectFieldMethodInterface(myObj, "TestFunc2")
-	exp := "invalid function called"
-	if err == nil || err.Error() != exp {
-		t.Errorf("Expected %v but received %v", exp, err)
-	}
-
-}
-
-func TestReflectFieldMethodInterfaceInvalidFieldMethod3(t *testing.T) {
-	myObj := new(Object)
-	_, err := ReflectFieldMethodInterface(myObj, "TestFunc3")
-	exp := "invalid function called"
-	if err == nil || err.Error() != exp {
-		t.Errorf("Expected %v but received %v", exp, err)
-	}
-}
-
-func TestReflectFieldMethodInterfaceInvalidFieldMethod4(t *testing.T) {
-	myObj := new(Object)
-	rcv, err := ReflectFieldMethodInterface(myObj, "TestFunc4")
-	if err != nil {
-		t.Error(err)
-	}
-	exp := "test1"
-	if rcv != exp {
-		t.Errorf("Expected %v but received %v", exp, rcv)
-	}
-}
-
-func TestReflectFieldMethodInterfaceInvalidFieldMethod5(t *testing.T) {
-	myObj := new(Object)
-	_, err := ReflectFieldMethodInterface(myObj, "TestFunc5")
-	exp := "invalid function called"
-	if err == nil || err.Error() != exp {
-		t.Errorf("Expected %v but received %v", exp, err)
-	}
-}
-
-func TestReflectFieldMethodInterfaceInvalidFieldMethod6(t *testing.T) {
-	myObj := new(Object)
-	_, err := ReflectFieldMethodInterface(myObj, "TestFunc6")
-	exp := ErrNotFound
-	if err == nil || err != exp {
-		t.Errorf("Expected %v but received %v", exp, err)
-	}
-}
-
-func TestIfaceAsStringSliceString(t *testing.T) {
-	//case of []string
-	fld := []string{"string_ex"}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"string_ex"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceInt(t *testing.T) {
-	//case of []int
-	fld := []int{1, 2, 3}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1", "2", "3"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceInt32(t *testing.T) {
-	//case of []int32
-	fld := []int32{1, 2, 3}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1", "2", "3"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceInt64(t *testing.T) {
-	//case of []int64
-	fld := []int64{1, 2, 3}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1", "2", "3"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceUInt32(t *testing.T) {
-	//case of []uint32
-	fld := []uint32{1, 2, 3}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1", "2", "3"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceUInt64(t *testing.T) {
-	//case of []uint64
-	fld := []uint64{1, 2, 3}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1", "2", "3"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceBool(t *testing.T) {
-	//case of []bool
-	fld := []bool{true, false, false}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"true", "false", "false"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceFloat32(t *testing.T) {
-	//case of []float32
-	fld := []float32{1.2, 2.8, 3.1}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1.2000000476837158", "2.799999952316284", "3.0999999046325684"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceFloat64(t *testing.T) {
-	//case of []float64
-	fld := []float64{1.2, 2.8, 3.1}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1.2", "2.8", "3.1"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceInterface(t *testing.T) {
-	//case of []interface
-	fld := []interface{}{1.2, "string", false}
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"1.2", "string", "false"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceStringNonSlice(t *testing.T) {
-	//case of string
-	fld := "very;long;string"
-	rcv, err := IfaceAsStringSlice(fld)
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"very", "long", "string"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-}
-
-func TestIfaceAsStringSliceDefault(t *testing.T) {
-	//case of default
-	fld := time.Second * 2
-	exp := "cannot convert field: 2s to []string"
-	_, err := IfaceAsStringSlice(fld)
-	if err.Error() != exp {
-		t.Errorf("Expected error")
-	}
-}
-
-func TestOptAsBool(t *testing.T) {
-	opts := map[string]interface{}{
-		"field1": 2,
-	}
-	rcv := OptAsBool(opts, "field1")
-	if !rcv {
-		t.Error("Output should've been true")
-	}
-
-	rcv = OptAsBool(opts, "field2")
-	if rcv {
-		t.Error("Output should've been false")
-	}
-}
-
-func TestOptAsBoolOrDef(t *testing.T) {
-	opts := map[string]interface{}{
-		"field1": 2,
-	}
-	rcv := OptAsBoolOrDef(opts, "field1", false)
-	if !rcv {
-		t.Error("Output should've been true")
-	}
-
-	rcv = OptAsBoolOrDef(opts, "field2", false)
-	if rcv {
-		t.Error("Output should've been false")
-	}
-}
-
-func TestOptAsStringSlice(t *testing.T) {
-	opts := map[string]interface{}{
-		"field1": []string{"val1", "val2"},
-	}
-	rcv, err := OptAsStringSlice(opts, "field1")
-	if err != nil {
-		t.Error(err)
-	}
-	exp := []string{"val1", "val2"}
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
-	}
-
-	_, err = OptAsStringSlice(opts, "field2")
-	if err != nil {
-		t.Error(err)
-	}
-
-	opts["field1"] = time.Second * 2
-	_, err = OptAsStringSlice(opts, "field1")
-	errExp := "error for option <field1>: cannot convert field: 2s to []string"
-	if err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err)
-	}
-}
-
-func TestStringAsBig(t *testing.T) {
-	itm := "2ns"
-	v, err := StringAsBig(itm)
-	if err != nil {
-		t.Error(err)
-	}
-	if exp := decimal.New(2, 0); exp.Cmp(v) != 0 {
-		t.Errorf("Expected %v \n but received \n %v", exp, v)
-	}
-	itm = ""
-	if v, err := StringAsBig(itm); err != nil {
-		t.Error(err)
-	} else if exp := decimal.New(0, 0); exp.Cmp(v) != 0 {
-		t.Errorf("Expected %v \n but received \n %v", exp, v)
-	}
-
-	itm = "2"
-	if v, err := StringAsBig(itm); err != nil {
-		t.Error(err)
-	} else if exp := decimal.New(2, 0); exp.Cmp(v) != 0 {
-		t.Errorf("Expected %v \n but received \n %v", exp, v)
+	val = false
+	experr = `cannot convert field: false to float64`
+	if _, err := IfaceAsTFloat64(val); err == nil || err.Error() != experr {
+		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
 	}
 }
 
 func TestIfaceAsTInt(t *testing.T) {
+	eInt := 3
 
-	var testInt32 int32 = 132
-	var testInt64 int64 = 164
-	var testFloat32 float32 = 15.32
-	var expInt32 int32 = 132
-	var expInt64 int64 = 164
-	var expFloat32 float32 = 15.32
-	if rcv, err := IfaceAsInt(testInt32); err != nil {
+	val := interface{}(3)
+
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+
 		t.Error(err)
-	} else if rcv != int(expInt32) {
-		t.Errorf("Expected <%+v>, received <%+v>", expInt32, rcv)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v", intConvert)
 	}
-	if rcv, err := IfaceAsInt(testInt64); err != nil {
+	val = interface{}(time.Duration(3))
+
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+
 		t.Error(err)
-	} else if rcv != int(expInt64) {
-		t.Errorf("Expected <%+v>, received <%+v>", expInt32, rcv)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v ", intConvert)
 	}
-	if rcv, err := IfaceAsInt(testFloat32); err != nil {
+	val = interface{}(int32(3))
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+
 		t.Error(err)
-	} else if rcv != int(expFloat32) {
-		t.Errorf("Expected <%+v>, received <%+v>", expInt32, rcv)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v ", intConvert)
 	}
+	val = interface{}(int64(3))
+
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+		t.Error(err)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v", intConvert)
+	}
+
+	val = interface{}(3.122)
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+		t.Error(err)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v", intConvert)
+	}
+	val = interface{}(float32(3.11))
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+		t.Error(err)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v", intConvert)
+	}
+	val = interface{}("3")
+	if intConvert, err := IfaceAsTInt(val); err != nil {
+
+		t.Error(err)
+	} else if intConvert != eInt {
+		t.Errorf("received %+v", intConvert)
+	}
+	val = interface{}(nil)
+	if _, err := IfaceAsTInt(val); err == nil {
+
+		t.Error("expecting error")
+	}
+}
+
+func TestIfaceStringInterface(t *testing.T) {
+
+	s := ""
+
+	if strItem := StringToInterface(s); strItem != s {
+		t.Error("Return empty")
+	}
+	s = "3"
+
+	if _, ok := StringToInterface(s).(int64); !ok {
+
+		t.Errorf("received type %T", s)
+	}
+	s = "false"
+
+	if _, ok := StringToInterface(s).(bool); !ok {
+
+		t.Errorf("received type  %T ", s)
+	}
+	s = "4.566"
+
+	if _, ok := StringToInterface(s).(float64); !ok {
+
+		t.Errorf("received type %T", s)
+	}
+	s = "*daily"
+
+	if _, ok := StringToInterface(s).(time.Time); !ok {
+		t.Errorf("received %T", s)
+	}
+	s = "3s"
+	if _, ok := StringToInterface(s).(time.Duration); !ok {
+		t.Errorf("received type %T", s)
+	}
+	s = "A string"
+
+	if _, ok := StringToInterface(s).(string); !ok {
+		t.Error("Should return string")
+
+	}
+
 }

@@ -28,10 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -52,12 +51,12 @@ var sTestsResIT = []func(t *testing.T){
 func TestResourceITMove1(t *testing.T) {
 	var err error
 	resPathIn = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	resCfgIn, err = config.NewCGRConfigFromPath(context.Background(), resPathIn)
+	resCfgIn, err = config.NewCGRConfigFromPath(resPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resPathOut = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	resCfgOut, err = config.NewCGRConfigFromPath(context.Background(), resPathOut)
+	resCfgOut, err = config.NewCGRConfigFromPath(resPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,12 +70,12 @@ func TestResourceITMove1(t *testing.T) {
 func TestResourceITMove2(t *testing.T) {
 	var err error
 	resPathIn = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	resCfgIn, err = config.NewCGRConfigFromPath(context.Background(), resPathIn)
+	resCfgIn, err = config.NewCGRConfigFromPath(resPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resPathOut = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	resCfgOut, err = config.NewCGRConfigFromPath(context.Background(), resPathOut)
+	resCfgOut, err = config.NewCGRConfigFromPath(resPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,12 +89,12 @@ func TestResourceITMove2(t *testing.T) {
 func TestResourceITMoveEncoding(t *testing.T) {
 	var err error
 	resPathIn = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	resCfgIn, err = config.NewCGRConfigFromPath(context.Background(), resPathIn)
+	resCfgIn, err = config.NewCGRConfigFromPath(resPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resPathOut = path.Join(*dataDir, "conf", "samples", "tutmongojson")
-	resCfgOut, err = config.NewCGRConfigFromPath(context.Background(), resPathOut)
+	resCfgOut, err = config.NewCGRConfigFromPath(resPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,12 +108,12 @@ func TestResourceITMoveEncoding(t *testing.T) {
 func TestResourceITMoveEncoding2(t *testing.T) {
 	var err error
 	resPathIn = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	resCfgIn, err = config.NewCGRConfigFromPath(context.Background(), resPathIn)
+	resCfgIn, err = config.NewCGRConfigFromPath(resPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resPathOut = path.Join(*dataDir, "conf", "samples", "tutmysqljson")
-	resCfgOut, err = config.NewCGRConfigFromPath(context.Background(), resPathOut)
+	resCfgOut, err = config.NewCGRConfigFromPath(resPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +129,7 @@ func testResITConnect(t *testing.T) {
 		resCfgIn.DataDbCfg().Host, resCfgIn.DataDbCfg().Port,
 		resCfgIn.DataDbCfg().Name, resCfgIn.DataDbCfg().User,
 		resCfgIn.DataDbCfg().Password, resCfgIn.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), resCfgIn.DataDbCfg().Opts, resCfgIn.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), resCfgIn.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -138,16 +137,16 @@ func testResITConnect(t *testing.T) {
 		resCfgOut.DataDbCfg().Host, resCfgOut.DataDbCfg().Port,
 		resCfgOut.DataDbCfg().Name, resCfgOut.DataDbCfg().User,
 		resCfgOut.DataDbCfg().Password, resCfgOut.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), resCfgOut.DataDbCfg().Opts, resCfgOut.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), resCfgOut.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if reflect.DeepEqual(resPathIn, resPathOut) {
-		resMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, true)
+		resMigrator, err = NewMigrator(dataDBIn, dataDBOut, nil, nil,
+			false, true, false, false)
 	} else {
-		resMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, false)
+		resMigrator, err = NewMigrator(dataDBIn, dataDBOut, nil, nil,
+			false, false, false, false)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -181,21 +180,18 @@ func testResITFlush(t *testing.T) {
 
 func testResITMigrateAndMove(t *testing.T) {
 	resPrfl := &engine.ResourceProfile{
-		Tenant:    "cgrates.org",
-		ID:        "RES1",
-		FilterIDs: []string{"*string:~*req.Account:1001"},
-		UsageTTL:  time.Second,
-		Limit:     1,
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 10,
-			}},
+		Tenant:       "cgrates.org",
+		ID:           "RES1",
+		FilterIDs:    []string{"*string:~*opts.Account:1001"},
+		UsageTTL:     time.Second,
+		Limit:        1,
+		Weight:       10,
 		ThresholdIDs: []string{"TH1"},
 	}
 	switch resAction {
 	case utils.Migrate: // for the momment only one version of rating plans exists
 	case utils.Move:
-		if err := resMigrator.dmIN.DataManager().SetResourceProfile(context.TODO(), resPrfl, true); err != nil {
+		if err := resMigrator.dmIN.DataManager().SetResourceProfile(resPrfl, true); err != nil {
 			t.Error(err)
 		}
 		currentVersion := engine.CurrentDataDBVersions()
@@ -204,7 +200,7 @@ func testResITMigrateAndMove(t *testing.T) {
 			t.Error("Error when setting version for Resource ", err.Error())
 		}
 
-		_, err = resMigrator.dmOut.DataManager().GetResourceProfile(context.TODO(), "cgrates.org", "RES1", false, false, utils.NonTransactional)
+		_, err = resMigrator.dmOut.DataManager().GetResourceProfile("cgrates.org", "RES1", false, false, utils.NonTransactional)
 		if err != utils.ErrNotFound {
 			t.Error(err)
 		}
@@ -213,14 +209,14 @@ func testResITMigrateAndMove(t *testing.T) {
 		if err != nil {
 			t.Error("Error when migrating Resource ", err.Error())
 		}
-		result, err := resMigrator.dmOut.DataManager().GetResourceProfile(context.TODO(), "cgrates.org", "RES1", false, false, utils.NonTransactional)
+		result, err := resMigrator.dmOut.DataManager().GetResourceProfile("cgrates.org", "RES1", false, false, utils.NonTransactional)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(result, resPrfl) {
 			t.Errorf("Expecting: %+v, received: %+v", resPrfl, result)
 		}
-		result, err = resMigrator.dmIN.DataManager().GetResourceProfile(context.TODO(), "cgrates.org", "RES1", false, false, utils.NonTransactional)
+		result, err = resMigrator.dmIN.DataManager().GetResourceProfile("cgrates.org", "RES1", false, false, utils.NonTransactional)
 		if err != utils.ErrNotFound {
 			t.Error(err)
 		} else if resMigrator.stats[utils.Resource] != 1 {

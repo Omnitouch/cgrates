@@ -23,33 +23,30 @@ import (
 
 	"github.com/nyaruka/phonenumbers"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
-func newDynamicDP(ctx *context.Context, resConns, stsConns, actsConns []string,
+func newDynamicDP(resConns, stsConns, apiConns []string,
 	tenant string, initialDP utils.DataProvider) *dynamicDP {
 	return &dynamicDP{
 		resConns:  resConns,
 		stsConns:  stsConns,
-		actsConns: actsConns,
+		apiConns:  apiConns,
 		tenant:    tenant,
 		initialDP: initialDP,
 		cache:     utils.MapStorage{},
-		ctx:       ctx,
 	}
 }
 
 type dynamicDP struct {
 	resConns  []string
 	stsConns  []string
-	actsConns []string
+	apiConns  []string
 	tenant    string
 	initialDP utils.DataProvider
 
 	cache utils.MapStorage
-	ctx   *context.Context
 }
 
 func (dDP *dynamicDP) String() string { return dDP.initialDP.String() }
@@ -67,7 +64,7 @@ var initialDPPrefixes = utils.NewStringSet([]string{
 	utils.MetaCgrep, utils.MetaRep, utils.MetaAct,
 	utils.MetaEC, utils.MetaUCH, utils.MetaOpts,
 	utils.MetaHdr, utils.MetaTrl, utils.MetaCfg,
-	utils.MetaTenant, utils.MetaTmp})
+	utils.MetaTenant})
 
 func (dDP *dynamicDP) FieldAsInterface(fldPath []string) (val interface{}, err error) {
 	if len(fldPath) == 0 {
@@ -76,7 +73,6 @@ func (dDP *dynamicDP) FieldAsInterface(fldPath []string) (val interface{}, err e
 	if initialDPPrefixes.Has(fldPath[0]) {
 		return dDP.initialDP.FieldAsInterface(fldPath)
 	}
-
 	val, err = dDP.cache.FieldAsInterface(fldPath)
 	if err == utils.ErrNotFound { // in case not found in cache try to populate it
 		return dDP.fieldAsInterface(fldPath)
@@ -90,23 +86,22 @@ func (dDP *dynamicDP) fieldAsInterface(fldPath []string) (val interface{}, err e
 	}
 	switch fldPath[0] {
 	case utils.MetaAccounts:
-		// sample of fieldName : ~*accounts.1001.Balances[Concrete1].Units
+		// sample of fieldName : ~*accounts.1001.BalanceMap.*monetary[0].Value
 		// split the field name in 3 parts
-		// fieldNameType (~*accounts), accountID(1001) and queried part (Balances.Balances[Concrete1].Units)
+		// fieldNameType (~*accounts), accountID(1001) and queried part (BalanceMap.*monetary[0].Value)
 
-		var account utils.Account
-		if err = connMgr.Call(dDP.ctx, dDP.actsConns, utils.AccountSv1GetAccount,
-			&utils.TenantIDWithAPIOpts{TenantID: &utils.TenantID{Tenant: dDP.tenant, ID: fldPath[1]}}, &account); err != nil {
+		var account Account
+		if err = connMgr.Call(dDP.apiConns, nil, utils.APIerSv2GetAccount,
+			&utils.AttrGetAccount{Tenant: dDP.tenant, Account: fldPath[1]}, &account); err != nil {
 			return
 		}
 		//construct dataProvider from account and set it further
-		dp := config.NewObjectDP(account)
-		dDP.cache.Set(fldPath[:2], dp)
-		return dp.FieldAsInterface(fldPath[2:])
+		dDP.cache.Set(fldPath[:2], account)
+		return account.FieldAsInterface(fldPath[2:])
 	case utils.MetaResources:
 		// sample of fieldName : ~*resources.ResourceID.Field
 		var reply ResourceWithConfig
-		if err := connMgr.Call(dDP.ctx, dDP.resConns, utils.ResourceSv1GetResourceWithConfig,
+		if err := connMgr.Call(dDP.resConns, nil, utils.ResourceSv1GetResourceWithConfig,
 			&utils.TenantIDWithAPIOpts{TenantID: &utils.TenantID{Tenant: dDP.tenant, ID: fldPath[1]}}, &reply); err != nil {
 			return nil, err
 		}
@@ -115,8 +110,9 @@ func (dDP *dynamicDP) fieldAsInterface(fldPath []string) (val interface{}, err e
 		return dp.FieldAsInterface(fldPath[2:])
 	case utils.MetaStats:
 		// sample of fieldName : ~*stats.StatID.*acd
-		var statValues map[string]*utils.Decimal
-		if err := connMgr.Call(dDP.ctx, dDP.stsConns, utils.StatSv1GetQueueDecimalMetrics,
+		var statValues map[string]float64
+
+		if err := connMgr.Call(dDP.stsConns, nil, utils.StatSv1GetQueueFloatMetrics,
 			&utils.TenantIDWithAPIOpts{TenantID: &utils.TenantID{Tenant: dDP.tenant, ID: fldPath[1]}},
 			&statValues); err != nil {
 			return nil, err
@@ -134,6 +130,18 @@ func (dDP *dynamicDP) fieldAsInterface(fldPath []string) (val interface{}, err e
 		}
 		dDP.cache.Set(fldPath[:2], dp)
 		return dp.FieldAsInterface(fldPath[2:])
+	case utils.MetaAsm:
+		// sample of fieldName ~*asm.BalanceSummaries.HolidayBalance.Value
+		stringReq, err := dDP.initialDP.FieldAsString([]string{utils.MetaReq})
+		if err != nil {
+			return nil, err
+		}
+		acntSummary, err := NewAccountSummaryFromJSON(stringReq)
+		if err != nil {
+			return nil, err
+		}
+		dDP.cache.Set(fldPath[:1], acntSummary)
+		return acntSummary.FieldAsInterface(fldPath[1:])
 	default: // in case of constant we give an empty DataProvider ( empty navigable map )
 	}
 	return nil, utils.ErrNotFound

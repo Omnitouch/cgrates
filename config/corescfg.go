@@ -21,8 +21,7 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // CoreSCfg the config for the coreS
@@ -30,17 +29,7 @@ type CoreSCfg struct {
 	Caps              int
 	CapsStrategy      string
 	CapsStatsInterval time.Duration
-	EEsConns          []string
 	ShutdownTimeout   time.Duration
-}
-
-// loadCoreSCfg loads the CoreS section of the configuration
-func (cS *CoreSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnCoreCfg := new(CoreSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, CoreSJSON, jsnCoreCfg); err != nil {
-		return
-	}
-	return cS.loadFromJSONCfg(jsnCoreCfg)
 }
 
 func (cS *CoreSCfg) loadFromJSONCfg(jsnCfg *CoreSJsonCfg) (err error) {
@@ -58,9 +47,6 @@ func (cS *CoreSCfg) loadFromJSONCfg(jsnCfg *CoreSJsonCfg) (err error) {
 			return
 		}
 	}
-	if jsnCfg.Ees_conns != nil {
-		cS.EEsConns = updateInternalConns(*jsnCfg.Ees_conns, utils.MetaEEs)
-	}
 	if jsnCfg.Shutdown_timeout != nil {
 		if cS.ShutdownTimeout, err = utils.ParseDurationWithNanosecs(*jsnCfg.Shutdown_timeout); err != nil {
 			return
@@ -70,7 +56,7 @@ func (cS *CoreSCfg) loadFromJSONCfg(jsnCfg *CoreSJsonCfg) (err error) {
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (cS CoreSCfg) AsMapInterface(string) interface{} {
+func (cS *CoreSCfg) AsMapInterface() map[string]interface{} {
 	mp := map[string]interface{}{
 		utils.CapsCfg:              cS.Caps,
 		utils.CapsStrategyCfg:      cS.CapsStrategy,
@@ -80,59 +66,18 @@ func (cS CoreSCfg) AsMapInterface(string) interface{} {
 	if cS.CapsStatsInterval == 0 {
 		mp[utils.CapsStatsIntervalCfg] = "0"
 	}
-	if cS.EEsConns != nil {
-		mp[utils.EEsConnsCfg] = getInternalJSONConns(cS.EEsConns)
-	}
 	if cS.ShutdownTimeout == 0 {
 		mp[utils.ShutdownTimeoutCfg] = "0"
 	}
 	return mp
 }
 
-func (CoreSCfg) SName() string            { return CoreSJSON }
-func (cS CoreSCfg) CloneSection() Section { return cS.Clone() }
-
 // Clone returns a deep copy of CoreSCfg
-func (cS CoreSCfg) Clone() (cln *CoreSCfg) {
-	cln = &CoreSCfg{
+func (cS CoreSCfg) Clone() *CoreSCfg {
+	return &CoreSCfg{
 		Caps:              cS.Caps,
 		CapsStrategy:      cS.CapsStrategy,
 		CapsStatsInterval: cS.CapsStatsInterval,
 		ShutdownTimeout:   cS.ShutdownTimeout,
 	}
-	if cS.EEsConns != nil {
-		cln.EEsConns = utils.CloneStringSlice(cS.EEsConns)
-	}
-
-	return
-}
-
-type CoreSJsonCfg struct {
-	Caps                *int
-	Caps_strategy       *string
-	Caps_stats_interval *string
-	Ees_conns           *[]string
-	Shutdown_timeout    *string
-}
-
-func diffCoreSJsonCfg(d *CoreSJsonCfg, v1, v2 *CoreSCfg) *CoreSJsonCfg {
-	if d == nil {
-		d = new(CoreSJsonCfg)
-	}
-	if v1.Caps != v2.Caps {
-		d.Caps = utils.IntPointer(v2.Caps)
-	}
-	if v1.CapsStrategy != v2.CapsStrategy {
-		d.Caps_strategy = utils.StringPointer(v2.CapsStrategy)
-	}
-	if v1.CapsStatsInterval != v2.CapsStatsInterval {
-		d.Caps_stats_interval = utils.StringPointer(v2.CapsStatsInterval.String())
-	}
-	if !utils.SliceStringEqual(v1.EEsConns, v2.EEsConns) {
-		d.Ees_conns = utils.SliceStringPointer(getInternalJSONConns(v2.EEsConns))
-	}
-	if v1.ShutdownTimeout != v2.ShutdownTimeout {
-		d.Shutdown_timeout = utils.StringPointer(v2.ShutdownTimeout.String())
-	}
-	return d
 }

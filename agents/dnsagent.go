@@ -23,10 +23,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/miekg/dns"
 )
 
@@ -128,7 +127,6 @@ func (da *DNSAgent) handleQuestion(dnsDP utils.DataProvider, rply *dns.Msg, q *d
 	for _, reqProcessor := range da.cgrCfg.DNSAgentCfg().RequestProcessors {
 		var lclProcessed bool
 		if lclProcessed, err = processRequest(
-			context.TODO(),
 			reqProcessor,
 			NewAgentRequest(
 				dnsDP, reqVars, cgrRplyNM, rplyNM,
@@ -139,7 +137,7 @@ func (da *DNSAgent) handleQuestion(dnsDP utils.DataProvider, rply *dns.Msg, q *d
 				da.fltrS, nil),
 			utils.DNSAgent, da.connMgr,
 			da.cgrCfg.DNSAgentCfg().SessionSConns,
-			da.fltrS); err != nil {
+			nil, da.fltrS); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing message: %s from %s",
 					utils.DNSAgent, err.Error(), dnsDP, rmtAddr))

@@ -20,9 +20,8 @@ package config
 import (
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -53,11 +52,19 @@ func TestKamAgentCfgloadFromJsonCfg(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, jsnCfg.kamAgentCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsnCfg.kamAgentCfg))
 	}
+	cfgJson := &KamAgentJsonCfg{
 
-	cfgJSON = nil
-	if err = jsnCfg.kamAgentCfg.loadFromJSONCfg(cfgJSON); err != nil {
+		Evapi_conns: &[]*KamConnJsonCfg{
+			{
+				Max_reconnect_interval: utils.StringPointer("test"),
+			},
+		}}
+
+	if err := jsnCfg.kamAgentCfg.loadFromJSONCfg(cfgJson); err != nil {
+
 		t.Error(err)
 	}
+
 }
 
 func TestKamConnCfgloadFromJsonCfg(t *testing.T) {
@@ -94,7 +101,7 @@ func TestKamAgentCfgAsMapInterface(t *testing.T) {
 			"create_cdr": true,
 			"timezone": "UTC",
 			"evapi_conns":[
-				{"address": "127.0.0.1:8448", "reconnects": 5, "max_reconnect_interval": "5m", "alias": ""}
+				{"address": "127.0.0.1:8448", "reconnects": 5, "alias": ""}
 			],
 		},
 	}`
@@ -104,16 +111,12 @@ func TestKamAgentCfgAsMapInterface(t *testing.T) {
 		utils.CreateCdrCfg:     true,
 		utils.TimezoneCfg:      "UTC",
 		utils.EvapiConnsCfg: []map[string]interface{}{
-			{
-				utils.AddressCfg:              "127.0.0.1:8448",
-				utils.ReconnectsCfg:           5,
-				utils.MaxReconnectIntervalCfg: "5m0s",
-				utils.AliasCfg:                ""},
+			{utils.AddressCfg: "127.0.0.1:8448", utils.ReconnectsCfg: 5, utils.MaxReconnectIntervalCfg: "0s", utils.AliasCfg: ""},
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.kamAgentCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.kamAgentCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -128,17 +131,12 @@ func TestKamAgentCfgAsMapInterface1(t *testing.T) {
 		utils.CreateCdrCfg:     false,
 		utils.TimezoneCfg:      "",
 		utils.EvapiConnsCfg: []map[string]interface{}{
-			{
-				utils.AddressCfg:              "127.0.0.1:8448",
-				utils.ReconnectsCfg:           5,
-				utils.MaxReconnectIntervalCfg: "0s",
-				utils.AliasCfg:                "",
-			},
+			{utils.AddressCfg: "127.0.0.1:8448", utils.ReconnectsCfg: 5, utils.MaxReconnectIntervalCfg: "0s", utils.AliasCfg: ""},
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.kamAgentCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.kamAgentCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, received %+v", eMap, rcv)
 	}
 }
@@ -160,185 +158,5 @@ func TestKamAgentCfgClone(t *testing.T) {
 	}
 	if rcv.EvapiConns[0].Alias = ""; ban.EvapiConns[0].Alias != "randomAlias" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffKamConnJsonCfg(t *testing.T) {
-	v1 := &KamConnCfg{
-		Alias:                "KAM",
-		Address:              "localhost:8080",
-		Reconnects:           2,
-		MaxReconnectInterval: time.Duration(2),
-	}
-
-	v2 := &KamConnCfg{
-		Alias:                "KAM_2",
-		Address:              "localhost:8037",
-		Reconnects:           5,
-		MaxReconnectInterval: time.Duration(3),
-	}
-
-	expected := &KamConnJsonCfg{
-		Alias:                  utils.StringPointer("KAM_2"),
-		Address:                utils.StringPointer("localhost:8037"),
-		Reconnects:             utils.IntPointer(5),
-		Max_reconnect_interval: utils.StringPointer("3ns"),
-	}
-
-	rcv := diffKamConnJsonCfg(v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &KamConnJsonCfg{}
-
-	rcv = diffKamConnJsonCfg(v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestEqualsKamConnsCfg(t *testing.T) {
-	v1 := []*KamConnCfg{
-		{
-			Alias:      "KAM",
-			Address:    "localhost:8080",
-			Reconnects: 2,
-		},
-	}
-
-	v2 := []*KamConnCfg{
-		{
-			Alias:      "KAM_2",
-			Address:    "localhost:8037",
-			Reconnects: 5,
-		},
-	}
-
-	if equalsKamConnsCfg(v1, v2) {
-		t.Error("Conns should not match")
-	}
-
-	v2 = []*KamConnCfg{
-		{
-			Alias:      "KAM",
-			Address:    "localhost:8080",
-			Reconnects: 2,
-		},
-	}
-
-	if !equalsKamConnsCfg(v1, v2) {
-		t.Error("Conns should match")
-	}
-
-	v2 = []*KamConnCfg{}
-	if equalsKamConnsCfg(v1, v2) {
-		t.Error("Conns should not match")
-	}
-}
-
-func TestDiffKamAgentJsonCfg(t *testing.T) {
-	var d *KamAgentJsonCfg
-
-	v1 := &KamAgentCfg{
-		Enabled:       false,
-		SessionSConns: []string{"*localhost"},
-		CreateCdr:     false,
-		EvapiConns: []*KamConnCfg{
-			{
-				Alias:      "KAM_2",
-				Address:    "localhost:8037",
-				Reconnects: 5,
-			},
-		},
-		Timezone: "UTC",
-	}
-
-	v2 := &KamAgentCfg{
-		Enabled:       true,
-		SessionSConns: []string{"*birpc"},
-		CreateCdr:     true,
-		EvapiConns: []*KamConnCfg{
-			{
-				Alias:      "KAM_1",
-				Address:    "localhost:8080",
-				Reconnects: 2,
-			},
-		},
-		Timezone: "EEST",
-	}
-
-	expected := &KamAgentJsonCfg{
-		Enabled:        utils.BoolPointer(true),
-		Sessions_conns: &[]string{"*birpc"},
-		Create_cdr:     utils.BoolPointer(true),
-		Evapi_conns: &[]*KamConnJsonCfg{
-			{
-				Alias:      utils.StringPointer("KAM_1"),
-				Address:    utils.StringPointer("localhost:8080"),
-				Reconnects: utils.IntPointer(2),
-			},
-		},
-		Timezone: utils.StringPointer("EEST"),
-	}
-
-	rcv := diffKamAgentJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &KamAgentJsonCfg{}
-
-	rcv = diffKamAgentJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestKamAgentCloneSection(t *testing.T) {
-	kamCfg := &KamAgentCfg{
-		Enabled:       false,
-		SessionSConns: []string{"*localhost"},
-		CreateCdr:     false,
-		EvapiConns: []*KamConnCfg{
-			{
-				Alias:      "KAM_2",
-				Address:    "localhost:8037",
-				Reconnects: 5,
-			},
-		},
-		Timezone: "UTC",
-	}
-
-	exp := &KamAgentCfg{
-		Enabled:       false,
-		SessionSConns: []string{"*localhost"},
-		CreateCdr:     false,
-		EvapiConns: []*KamConnCfg{
-			{
-				Alias:      "KAM_2",
-				Address:    "localhost:8037",
-				Reconnects: 5,
-			},
-		},
-		Timezone: "UTC",
-	}
-
-	rcv := kamCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-func TestKamConnCfgloadFromJsonCfgMaxReconnErr(t *testing.T) {
-	var kamcocfg KamConnCfg
-
-	json := &KamConnJsonCfg{
-		Max_reconnect_interval: utils.StringPointer("invalid duration"),
-	}
-	expErr := `time: invalid duration "invalid duration"`
-	if err = kamcocfg.loadFromJSONCfg(json); err.Error() != expErr {
-		t.Errorf("Expected error <%v>, Received error <%v>", expErr, err.Error())
 	}
 }

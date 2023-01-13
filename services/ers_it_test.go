@@ -28,14 +28,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/ers"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/ers"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 func TestEventReaderSReload(t *testing.T) {
@@ -49,34 +48,38 @@ func TestEventReaderSReload(t *testing.T) {
 	}
 	cfg := config.NewDefaultCGRConfig()
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	cfg.SessionSCfg().Enabled = true
 	cfg.SessionSCfg().ListenBijson = ""
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
-	ctx, cancel := context.WithCancel(context.TODO())
+	shdChan := utils.NewSyncedChan()
 	defer func() {
-		cancel()
+		shdChan.CloseOnce()
 		time.Sleep(10 * time.Millisecond)
 	}()
 	shdWg := new(sync.WaitGroup)
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	db := NewDataDBService(cfg, nil, srvDep)
-	sS := NewSessionService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep)
-	erS := NewEventReaderService(cfg, filterSChan, nil, srvDep)
-	engine.NewConnManager(cfg)
+	sS := NewSessionService(cfg, db, server, make(chan rpcclient.ClientConnector, 1), shdChan, nil, anz, srvDep)
+	erS := NewEventReaderService(cfg, filterSChan, shdChan, nil, srvDep)
+	engine.NewConnManager(cfg, nil)
 	srvMngr.AddServices(erS, sS,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Fatal(err)
+	}
 	if erS.IsRunning() {
 		t.Fatal("Expected service to be down")
 	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "ers_reload", "internal")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.ERsJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "ers_reload", "internal"),
+		Section: config.ERsJson,
 	}, &reply); err != nil {
 		t.Fatal(err)
 	} else if reply != utils.OK {
@@ -88,18 +91,18 @@ func TestEventReaderSReload(t *testing.T) {
 	}
 
 	runtime.Gosched()
-	err := erS.Start(ctx, cancel)
+	err := erS.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Fatalf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
 	time.Sleep(10 * time.Millisecond)
 	runtime.Gosched()
-	err = erS.Reload(ctx, cancel)
+	err = erS.Reload()
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
 	cfg.ERsCfg().Enabled = false
-	cfg.GetReloadChan() <- config.SectionToService[config.ERsJSON]
+	cfg.GetReloadChan(config.ERsJson) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 	if erS.IsRunning() {
 		t.Fatal("Expected service to be down")
@@ -117,6 +120,8 @@ func TestEventReaderSReload2(t *testing.T) {
 		}
 	}
 	cfg := config.NewDefaultCGRConfig()
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	cfg.SessionSCfg().Enabled = true
 	cfg.ERsCfg().Enabled = true
 	cfg.ERsCfg().Readers = []*config.EventReaderCfg{
@@ -126,15 +131,16 @@ func TestEventReaderSReload2(t *testing.T) {
 	}
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	erS := NewEventReaderService(cfg, filterSChan, nil, srvDep)
+	erS := NewEventReaderService(cfg, filterSChan, shdChan, nil, srvDep)
 	ers := ers.NewERService(cfg, nil, nil)
 
 	runtime.Gosched()
 	srv := erS.(*EventReaderService)
 	srv.stopChan = make(chan struct{})
 	srv.rldChan = make(chan struct{})
-	err := srv.listenAndServe(ers, srv.stopChan, srv.rldChan, func() {})
+	err := srv.listenAndServe(ers, srv.stopChan, srv.rldChan)
 	if err == nil || err.Error() != "unsupported reader type: <bad_type>" {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", "unsupported reader type: <bad_type>", err)
 	}

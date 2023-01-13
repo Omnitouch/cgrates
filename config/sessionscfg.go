@@ -23,73 +23,74 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
-const (
-	SessionsAccountsDftOpt               = false
-	SessionsAttributesDftOpt             = false
-	SessionsCDRsDftOpt                   = false
-	SessionsChargersDftOpt               = false
-	SessionsResourcesDftOpt              = false
-	SessionsRoutesDftOpt                 = false
-	SessionsStatsDftOpt                  = false
-	SessionsThresholdsDftOpt             = false
-	SessionsInitiateDftOpt               = false
-	SessionsUpdateDftOpt                 = false
-	SessionsTerminateDftOpt              = false
-	SessionsMessageDftOpt                = false
-	SessionsAttributesDerivedReplyDftOpt = false
-	SessionsBlockerErrorDftOpt           = false
-	SessionsCDRsDerivedReplyDftOpt       = false
-	SessionsResourcesAuthorizeDftOpt     = false
-	SessionsResourcesAllocateDftOpt      = false
-	SessionsResourcesReleaseDftOpt       = false
-	SessionsResourcesDerivedReplyDftOpt  = false
-	SessionsRoutesDerivedReplyDftOpt     = false
-	SessionsStatsDerivedReplyDftOpt      = false
-	SessionsThresholdsDerivedReplyDftOpt = false
-	SessionsMaxUsageDftOpt               = false
-	SessionsForceDurationDftOpt          = false
-	SessionsTTLDftOpt                    = 0
-	SessionsChargeableDftOpt             = true
-	SessionsTTLMaxDelayDftOpt            = 0
-	SessionsDebitIntervalDftOpt          = 0
-)
+// NewDfltFsConnConfig returns the first cached default value for a FreeSWITCHAgent connection
+func NewDfltFsConnConfig() *FsConnCfg {
+	if dfltFsConnConfig == nil {
+		return new(FsConnCfg) // No defaults, most probably we are building the defaults now
+	}
+	dfltVal := *dfltFsConnConfig // Copy the value instead of it's pointer
+	return &dfltVal
+}
 
-type SessionsOpts struct {
-	Accounts               []*utils.DynamicBoolOpt
-	Attributes             []*utils.DynamicBoolOpt
-	CDRs                   []*utils.DynamicBoolOpt
-	Chargers               []*utils.DynamicBoolOpt
-	Resources              []*utils.DynamicBoolOpt
-	Routes                 []*utils.DynamicBoolOpt
-	Stats                  []*utils.DynamicBoolOpt
-	Thresholds             []*utils.DynamicBoolOpt
-	Initiate               []*utils.DynamicBoolOpt
-	Update                 []*utils.DynamicBoolOpt
-	Terminate              []*utils.DynamicBoolOpt
-	Message                []*utils.DynamicBoolOpt
-	AttributesDerivedReply []*utils.DynamicBoolOpt
-	BlockerError           []*utils.DynamicBoolOpt
-	CDRsDerivedReply       []*utils.DynamicBoolOpt
-	ResourcesAuthorize     []*utils.DynamicBoolOpt
-	ResourcesAllocate      []*utils.DynamicBoolOpt
-	ResourcesRelease       []*utils.DynamicBoolOpt
-	ResourcesDerivedReply  []*utils.DynamicBoolOpt
-	RoutesDerivedReply     []*utils.DynamicBoolOpt
-	StatsDerivedReply      []*utils.DynamicBoolOpt
-	ThresholdsDerivedReply []*utils.DynamicBoolOpt
-	MaxUsage               []*utils.DynamicBoolOpt
-	ForceDuration          []*utils.DynamicBoolOpt
-	TTL                    []*utils.DynamicDurationOpt
-	Chargeable             []*utils.DynamicBoolOpt
-	TTLLastUsage           []*utils.DynamicDurationPointerOpt
-	TTLLastUsed            []*utils.DynamicDurationPointerOpt
-	DebitInterval          []*utils.DynamicDurationOpt
-	TTLMaxDelay            []*utils.DynamicDurationOpt
-	TTLUsage               []*utils.DynamicDurationPointerOpt
+// FsConnCfg one connection to FreeSWITCH server
+type FsConnCfg struct {
+	Address              string
+	Password             string
+	Reconnects           int
+	MaxReconnectInterval time.Duration
+	Alias                string
+}
+
+func (fs *FsConnCfg) loadFromJSONCfg(jsnCfg *FsConnJsonCfg) (err error) {
+	if jsnCfg == nil {
+		return
+	}
+	if jsnCfg.Address != nil {
+		fs.Address = *jsnCfg.Address
+	}
+	if jsnCfg.Password != nil {
+		fs.Password = *jsnCfg.Password
+	}
+	if jsnCfg.Reconnects != nil {
+		fs.Reconnects = *jsnCfg.Reconnects
+	}
+	if jsnCfg.Max_reconnect_interval != nil {
+		if fs.MaxReconnectInterval, err = utils.ParseDurationWithNanosecs(*jsnCfg.Max_reconnect_interval); err != nil {
+			return
+		}
+	}
+	fs.Alias = fs.Address
+	if jsnCfg.Alias != nil && *jsnCfg.Alias != "" {
+		fs.Alias = *jsnCfg.Alias
+	}
+
+	return
+}
+
+// AsMapInterface returns the config as a map[string]interface{}
+func (fs *FsConnCfg) AsMapInterface() map[string]interface{} {
+	return map[string]interface{}{
+		utils.AddressCfg:              fs.Address,
+		utils.Password:                fs.Password,
+		utils.ReconnectsCfg:           fs.Reconnects,
+		utils.MaxReconnectIntervalCfg: fs.MaxReconnectInterval.String(),
+		utils.AliasCfg:                fs.Alias,
+	}
+}
+
+// Clone returns a deep copy of FsConnCfg
+func (fs FsConnCfg) Clone() *FsConnCfg {
+	return &FsConnCfg{
+		Address:              fs.Address,
+		Password:             fs.Password,
+		Reconnects:           fs.Reconnects,
+		MaxReconnectInterval: fs.MaxReconnectInterval,
+		Alias:                fs.Alias,
+	}
 }
 
 // SessionSCfg is the config section for SessionS
@@ -98,159 +99,30 @@ type SessionSCfg struct {
 	ListenBijson        string
 	ListenBigob         string
 	ChargerSConns       []string
-	ResourceSConns      []string
-	ThresholdSConns     []string
+	RALsConns           []string
+	ResSConns           []string
+	ThreshSConns        []string
 	StatSConns          []string
 	RouteSConns         []string
-	AttributeSConns     []string
+	AttrSConns          []string
 	CDRsConns           []string
 	ReplicationConns    []string
-	RateSConns          []string
-	AccountSConns       []string
+	DebitInterval       time.Duration
 	StoreSCosts         bool
+	SessionTTL          time.Duration
+	SessionTTLMaxDelay  *time.Duration
+	SessionTTLLastUsed  *time.Duration
+	SessionTTLUsage     *time.Duration
+	SessionTTLLastUsage *time.Duration
 	SessionIndexes      utils.StringSet
 	ClientProtocol      float64
 	ChannelSyncInterval time.Duration
 	TerminateAttempts   int
 	AlterableFields     utils.StringSet
 	MinDurLowBalance    time.Duration
-	ActionSConns        []string
+	SchedulerConns      []string
 	STIRCfg             *STIRcfg
 	DefaultUsage        map[string]time.Duration
-	Opts                *SessionsOpts
-}
-
-// loadSessionSCfg loads the SessionS section of the configuration
-func (scfg *SessionSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnSessionSCfg := new(SessionSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, SessionSJSON, jsnSessionSCfg); err != nil {
-		return
-	}
-	return scfg.loadFromJSONCfg(jsnSessionSCfg)
-}
-
-func (sesOpts *SessionsOpts) loadFromJSONCfg(jsnCfg *SessionsOptsJson) (err error) {
-	if jsnCfg == nil {
-		return
-	}
-	if jsnCfg.Accounts != nil {
-		sesOpts.Accounts = append(sesOpts.Accounts, jsnCfg.Accounts...)
-	}
-	if jsnCfg.Attributes != nil {
-		sesOpts.Attributes = append(sesOpts.Attributes, jsnCfg.Attributes...)
-	}
-	if jsnCfg.CDRs != nil {
-		sesOpts.CDRs = append(sesOpts.CDRs, jsnCfg.CDRs...)
-	}
-	if jsnCfg.Chargers != nil {
-		sesOpts.Chargers = append(sesOpts.Chargers, jsnCfg.Chargers...)
-	}
-	if jsnCfg.Resources != nil {
-		sesOpts.Resources = append(sesOpts.Resources, jsnCfg.Resources...)
-	}
-	if jsnCfg.Routes != nil {
-		sesOpts.Routes = append(sesOpts.Routes, jsnCfg.Routes...)
-	}
-	if jsnCfg.Stats != nil {
-		sesOpts.Stats = append(sesOpts.Stats, jsnCfg.Stats...)
-	}
-	if jsnCfg.Thresholds != nil {
-		sesOpts.Thresholds = append(sesOpts.Thresholds, jsnCfg.Thresholds...)
-	}
-	if jsnCfg.Initiate != nil {
-		sesOpts.Initiate = append(sesOpts.Initiate, jsnCfg.Initiate...)
-	}
-	if jsnCfg.Update != nil {
-		sesOpts.Update = append(sesOpts.Update, jsnCfg.Update...)
-	}
-	if jsnCfg.Terminate != nil {
-		sesOpts.Terminate = append(sesOpts.Terminate, jsnCfg.Terminate...)
-	}
-	if jsnCfg.Message != nil {
-		sesOpts.Message = append(sesOpts.Message, jsnCfg.Message...)
-	}
-	if jsnCfg.AttributesDerivedReply != nil {
-		sesOpts.AttributesDerivedReply = append(sesOpts.AttributesDerivedReply, jsnCfg.AttributesDerivedReply...)
-	}
-	if jsnCfg.BlockerError != nil {
-		sesOpts.BlockerError = append(sesOpts.BlockerError, jsnCfg.BlockerError...)
-	}
-	if jsnCfg.CDRsDerivedReply != nil {
-		sesOpts.CDRsDerivedReply = append(sesOpts.CDRsDerivedReply, jsnCfg.CDRsDerivedReply...)
-	}
-	if jsnCfg.ResourcesAuthorize != nil {
-		sesOpts.ResourcesAuthorize = append(sesOpts.ResourcesAuthorize, jsnCfg.ResourcesAuthorize...)
-	}
-	if jsnCfg.ResourcesAllocate != nil {
-		sesOpts.ResourcesAllocate = append(sesOpts.ResourcesAllocate, jsnCfg.ResourcesAllocate...)
-	}
-	if jsnCfg.ResourcesRelease != nil {
-		sesOpts.ResourcesRelease = append(sesOpts.ResourcesRelease, jsnCfg.ResourcesRelease...)
-	}
-	if jsnCfg.ResourcesDerivedReply != nil {
-		sesOpts.ResourcesDerivedReply = append(sesOpts.ResourcesDerivedReply, jsnCfg.ResourcesDerivedReply...)
-	}
-	if jsnCfg.RoutesDerivedReply != nil {
-		sesOpts.RoutesDerivedReply = append(sesOpts.RoutesDerivedReply, jsnCfg.RoutesDerivedReply...)
-	}
-	if jsnCfg.StatsDerivedReply != nil {
-		sesOpts.StatsDerivedReply = append(sesOpts.StatsDerivedReply, jsnCfg.StatsDerivedReply...)
-	}
-	if jsnCfg.ThresholdsDerivedReply != nil {
-		sesOpts.ThresholdsDerivedReply = append(sesOpts.ThresholdsDerivedReply, jsnCfg.ThresholdsDerivedReply...)
-	}
-	if jsnCfg.MaxUsage != nil {
-		sesOpts.MaxUsage = append(sesOpts.MaxUsage, jsnCfg.MaxUsage...)
-	}
-	if jsnCfg.ForceDuration != nil {
-		sesOpts.ForceDuration = append(sesOpts.ForceDuration, jsnCfg.ForceDuration...)
-	}
-	if jsnCfg.TTL != nil {
-		var ttl []*utils.DynamicDurationOpt
-		if ttl, err = utils.StringToDurationDynamicOpts(jsnCfg.TTL); err != nil {
-			return
-		}
-		sesOpts.TTL = append(sesOpts.TTL, ttl...)
-	}
-	if jsnCfg.Chargeable != nil {
-		sesOpts.Chargeable = append(sesOpts.Chargeable, jsnCfg.Chargeable...)
-	}
-	if jsnCfg.TTLLastUsage != nil {
-		var lastUsage []*utils.DynamicDurationPointerOpt
-		if lastUsage, err = utils.StringToDurationPointerDynamicOpts(jsnCfg.TTLLastUsage); err != nil {
-			return
-		}
-		sesOpts.TTLLastUsage = append(sesOpts.TTLLastUsage, lastUsage...)
-	}
-	if jsnCfg.TTLLastUsed != nil {
-		var lastUsed []*utils.DynamicDurationPointerOpt
-		if lastUsed, err = utils.StringToDurationPointerDynamicOpts(jsnCfg.TTLLastUsed); err != nil {
-			return
-		}
-		sesOpts.TTLLastUsed = append(sesOpts.TTLLastUsed, lastUsed...)
-	}
-	if jsnCfg.DebitInterval != nil {
-		var debitInterval []*utils.DynamicDurationOpt
-		if debitInterval, err = utils.StringToDurationDynamicOpts(jsnCfg.DebitInterval); err != nil {
-			return
-		}
-		sesOpts.DebitInterval = append(sesOpts.DebitInterval, debitInterval...)
-	}
-	if jsnCfg.TTLMaxDelay != nil {
-		var maxDelay []*utils.DynamicDurationOpt
-		if maxDelay, err = utils.StringToDurationDynamicOpts(jsnCfg.TTLMaxDelay); err != nil {
-			return
-		}
-		sesOpts.TTLMaxDelay = append(sesOpts.TTLMaxDelay, maxDelay...)
-	}
-	if jsnCfg.TTLUsage != nil {
-		var usage []*utils.DynamicDurationPointerOpt
-		if usage, err = utils.StringToDurationPointerDynamicOpts(jsnCfg.TTLUsage); err != nil {
-			return
-		}
-		sesOpts.TTLUsage = append(sesOpts.TTLUsage, usage...)
-	}
-	return
 }
 
 func (scfg *SessionSCfg) loadFromJSONCfg(jsnCfg *SessionSJsonCfg) (err error) {
@@ -267,46 +139,134 @@ func (scfg *SessionSCfg) loadFromJSONCfg(jsnCfg *SessionSJsonCfg) (err error) {
 		scfg.ListenBigob = *jsnCfg.Listen_bigob
 	}
 	if jsnCfg.Chargers_conns != nil {
-		scfg.ChargerSConns = updateInternalConns(*jsnCfg.Chargers_conns, utils.MetaChargers)
+		scfg.ChargerSConns = make([]string, len(*jsnCfg.Chargers_conns))
+		for idx, connID := range *jsnCfg.Chargers_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.ChargerSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.ChargerSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)
+			}
+		}
+	}
+	if jsnCfg.Rals_conns != nil {
+		scfg.RALsConns = make([]string, len(*jsnCfg.Rals_conns))
+		for idx, connID := range *jsnCfg.Rals_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.RALsConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.RALsConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)
+			}
+		}
 	}
 	if jsnCfg.Resources_conns != nil {
-		scfg.ResourceSConns = updateInternalConns(*jsnCfg.Resources_conns, utils.MetaResources)
+		scfg.ResSConns = make([]string, len(*jsnCfg.Resources_conns))
+		for idx, connID := range *jsnCfg.Resources_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.ResSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.ResSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources)
+			}
+		}
 	}
 	if jsnCfg.Thresholds_conns != nil {
-		scfg.ThresholdSConns = updateInternalConns(*jsnCfg.Thresholds_conns, utils.MetaThresholds)
+		scfg.ThreshSConns = make([]string, len(*jsnCfg.Thresholds_conns))
+		for idx, connID := range *jsnCfg.Thresholds_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.ThreshSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.ThreshSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds)
+			}
+		}
 	}
 	if jsnCfg.Stats_conns != nil {
-		scfg.StatSConns = updateInternalConns(*jsnCfg.Stats_conns, utils.MetaStats)
+		scfg.StatSConns = make([]string, len(*jsnCfg.Stats_conns))
+		for idx, connID := range *jsnCfg.Stats_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.StatSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.StatSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats)
+			}
+		}
 	}
 	if jsnCfg.Routes_conns != nil {
-		scfg.RouteSConns = updateInternalConns(*jsnCfg.Routes_conns, utils.MetaRoutes)
+		scfg.RouteSConns = make([]string, len(*jsnCfg.Routes_conns))
+		for idx, connID := range *jsnCfg.Routes_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.RouteSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.RouteSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaRoutes)
+			}
+		}
 	}
 	if jsnCfg.Attributes_conns != nil {
-		scfg.AttributeSConns = updateInternalConns(*jsnCfg.Attributes_conns, utils.MetaAttributes)
+		scfg.AttrSConns = make([]string, len(*jsnCfg.Attributes_conns))
+		for idx, connID := range *jsnCfg.Attributes_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.AttrSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.AttrSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)
+			}
+		}
 	}
 	if jsnCfg.Cdrs_conns != nil {
-		scfg.CDRsConns = updateInternalConns(*jsnCfg.Cdrs_conns, utils.MetaCDRs)
-	}
-	if jsnCfg.Actions_conns != nil {
-		scfg.ActionSConns = updateInternalConns(*jsnCfg.Actions_conns, utils.MetaActions)
+		scfg.CDRsConns = make([]string, len(*jsnCfg.Cdrs_conns))
+		for idx, connID := range *jsnCfg.Cdrs_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.CDRsConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.CDRsConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)
+			}
+		}
 	}
 	if jsnCfg.Replication_conns != nil {
 		scfg.ReplicationConns = make([]string, len(*jsnCfg.Replication_conns))
 		for idx, connID := range *jsnCfg.Replication_conns {
 			if connID == utils.MetaInternal {
-				return fmt.Errorf("Replication connection ID needs to be different than *internal ")
+				return fmt.Errorf("Replication connection ID needs to be different than *internal")
 			}
 			scfg.ReplicationConns[idx] = connID
 		}
 	}
-	if jsnCfg.Rates_conns != nil {
-		scfg.RateSConns = updateInternalConns(*jsnCfg.Rates_conns, utils.MetaRates)
-	}
-	if jsnCfg.Accounts_conns != nil {
-		scfg.AccountSConns = updateInternalConns(*jsnCfg.Accounts_conns, utils.MetaAccounts)
+	if jsnCfg.Debit_interval != nil {
+		if scfg.DebitInterval, err = utils.ParseDurationWithNanosecs(*jsnCfg.Debit_interval); err != nil {
+			return err
+		}
 	}
 	if jsnCfg.Store_session_costs != nil {
 		scfg.StoreSCosts = *jsnCfg.Store_session_costs
+	}
+	if jsnCfg.Session_ttl != nil {
+		if scfg.SessionTTL, err = utils.ParseDurationWithNanosecs(*jsnCfg.Session_ttl); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Session_ttl_max_delay != nil {
+		var maxTTLDelay time.Duration
+		if maxTTLDelay, err = utils.ParseDurationWithNanosecs(*jsnCfg.Session_ttl_max_delay); err != nil {
+			return err
+		}
+		scfg.SessionTTLMaxDelay = &maxTTLDelay
+	}
+	if jsnCfg.Session_ttl_last_used != nil {
+		var sessionTTLLastUsed time.Duration
+		if sessionTTLLastUsed, err = utils.ParseDurationWithNanosecs(*jsnCfg.Session_ttl_last_used); err != nil {
+			return err
+		}
+		scfg.SessionTTLLastUsed = &sessionTTLLastUsed
+	}
+	if jsnCfg.Session_ttl_usage != nil {
+		var sessionTTLUsage time.Duration
+		if sessionTTLUsage, err = utils.ParseDurationWithNanosecs(*jsnCfg.Session_ttl_usage); err != nil {
+			return err
+		}
+		scfg.SessionTTLUsage = &sessionTTLUsage
+	}
+	if jsnCfg.Session_ttl_last_usage != nil {
+		var sessionTTLLastUsage time.Duration
+		if sessionTTLLastUsage, err = utils.ParseDurationWithNanosecs(*jsnCfg.Session_ttl_last_usage); err != nil {
+			return err
+		}
+		scfg.SessionTTLLastUsage = &sessionTTLLastUsage
 	}
 	if jsnCfg.Session_indexes != nil {
 		scfg.SessionIndexes = utils.NewStringSet(*jsnCfg.Session_indexes)
@@ -331,26 +291,26 @@ func (scfg *SessionSCfg) loadFromJSONCfg(jsnCfg *SessionSJsonCfg) (err error) {
 		}
 	}
 	if jsnCfg.Default_usage != nil {
-		for k, v := range jsnCfg.Default_usage {
+		for k, v := range *jsnCfg.Default_usage {
 			if scfg.DefaultUsage[k], err = utils.ParseDurationWithNanosecs(v); err != nil {
 				return
 			}
 		}
 	}
-	if jsnCfg.Stir != nil {
-		if err = scfg.STIRCfg.loadFromJSONCfg(jsnCfg.Stir); err != nil {
-			return
+	if jsnCfg.Scheduler_conns != nil {
+		scfg.SchedulerConns = make([]string, len(*jsnCfg.Scheduler_conns))
+		for idx, connID := range *jsnCfg.Scheduler_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			scfg.SchedulerConns[idx] = connID
+			if connID == utils.MetaInternal {
+				scfg.SchedulerConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaScheduler)
+			}
 		}
 	}
-	if jsnCfg.Opts != nil {
-		if err = scfg.Opts.loadFromJSONCfg(jsnCfg.Opts); err != nil {
-			return
-		}
-	}
-	return
+	return scfg.STIRCfg.loadFromJSONCfg(jsnCfg.Stir)
 }
 
-func (scfg SessionSCfg) GetDefaultUsage(tor string) time.Duration {
+func (scfg *SessionSCfg) GetDefaultUsage(tor string) time.Duration {
 	if tor == utils.EmptyString {
 		tor = utils.MetaAny
 	}
@@ -358,7 +318,7 @@ func (scfg SessionSCfg) GetDefaultUsage(tor string) time.Duration {
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (scfg SessionSCfg) AsMapInterface(string) interface{} {
+func (scfg *SessionSCfg) AsMapInterface() (initialMP map[string]interface{}) {
 	maxComputed := make(map[string]string)
 	for key, item := range scfg.DefaultUsage {
 		if key == utils.MetaAny || key == utils.MetaVoice {
@@ -367,40 +327,7 @@ func (scfg SessionSCfg) AsMapInterface(string) interface{} {
 			maxComputed[key] = strconv.Itoa(int(item))
 		}
 	}
-	opts := map[string]interface{}{
-		utils.MetaAccounts:                  scfg.Opts.Accounts,
-		utils.MetaAttributes:                scfg.Opts.Attributes,
-		utils.MetaCDRs:                      scfg.Opts.CDRs,
-		utils.MetaChargers:                  scfg.Opts.Chargers,
-		utils.MetaResources:                 scfg.Opts.Resources,
-		utils.MetaRoutes:                    scfg.Opts.Routes,
-		utils.MetaStats:                     scfg.Opts.Stats,
-		utils.MetaThresholds:                scfg.Opts.Thresholds,
-		utils.MetaInitiate:                  scfg.Opts.Initiate,
-		utils.MetaUpdate:                    scfg.Opts.Update,
-		utils.MetaTerminate:                 scfg.Opts.Terminate,
-		utils.MetaMessage:                   scfg.Opts.Message,
-		utils.MetaAttributesDerivedReplyCfg: scfg.Opts.AttributesDerivedReply,
-		utils.MetaBlockerErrorCfg:           scfg.Opts.BlockerError,
-		utils.MetaCDRsDerivedReplyCfg:       scfg.Opts.CDRsDerivedReply,
-		utils.MetaResourcesAuthorizeCfg:     scfg.Opts.ResourcesAuthorize,
-		utils.MetaResourcesAllocateCfg:      scfg.Opts.ResourcesAllocate,
-		utils.MetaResourcesReleaseCfg:       scfg.Opts.ResourcesRelease,
-		utils.MetaResourcesDerivedReplyCfg:  scfg.Opts.ResourcesDerivedReply,
-		utils.MetaRoutesDerivedReplyCfg:     scfg.Opts.RoutesDerivedReply,
-		utils.MetaStatsDerivedReplyCfg:      scfg.Opts.StatsDerivedReply,
-		utils.MetaThresholdsDerivedReplyCfg: scfg.Opts.ThresholdsDerivedReply,
-		utils.MetaMaxUsageCfg:               scfg.Opts.MaxUsage,
-		utils.MetaForceDurationCfg:          scfg.Opts.ForceDuration,
-		utils.MetaTTLCfg:                    scfg.Opts.TTL,
-		utils.MetaChargeableCfg:             scfg.Opts.Chargeable,
-		utils.MetaDebitIntervalCfg:          scfg.Opts.DebitInterval,
-		utils.MetaTTLLastUsageCfg:           scfg.Opts.TTLLastUsage,
-		utils.MetaTTLLastUsedCfg:            scfg.Opts.TTLLastUsed,
-		utils.MetaTTLMaxDelayCfg:            scfg.Opts.TTLMaxDelay,
-		utils.MetaTTLUsageCfg:               scfg.Opts.TTLUsage,
-	}
-	mp := map[string]interface{}{
+	initialMP = map[string]interface{}{
 		utils.EnabledCfg:             scfg.Enabled,
 		utils.ListenBijsonCfg:        scfg.ListenBijson,
 		utils.ListenBigobCfg:         scfg.ListenBigob,
@@ -413,209 +340,125 @@ func (scfg SessionSCfg) AsMapInterface(string) interface{} {
 		utils.STIRCfg:                scfg.STIRCfg.AsMapInterface(),
 		utils.MinDurLowBalanceCfg:    "0",
 		utils.ChannelSyncIntervalCfg: "0",
+		utils.DebitIntervalCfg:       "0",
+		utils.SessionTTLCfg:          "0",
 		utils.DefaultUsageCfg:        maxComputed,
-		utils.OptsCfg:                opts,
+	}
+	if scfg.DebitInterval != 0 {
+		initialMP[utils.DebitIntervalCfg] = scfg.DebitInterval.String()
+	}
+	if scfg.SessionTTL != 0 {
+		initialMP[utils.SessionTTLCfg] = scfg.SessionTTL.String()
+	}
+	if scfg.SessionTTLMaxDelay != nil {
+		initialMP[utils.SessionTTLMaxDelayCfg] = scfg.SessionTTLMaxDelay.String()
+	}
+	if scfg.SessionTTLLastUsed != nil {
+		initialMP[utils.SessionTTLLastUsedCfg] = scfg.SessionTTLLastUsed.String()
+	}
+	if scfg.SessionTTLUsage != nil {
+		initialMP[utils.SessionTTLUsageCfg] = scfg.SessionTTLUsage.String()
+	}
+	if scfg.SessionTTLLastUsage != nil {
+		initialMP[utils.SessionTTLLastUsageCfg] = scfg.SessionTTLLastUsage.String()
 	}
 	if scfg.ChannelSyncInterval != 0 {
-		mp[utils.ChannelSyncIntervalCfg] = scfg.ChannelSyncInterval.String()
+		initialMP[utils.ChannelSyncIntervalCfg] = scfg.ChannelSyncInterval.String()
 	}
 	if scfg.MinDurLowBalance != 0 {
-		mp[utils.MinDurLowBalanceCfg] = scfg.MinDurLowBalance.String()
+		initialMP[utils.MinDurLowBalanceCfg] = scfg.MinDurLowBalance.String()
 	}
 	if scfg.ChargerSConns != nil {
-		mp[utils.ChargerSConnsCfg] = getInternalJSONConns(scfg.ChargerSConns)
+		chargerSConns := make([]string, len(scfg.ChargerSConns))
+		for i, item := range scfg.ChargerSConns {
+			chargerSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers) {
+				chargerSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ChargerSConnsCfg] = chargerSConns
 	}
-	if scfg.ResourceSConns != nil {
-		mp[utils.ResourceSConnsCfg] = getInternalJSONConns(scfg.ResourceSConns)
+	if scfg.RALsConns != nil {
+		RALsConns := make([]string, len(scfg.RALsConns))
+		for i, item := range scfg.RALsConns {
+			RALsConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder) {
+				RALsConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.RALsConnsCfg] = RALsConns
 	}
-	if scfg.ThresholdSConns != nil {
-		mp[utils.ThresholdSConnsCfg] = getInternalJSONConns(scfg.ThresholdSConns)
+	if scfg.ResSConns != nil {
+		resSConns := make([]string, len(scfg.ResSConns))
+		for i, item := range scfg.ResSConns {
+			resSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources) {
+				resSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ResourceSConnsCfg] = resSConns
+	}
+	if scfg.ThreshSConns != nil {
+		threshSConns := make([]string, len(scfg.ThreshSConns))
+		for i, item := range scfg.ThreshSConns {
+			threshSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds) {
+				threshSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ThresholdSConnsCfg] = threshSConns
 	}
 	if scfg.StatSConns != nil {
-		mp[utils.StatSConnsCfg] = getInternalJSONConns(scfg.StatSConns)
+		statSConns := make([]string, len(scfg.StatSConns))
+		for i, item := range scfg.StatSConns {
+			statSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats) {
+				statSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.StatSConnsCfg] = statSConns
 	}
 	if scfg.RouteSConns != nil {
-		mp[utils.RouteSConnsCfg] = getInternalJSONConns(scfg.RouteSConns)
+		routesConns := make([]string, len(scfg.RouteSConns))
+		for i, item := range scfg.RouteSConns {
+			routesConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaRoutes) {
+				routesConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.RouteSConnsCfg] = routesConns
 	}
-	if scfg.AttributeSConns != nil {
-		mp[utils.AttributeSConnsCfg] = getInternalJSONConns(scfg.AttributeSConns)
+	if scfg.AttrSConns != nil {
+		attrSConns := make([]string, len(scfg.AttrSConns))
+		for i, item := range scfg.AttrSConns {
+			attrSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes) {
+				attrSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.AttributeSConnsCfg] = attrSConns
 	}
 	if scfg.CDRsConns != nil {
-		mp[utils.CDRsConnsCfg] = getInternalJSONConns(scfg.CDRsConns)
+		CDRsConns := make([]string, len(scfg.CDRsConns))
+		for i, item := range scfg.CDRsConns {
+			CDRsConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs) {
+				CDRsConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.CDRsConnsCfg] = CDRsConns
 	}
-	if scfg.ActionSConns != nil {
-		mp[utils.ActionSConnsCfg] = getInternalJSONConns(scfg.ActionSConns)
+	if scfg.SchedulerConns != nil {
+		schedulerConns := make([]string, len(scfg.SchedulerConns))
+		for i, item := range scfg.SchedulerConns {
+			schedulerConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaScheduler) {
+				schedulerConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.SchedulerConnsCfg] = schedulerConns
 	}
-	if scfg.RateSConns != nil {
-		mp[utils.RateSConnsCfg] = getInternalJSONConns(scfg.RateSConns)
-	}
-	if scfg.AccountSConns != nil {
-		mp[utils.AccountSConnsCfg] = getInternalJSONConns(scfg.AccountSConns)
-	}
-	return mp
-}
-
-func (SessionSCfg) SName() string              { return SessionSJSON }
-func (scfg SessionSCfg) CloneSection() Section { return scfg.Clone() }
-
-func (sesOpts *SessionsOpts) Clone() (cln *SessionsOpts) {
-	var acntS []*utils.DynamicBoolOpt
-	if sesOpts.Accounts != nil {
-		acntS = utils.CloneDynamicBoolOpt(sesOpts.Accounts)
-	}
-	var attrS []*utils.DynamicBoolOpt
-	if sesOpts.Attributes != nil {
-		attrS = utils.CloneDynamicBoolOpt(sesOpts.Attributes)
-	}
-	var cdrS []*utils.DynamicBoolOpt
-	if sesOpts.CDRs != nil {
-		cdrS = utils.CloneDynamicBoolOpt(sesOpts.CDRs)
-	}
-	var chrgS []*utils.DynamicBoolOpt
-	if sesOpts.Chargers != nil {
-		chrgS = utils.CloneDynamicBoolOpt(sesOpts.Chargers)
-	}
-	var reS []*utils.DynamicBoolOpt
-	if sesOpts.Resources != nil {
-		reS = utils.CloneDynamicBoolOpt(sesOpts.Resources)
-	}
-	var rouS []*utils.DynamicBoolOpt
-	if sesOpts.Routes != nil {
-		rouS = utils.CloneDynamicBoolOpt(sesOpts.Routes)
-	}
-	var stS []*utils.DynamicBoolOpt
-	if sesOpts.Stats != nil {
-		stS = utils.CloneDynamicBoolOpt(sesOpts.Stats)
-	}
-	var thdS []*utils.DynamicBoolOpt
-	if sesOpts.Thresholds != nil {
-		thdS = utils.CloneDynamicBoolOpt(sesOpts.Thresholds)
-	}
-	var initS []*utils.DynamicBoolOpt
-	if sesOpts.Initiate != nil {
-		initS = utils.CloneDynamicBoolOpt(sesOpts.Initiate)
-	}
-	var updS []*utils.DynamicBoolOpt
-	if sesOpts.Update != nil {
-		updS = utils.CloneDynamicBoolOpt(sesOpts.Update)
-	}
-	var termS []*utils.DynamicBoolOpt
-	if sesOpts.Terminate != nil {
-		termS = utils.CloneDynamicBoolOpt(sesOpts.Terminate)
-	}
-	var msg []*utils.DynamicBoolOpt
-	if sesOpts.Message != nil {
-		msg = utils.CloneDynamicBoolOpt(sesOpts.Message)
-	}
-	var attrDerivedReply []*utils.DynamicBoolOpt
-	if sesOpts.AttributesDerivedReply != nil {
-		attrDerivedReply = utils.CloneDynamicBoolOpt(sesOpts.AttributesDerivedReply)
-	}
-	var blockerErr []*utils.DynamicBoolOpt
-	if sesOpts.BlockerError != nil {
-		blockerErr = utils.CloneDynamicBoolOpt(sesOpts.BlockerError)
-	}
-	var cdrsDerivedReply []*utils.DynamicBoolOpt
-	if sesOpts.CDRsDerivedReply != nil {
-		cdrsDerivedReply = utils.CloneDynamicBoolOpt(sesOpts.CDRsDerivedReply)
-	}
-	var resAuthorize []*utils.DynamicBoolOpt
-	if sesOpts.ResourcesAuthorize != nil {
-		resAuthorize = utils.CloneDynamicBoolOpt(sesOpts.ResourcesAuthorize)
-	}
-	var resAllocate []*utils.DynamicBoolOpt
-	if sesOpts.ResourcesAllocate != nil {
-		resAllocate = utils.CloneDynamicBoolOpt(sesOpts.ResourcesAllocate)
-	}
-	var resRelease []*utils.DynamicBoolOpt
-	if sesOpts.ResourcesRelease != nil {
-		resRelease = utils.CloneDynamicBoolOpt(sesOpts.ResourcesRelease)
-	}
-	var resDerivedReply []*utils.DynamicBoolOpt
-	if sesOpts.ResourcesDerivedReply != nil {
-		resDerivedReply = utils.CloneDynamicBoolOpt(sesOpts.ResourcesDerivedReply)
-	}
-	var rouDerivedReply []*utils.DynamicBoolOpt
-	if sesOpts.RoutesDerivedReply != nil {
-		rouDerivedReply = utils.CloneDynamicBoolOpt(sesOpts.RoutesDerivedReply)
-	}
-	var stsDerivedReply []*utils.DynamicBoolOpt
-	if sesOpts.StatsDerivedReply != nil {
-		stsDerivedReply = utils.CloneDynamicBoolOpt(sesOpts.StatsDerivedReply)
-	}
-	var thdsDerivedReply []*utils.DynamicBoolOpt
-	if sesOpts.ThresholdsDerivedReply != nil {
-		thdsDerivedReply = utils.CloneDynamicBoolOpt(sesOpts.ThresholdsDerivedReply)
-	}
-	var maxUsage []*utils.DynamicBoolOpt
-	if sesOpts.MaxUsage != nil {
-		maxUsage = utils.CloneDynamicBoolOpt(sesOpts.MaxUsage)
-	}
-	var forceDuration []*utils.DynamicBoolOpt
-	if sesOpts.ForceDuration != nil {
-		forceDuration = utils.CloneDynamicBoolOpt(sesOpts.ForceDuration)
-	}
-	var ttl []*utils.DynamicDurationOpt
-	if sesOpts.TTL != nil {
-		ttl = utils.CloneDynamicDurationOpt(sesOpts.TTL)
-	}
-	var chargeable []*utils.DynamicBoolOpt
-	if sesOpts.Chargeable != nil {
-		chargeable = utils.CloneDynamicBoolOpt(sesOpts.Chargeable)
-	}
-	var debitIvl []*utils.DynamicDurationOpt
-	if sesOpts.DebitInterval != nil {
-		debitIvl = utils.CloneDynamicDurationOpt(sesOpts.DebitInterval)
-	}
-	var lastUsg []*utils.DynamicDurationPointerOpt
-	if sesOpts.TTLLastUsage != nil {
-		lastUsg = utils.CloneDynamicDurationPointerOpt(sesOpts.TTLLastUsage)
-	}
-	var lastUsed []*utils.DynamicDurationPointerOpt
-	if sesOpts.TTLLastUsed != nil {
-		lastUsed = utils.CloneDynamicDurationPointerOpt(sesOpts.TTLLastUsed)
-	}
-	var maxDelay []*utils.DynamicDurationOpt
-	if sesOpts.TTLMaxDelay != nil {
-		maxDelay = utils.CloneDynamicDurationOpt(sesOpts.TTLMaxDelay)
-	}
-	var usg []*utils.DynamicDurationPointerOpt
-	if sesOpts.TTLUsage != nil {
-		usg = utils.CloneDynamicDurationPointerOpt(sesOpts.TTLUsage)
-	}
-	return &SessionsOpts{
-		Accounts:               acntS,
-		Attributes:             attrS,
-		CDRs:                   cdrS,
-		Chargers:               chrgS,
-		Resources:              reS,
-		Routes:                 rouS,
-		Stats:                  stS,
-		Thresholds:             thdS,
-		Initiate:               initS,
-		Update:                 updS,
-		Terminate:              termS,
-		Message:                msg,
-		AttributesDerivedReply: attrDerivedReply,
-		BlockerError:           blockerErr,
-		CDRsDerivedReply:       cdrsDerivedReply,
-		ResourcesAuthorize:     resAuthorize,
-		ResourcesAllocate:      resAllocate,
-		ResourcesRelease:       resRelease,
-		ResourcesDerivedReply:  resDerivedReply,
-		RoutesDerivedReply:     rouDerivedReply,
-		StatsDerivedReply:      stsDerivedReply,
-		ThresholdsDerivedReply: thdsDerivedReply,
-		MaxUsage:               maxUsage,
-		ForceDuration:          forceDuration,
-		TTL:                    ttl,
-		Chargeable:             chargeable,
-		DebitInterval:          debitIvl,
-		TTLLastUsage:           lastUsg,
-		TTLLastUsed:            lastUsed,
-		TTLMaxDelay:            maxDelay,
-		TTLUsage:               usg,
-	}
+	return
 }
 
 // Clone returns a deep copy of SessionSCfg
@@ -623,7 +466,9 @@ func (scfg SessionSCfg) Clone() (cln *SessionSCfg) {
 	cln = &SessionSCfg{
 		Enabled:             scfg.Enabled,
 		ListenBijson:        scfg.ListenBijson,
+		DebitInterval:       scfg.DebitInterval,
 		StoreSCosts:         scfg.StoreSCosts,
+		SessionTTL:          scfg.SessionTTL,
 		ClientProtocol:      scfg.ClientProtocol,
 		ChannelSyncInterval: scfg.ChannelSyncInterval,
 		TerminateAttempts:   scfg.TerminateAttempts,
@@ -633,45 +478,386 @@ func (scfg SessionSCfg) Clone() (cln *SessionSCfg) {
 		AlterableFields: scfg.AlterableFields.Clone(),
 		STIRCfg:         scfg.STIRCfg.Clone(),
 		DefaultUsage:    make(map[string]time.Duration),
-		Opts:            scfg.Opts.Clone(),
 	}
 	for k, v := range scfg.DefaultUsage {
 		cln.DefaultUsage[k] = v
 	}
-	if scfg.ChargerSConns != nil {
-		cln.ChargerSConns = utils.CloneStringSlice(scfg.ChargerSConns)
+	if scfg.SessionTTLMaxDelay != nil {
+		cln.SessionTTLMaxDelay = utils.DurationPointer(*scfg.SessionTTLMaxDelay)
 	}
-	if scfg.ResourceSConns != nil {
-		cln.ResourceSConns = utils.CloneStringSlice(scfg.ResourceSConns)
+	if scfg.SessionTTLLastUsed != nil {
+		cln.SessionTTLLastUsed = utils.DurationPointer(*scfg.SessionTTLLastUsed)
 	}
-	if scfg.ThresholdSConns != nil {
-		cln.ThresholdSConns = utils.CloneStringSlice(scfg.ThresholdSConns)
+	if scfg.SessionTTLUsage != nil {
+		cln.SessionTTLUsage = utils.DurationPointer(*scfg.SessionTTLUsage)
 	}
-	if scfg.StatSConns != nil {
-		cln.StatSConns = utils.CloneStringSlice(scfg.StatSConns)
-	}
-	if scfg.RouteSConns != nil {
-		cln.RouteSConns = utils.CloneStringSlice(scfg.RouteSConns)
-	}
-	if scfg.AttributeSConns != nil {
-		cln.AttributeSConns = utils.CloneStringSlice(scfg.AttributeSConns)
-	}
-	if scfg.CDRsConns != nil {
-		cln.CDRsConns = utils.CloneStringSlice(scfg.CDRsConns)
-	}
-	if scfg.ReplicationConns != nil {
-		cln.ReplicationConns = utils.CloneStringSlice(scfg.ReplicationConns)
-	}
-	if scfg.ActionSConns != nil {
-		cln.ActionSConns = utils.CloneStringSlice(scfg.ActionSConns)
-	}
-	if scfg.RateSConns != nil {
-		cln.RateSConns = utils.CloneStringSlice(scfg.RateSConns)
-	}
-	if scfg.AccountSConns != nil {
-		cln.AccountSConns = utils.CloneStringSlice(scfg.AccountSConns)
+	if scfg.SessionTTLLastUsage != nil {
+		cln.SessionTTLLastUsage = utils.DurationPointer(*scfg.SessionTTLLastUsage)
 	}
 
+	if scfg.ChargerSConns != nil {
+		cln.ChargerSConns = make([]string, len(scfg.ChargerSConns))
+		for i, con := range scfg.ChargerSConns {
+			cln.ChargerSConns[i] = con
+		}
+	}
+	if scfg.RALsConns != nil {
+		cln.RALsConns = make([]string, len(scfg.RALsConns))
+		for i, con := range scfg.RALsConns {
+			cln.RALsConns[i] = con
+		}
+	}
+	if scfg.ResSConns != nil {
+		cln.ResSConns = make([]string, len(scfg.ResSConns))
+		for i, con := range scfg.ResSConns {
+			cln.ResSConns[i] = con
+		}
+	}
+	if scfg.ThreshSConns != nil {
+		cln.ThreshSConns = make([]string, len(scfg.ThreshSConns))
+		for i, con := range scfg.ThreshSConns {
+			cln.ThreshSConns[i] = con
+		}
+	}
+	if scfg.StatSConns != nil {
+		cln.StatSConns = make([]string, len(scfg.StatSConns))
+		for i, con := range scfg.StatSConns {
+			cln.StatSConns[i] = con
+		}
+	}
+	if scfg.RouteSConns != nil {
+		cln.RouteSConns = make([]string, len(scfg.RouteSConns))
+		for i, con := range scfg.RouteSConns {
+			cln.RouteSConns[i] = con
+		}
+	}
+	if scfg.AttrSConns != nil {
+		cln.AttrSConns = make([]string, len(scfg.AttrSConns))
+		for i, con := range scfg.AttrSConns {
+			cln.AttrSConns[i] = con
+		}
+	}
+	if scfg.CDRsConns != nil {
+		cln.CDRsConns = make([]string, len(scfg.CDRsConns))
+		for i, con := range scfg.CDRsConns {
+			cln.CDRsConns[i] = con
+		}
+	}
+	if scfg.ReplicationConns != nil {
+		cln.ReplicationConns = make([]string, len(scfg.ReplicationConns))
+		for i, con := range scfg.ReplicationConns {
+			cln.ReplicationConns[i] = con
+		}
+	}
+	if scfg.SchedulerConns != nil {
+		cln.SchedulerConns = make([]string, len(scfg.SchedulerConns))
+		for i, con := range scfg.SchedulerConns {
+			cln.SchedulerConns[i] = con
+		}
+	}
+
+	return
+}
+
+// FsAgentCfg the config section that describes the FreeSWITCH Agent
+type FsAgentCfg struct {
+	Enabled             bool
+	SessionSConns       []string
+	SubscribePark       bool
+	CreateCdr           bool
+	ExtraFields         RSRParsers
+	LowBalanceAnnFile   string
+	EmptyBalanceContext string
+	EmptyBalanceAnnFile string
+	MaxWaitConnection   time.Duration
+	EventSocketConns    []*FsConnCfg
+}
+
+func (fscfg *FsAgentCfg) loadFromJSONCfg(jsnCfg *FreeswitchAgentJsonCfg) error {
+	if jsnCfg == nil {
+		return nil
+	}
+	var err error
+	if jsnCfg.Enabled != nil {
+		fscfg.Enabled = *jsnCfg.Enabled
+	}
+	if jsnCfg.Sessions_conns != nil {
+		fscfg.SessionSConns = make([]string, len(*jsnCfg.Sessions_conns))
+		for idx, connID := range *jsnCfg.Sessions_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			fscfg.SessionSConns[idx] = connID
+			if connID == utils.MetaInternal ||
+				connID == rpcclient.BiRPCInternal {
+				fscfg.SessionSConns[idx] = utils.ConcatenatedKey(connID, utils.MetaSessionS)
+			}
+		}
+	}
+	if jsnCfg.Subscribe_park != nil {
+		fscfg.SubscribePark = *jsnCfg.Subscribe_park
+	}
+	if jsnCfg.Create_cdr != nil {
+		fscfg.CreateCdr = *jsnCfg.Create_cdr
+	}
+	if jsnCfg.Extra_fields != nil {
+		if fscfg.ExtraFields, err = NewRSRParsersFromSlice(*jsnCfg.Extra_fields); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Low_balance_ann_file != nil {
+		fscfg.LowBalanceAnnFile = *jsnCfg.Low_balance_ann_file
+	}
+	if jsnCfg.Empty_balance_context != nil {
+		fscfg.EmptyBalanceContext = *jsnCfg.Empty_balance_context
+	}
+
+	if jsnCfg.Empty_balance_ann_file != nil {
+		fscfg.EmptyBalanceAnnFile = *jsnCfg.Empty_balance_ann_file
+	}
+	if jsnCfg.Max_wait_connection != nil {
+		if fscfg.MaxWaitConnection, err = utils.ParseDurationWithNanosecs(*jsnCfg.Max_wait_connection); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Event_socket_conns != nil {
+		fscfg.EventSocketConns = make([]*FsConnCfg, len(*jsnCfg.Event_socket_conns))
+		for idx, jsnConnCfg := range *jsnCfg.Event_socket_conns {
+			fscfg.EventSocketConns[idx] = NewDfltFsConnConfig()
+			fscfg.EventSocketConns[idx].loadFromJSONCfg(jsnConnCfg)
+		}
+	}
+	return nil
+}
+
+// AsMapInterface returns the config as a map[string]interface{}
+func (fscfg *FsAgentCfg) AsMapInterface(separator string) (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
+		utils.EnabledCfg:             fscfg.Enabled,
+		utils.SubscribeParkCfg:       fscfg.SubscribePark,
+		utils.CreateCdrCfg:           fscfg.CreateCdr,
+		utils.LowBalanceAnnFileCfg:   fscfg.LowBalanceAnnFile,
+		utils.EmptyBalanceContextCfg: fscfg.EmptyBalanceContext,
+		utils.EmptyBalanceAnnFileCfg: fscfg.EmptyBalanceAnnFile,
+	}
+	if fscfg.SessionSConns != nil {
+		sessionSConns := make([]string, len(fscfg.SessionSConns))
+		for i, item := range fscfg.SessionSConns {
+			sessionSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS) {
+				sessionSConns[i] = utils.MetaInternal
+			} else if item == utils.ConcatenatedKey(rpcclient.BiRPCInternal, utils.MetaSessionS) {
+				sessionSConns[i] = rpcclient.BiRPCInternal
+			}
+		}
+		initialMP[utils.SessionSConnsCfg] = sessionSConns
+	}
+	if fscfg.ExtraFields != nil {
+		initialMP[utils.ExtraFieldsCfg] = fscfg.ExtraFields.GetRule(separator)
+	}
+
+	if fscfg.MaxWaitConnection != 0 {
+		initialMP[utils.MaxWaitConnectionCfg] = fscfg.MaxWaitConnection.String()
+	} else {
+		initialMP[utils.MaxWaitConnectionCfg] = utils.EmptyString
+	}
+	if fscfg.EventSocketConns != nil {
+		eventSocketConns := make([]map[string]interface{}, len(fscfg.EventSocketConns))
+		for key, item := range fscfg.EventSocketConns {
+			eventSocketConns[key] = item.AsMapInterface()
+		}
+		initialMP[utils.EventSocketConnsCfg] = eventSocketConns
+	}
+	return
+}
+
+// Clone returns a deep copy of FsAgentCfg
+func (fscfg FsAgentCfg) Clone() (cln *FsAgentCfg) {
+	cln = &FsAgentCfg{
+		Enabled:             fscfg.Enabled,
+		SubscribePark:       fscfg.SubscribePark,
+		CreateCdr:           fscfg.CreateCdr,
+		ExtraFields:         fscfg.ExtraFields.Clone(),
+		LowBalanceAnnFile:   fscfg.LowBalanceAnnFile,
+		EmptyBalanceContext: fscfg.EmptyBalanceContext,
+		EmptyBalanceAnnFile: fscfg.EmptyBalanceAnnFile,
+		MaxWaitConnection:   fscfg.MaxWaitConnection,
+	}
+	if fscfg.SessionSConns != nil {
+		cln.SessionSConns = make([]string, len(fscfg.SessionSConns))
+		for i, con := range fscfg.SessionSConns {
+			cln.SessionSConns[i] = con
+		}
+	}
+	if fscfg.EventSocketConns != nil {
+		cln.EventSocketConns = make([]*FsConnCfg, len(fscfg.EventSocketConns))
+		for i, req := range fscfg.EventSocketConns {
+			cln.EventSocketConns[i] = req.Clone()
+		}
+	}
+	return
+}
+
+// NewDefaultAsteriskConnCfg is uses stored defaults so we can pre-populate by loading from JSON config
+func NewDefaultAsteriskConnCfg() *AsteriskConnCfg {
+	if dfltAstConnCfg == nil {
+		return new(AsteriskConnCfg) // No defaults, most probably we are building the defaults now
+	}
+	dfltVal := *dfltAstConnCfg // Copy the value instead of it's pointer
+	return &dfltVal
+}
+
+// AsteriskConnCfg the config for a Asterisk connection
+type AsteriskConnCfg struct {
+	Alias                string
+	Address              string
+	User                 string
+	Password             string
+	ConnectAttempts      int
+	Reconnects           int
+	MaxReconnectInterval time.Duration
+}
+
+func (aConnCfg *AsteriskConnCfg) loadFromJSONCfg(jsnCfg *AstConnJsonCfg) (err error) {
+	if jsnCfg == nil {
+		return
+	}
+	if jsnCfg.Address != nil {
+		aConnCfg.Address = *jsnCfg.Address
+	}
+	if jsnCfg.Alias != nil {
+		aConnCfg.Alias = *jsnCfg.Alias
+	}
+	if jsnCfg.User != nil {
+		aConnCfg.User = *jsnCfg.User
+	}
+	if jsnCfg.Password != nil {
+		aConnCfg.Password = *jsnCfg.Password
+	}
+	if jsnCfg.Connect_attempts != nil {
+		aConnCfg.ConnectAttempts = *jsnCfg.Connect_attempts
+	}
+	if jsnCfg.Reconnects != nil {
+		aConnCfg.Reconnects = *jsnCfg.Reconnects
+	}
+	if jsnCfg.Max_reconnect_interval != nil {
+		if aConnCfg.MaxReconnectInterval, err = utils.ParseDurationWithNanosecs(*jsnCfg.Max_reconnect_interval); err != nil {
+			return
+		}
+	}
+	return
+}
+
+// AsMapInterface returns the config as a map[string]interface{}
+func (aConnCfg *AsteriskConnCfg) AsMapInterface() map[string]interface{} {
+	return map[string]interface{}{
+		utils.AliasCfg:                aConnCfg.Alias,
+		utils.AddressCfg:              aConnCfg.Address,
+		utils.UserCf:                  aConnCfg.User,
+		utils.Password:                aConnCfg.Password,
+		utils.ConnectAttemptsCfg:      aConnCfg.ConnectAttempts,
+		utils.ReconnectsCfg:           aConnCfg.Reconnects,
+		utils.MaxReconnectIntervalCfg: aConnCfg.MaxReconnectInterval.String(),
+	}
+}
+
+// Clone returns a deep copy of AsteriskConnCfg
+func (aConnCfg AsteriskConnCfg) Clone() *AsteriskConnCfg {
+	return &AsteriskConnCfg{
+		Alias:                aConnCfg.Alias,
+		Address:              aConnCfg.Address,
+		User:                 aConnCfg.User,
+		Password:             aConnCfg.Password,
+		ConnectAttempts:      aConnCfg.ConnectAttempts,
+		Reconnects:           aConnCfg.Reconnects,
+		MaxReconnectInterval: aConnCfg.MaxReconnectInterval,
+	}
+}
+
+// AsteriskAgentCfg the config section that describes the Asterisk Agent
+type AsteriskAgentCfg struct {
+	Enabled       bool
+	SessionSConns []string
+	CreateCDR     bool
+	AsteriskConns []*AsteriskConnCfg
+}
+
+func (aCfg *AsteriskAgentCfg) loadFromJSONCfg(jsnCfg *AsteriskAgentJsonCfg) (err error) {
+	if jsnCfg == nil {
+		return nil
+	}
+	if jsnCfg.Enabled != nil {
+		aCfg.Enabled = *jsnCfg.Enabled
+	}
+	if jsnCfg.Sessions_conns != nil {
+		aCfg.SessionSConns = make([]string, len(*jsnCfg.Sessions_conns))
+		for idx, attrConn := range *jsnCfg.Sessions_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			aCfg.SessionSConns[idx] = attrConn
+			if attrConn == utils.MetaInternal ||
+				attrConn == rpcclient.BiRPCInternal {
+				aCfg.SessionSConns[idx] = utils.ConcatenatedKey(attrConn, utils.MetaSessionS)
+			}
+		}
+	}
+	if jsnCfg.Create_cdr != nil {
+		aCfg.CreateCDR = *jsnCfg.Create_cdr
+	}
+
+	if jsnCfg.Asterisk_conns != nil {
+		aCfg.AsteriskConns = make([]*AsteriskConnCfg, len(*jsnCfg.Asterisk_conns))
+		for i, jsnAConn := range *jsnCfg.Asterisk_conns {
+			aCfg.AsteriskConns[i] = NewDefaultAsteriskConnCfg()
+			aCfg.AsteriskConns[i].loadFromJSONCfg(jsnAConn)
+		}
+	}
+	return nil
+}
+
+// AsMapInterface returns the config as a map[string]interface{}
+func (aCfg *AsteriskAgentCfg) AsMapInterface() (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
+		utils.EnabledCfg:   aCfg.Enabled,
+		utils.CreateCDRCfg: aCfg.CreateCDR,
+	}
+	if aCfg.AsteriskConns != nil {
+		conns := make([]map[string]interface{}, len(aCfg.AsteriskConns))
+		for i, item := range aCfg.AsteriskConns {
+			conns[i] = item.AsMapInterface()
+		}
+		initialMP[utils.AsteriskConnsCfg] = conns
+	}
+	if aCfg.SessionSConns != nil {
+		sessionSConns := make([]string, len(aCfg.SessionSConns))
+		for i, item := range aCfg.SessionSConns {
+			sessionSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS) {
+				sessionSConns[i] = utils.MetaInternal
+			} else if item == utils.ConcatenatedKey(rpcclient.BiRPCInternal, utils.MetaSessionS) {
+				sessionSConns[i] = rpcclient.BiRPCInternal
+			}
+		}
+		initialMP[utils.SessionSConnsCfg] = sessionSConns
+	}
+	return
+}
+
+// Clone returns a deep copy of AsteriskAgentCfg
+func (aCfg AsteriskAgentCfg) Clone() (cln *AsteriskAgentCfg) {
+	cln = &AsteriskAgentCfg{
+		Enabled:   aCfg.Enabled,
+		CreateCDR: aCfg.CreateCDR,
+	}
+	if aCfg.SessionSConns != nil {
+		cln.SessionSConns = make([]string, len(aCfg.SessionSConns))
+		for i, con := range aCfg.SessionSConns {
+			cln.SessionSConns[i] = con
+		}
+	}
+	if aCfg.AsteriskConns != nil {
+		cln.AsteriskConns = make([]*AsteriskConnCfg, len(aCfg.AsteriskConns))
+		for i, req := range aCfg.AsteriskConns {
+			cln.AsteriskConns[i] = req.Clone()
+		}
+	}
 	return
 }
 
@@ -734,279 +920,4 @@ func (stirCfg STIRcfg) Clone() *STIRcfg {
 		PublicKeyPath:      stirCfg.PublicKeyPath,
 		PrivateKeyPath:     stirCfg.PrivateKeyPath,
 	}
-}
-
-type STIRJsonCfg struct {
-	Allowed_attest      *[]string
-	Payload_maxduration *string
-	Default_attest      *string
-	Publickey_path      *string
-	Privatekey_path     *string
-}
-
-func diffSTIRJsonCfg(d *STIRJsonCfg, v1, v2 *STIRcfg) *STIRJsonCfg {
-	if d == nil {
-		d = new(STIRJsonCfg)
-	}
-	if v1.AllowedAttest.Equals(v2.AllowedAttest) {
-		d.Allowed_attest = nil
-		if v2.AllowedAttest != nil {
-			d.Allowed_attest = utils.SliceStringPointer(v2.AllowedAttest.AsSlice())
-		}
-	}
-	if v1.PayloadMaxduration != v2.PayloadMaxduration {
-		d.Payload_maxduration = utils.StringPointer(v2.PayloadMaxduration.String())
-	}
-	if v1.DefaultAttest != v2.DefaultAttest {
-		d.Default_attest = utils.StringPointer(v2.DefaultAttest)
-	}
-	if v1.PublicKeyPath != v2.PublicKeyPath {
-		d.Publickey_path = utils.StringPointer(v2.PublicKeyPath)
-	}
-	if v1.PrivateKeyPath != v2.PrivateKeyPath {
-		d.Privatekey_path = utils.StringPointer(v2.PrivateKeyPath)
-	}
-	return d
-}
-
-type SessionsOptsJson struct {
-	Accounts               []*utils.DynamicBoolOpt   `json:"*accounts"`
-	Attributes             []*utils.DynamicBoolOpt   `json:"*attributes"`
-	CDRs                   []*utils.DynamicBoolOpt   `json:"*cdrs"`
-	Chargers               []*utils.DynamicBoolOpt   `json:"*chargers"`
-	Resources              []*utils.DynamicBoolOpt   `json:"*resources"`
-	Routes                 []*utils.DynamicBoolOpt   `json:"*routes"`
-	Stats                  []*utils.DynamicBoolOpt   `json:"*stats"`
-	Thresholds             []*utils.DynamicBoolOpt   `json:"*thresholds"`
-	Initiate               []*utils.DynamicBoolOpt   `json:"*initiate"`
-	Update                 []*utils.DynamicBoolOpt   `json:"*update"`
-	Terminate              []*utils.DynamicBoolOpt   `json:"*terminate"`
-	Message                []*utils.DynamicBoolOpt   `json:"*message"`
-	AttributesDerivedReply []*utils.DynamicBoolOpt   `json:"*attributesDerivedReply"`
-	BlockerError           []*utils.DynamicBoolOpt   `json:"*blockerError"`
-	CDRsDerivedReply       []*utils.DynamicBoolOpt   `json:"*cdrsDerivedReply"`
-	ResourcesAuthorize     []*utils.DynamicBoolOpt   `json:"*resourcesAuthorize"`
-	ResourcesAllocate      []*utils.DynamicBoolOpt   `json:"*resourcesAllocate"`
-	ResourcesRelease       []*utils.DynamicBoolOpt   `json:"*resourcesRelease"`
-	ResourcesDerivedReply  []*utils.DynamicBoolOpt   `json:"*resourcesDerivedReply"`
-	RoutesDerivedReply     []*utils.DynamicBoolOpt   `json:"*routesDerivedReply"`
-	StatsDerivedReply      []*utils.DynamicBoolOpt   `json:"*statsDerivedReply"`
-	ThresholdsDerivedReply []*utils.DynamicBoolOpt   `json:"*thresholdsDerivedReply"`
-	MaxUsage               []*utils.DynamicBoolOpt   `json:"*maxUsage"`
-	ForceDuration          []*utils.DynamicBoolOpt   `json:"*forceDuration"`
-	TTL                    []*utils.DynamicStringOpt `json:"*ttl"`
-	Chargeable             []*utils.DynamicBoolOpt   `json:"*chargeable"`
-	DebitInterval          []*utils.DynamicStringOpt `json:"*debitInterval"`
-	TTLLastUsage           []*utils.DynamicStringOpt `json:"*ttlLastUsage"`
-	TTLLastUsed            []*utils.DynamicStringOpt `json:"*ttlLastUsed"`
-	TTLMaxDelay            []*utils.DynamicStringOpt `json:"*ttlMaxDelay"`
-	TTLUsage               []*utils.DynamicStringOpt `json:"*ttlUsage"`
-}
-
-// SessionSJsonCfg config section
-type SessionSJsonCfg struct {
-	Enabled               *bool
-	Listen_bijson         *string
-	Listen_bigob          *string
-	Chargers_conns        *[]string
-	Resources_conns       *[]string
-	Thresholds_conns      *[]string
-	Stats_conns           *[]string
-	Routes_conns          *[]string
-	Cdrs_conns            *[]string
-	Replication_conns     *[]string
-	Attributes_conns      *[]string
-	Actions_conns         *[]string
-	Rates_conns           *[]string
-	Accounts_conns        *[]string
-	Store_session_costs   *bool
-	Session_indexes       *[]string
-	Client_protocol       *float64
-	Channel_sync_interval *string
-	Terminate_attempts    *int
-	Alterable_fields      *[]string
-	Min_dur_low_balance   *string
-	Stir                  *STIRJsonCfg
-	Default_usage         map[string]string
-	Opts                  *SessionsOptsJson
-}
-
-func diffSessionsOptsJsonCfg(d *SessionsOptsJson, v1, v2 *SessionsOpts) *SessionsOptsJson {
-	if d == nil {
-		d = new(SessionsOptsJson)
-	}
-	if !utils.DynamicBoolOptEqual(v1.Accounts, v2.Accounts) {
-		d.Accounts = v2.Accounts
-	}
-	if !utils.DynamicBoolOptEqual(v1.Attributes, v2.Attributes) {
-		d.Attributes = v2.Attributes
-	}
-	if !utils.DynamicBoolOptEqual(v1.CDRs, v2.CDRs) {
-		d.CDRs = v2.CDRs
-	}
-	if !utils.DynamicBoolOptEqual(v1.Chargers, v2.Chargers) {
-		d.Chargers = v2.Chargers
-	}
-	if !utils.DynamicBoolOptEqual(v1.Resources, v2.Resources) {
-		d.Resources = v2.Resources
-	}
-	if !utils.DynamicBoolOptEqual(v1.Routes, v2.Routes) {
-		d.Routes = v2.Routes
-	}
-	if !utils.DynamicBoolOptEqual(v1.Stats, v2.Stats) {
-		d.Stats = v2.Stats
-	}
-	if !utils.DynamicBoolOptEqual(v1.Thresholds, v2.Thresholds) {
-		d.Thresholds = v2.Thresholds
-	}
-	if !utils.DynamicBoolOptEqual(v1.Initiate, v2.Initiate) {
-		d.Initiate = v2.Initiate
-	}
-	if !utils.DynamicBoolOptEqual(v1.Update, v2.Update) {
-		d.Update = v2.Update
-	}
-	if !utils.DynamicBoolOptEqual(v1.Terminate, v2.Terminate) {
-		d.Terminate = v2.Terminate
-	}
-	if !utils.DynamicBoolOptEqual(v1.Message, v2.Message) {
-		d.Message = v2.Message
-	}
-	if !utils.DynamicBoolOptEqual(v1.AttributesDerivedReply, v2.AttributesDerivedReply) {
-		d.AttributesDerivedReply = v2.AttributesDerivedReply
-	}
-	if !utils.DynamicBoolOptEqual(v1.BlockerError, v2.BlockerError) {
-		d.BlockerError = v2.BlockerError
-	}
-	if !utils.DynamicBoolOptEqual(v1.CDRsDerivedReply, v2.CDRsDerivedReply) {
-		d.CDRsDerivedReply = v2.CDRsDerivedReply
-	}
-	if !utils.DynamicBoolOptEqual(v1.ResourcesAuthorize, v2.ResourcesAuthorize) {
-		d.ResourcesAuthorize = v2.ResourcesAuthorize
-	}
-	if !utils.DynamicBoolOptEqual(v1.ResourcesAllocate, v2.ResourcesAllocate) {
-		d.ResourcesAllocate = v2.ResourcesAllocate
-	}
-	if !utils.DynamicBoolOptEqual(v1.ResourcesRelease, v2.ResourcesRelease) {
-		d.ResourcesRelease = v2.ResourcesRelease
-	}
-	if !utils.DynamicBoolOptEqual(v1.ResourcesDerivedReply, v2.ResourcesDerivedReply) {
-		d.ResourcesDerivedReply = v2.ResourcesDerivedReply
-	}
-	if !utils.DynamicBoolOptEqual(v1.RoutesDerivedReply, v2.RoutesDerivedReply) {
-		d.RoutesDerivedReply = v2.RoutesDerivedReply
-	}
-	if !utils.DynamicBoolOptEqual(v1.StatsDerivedReply, v2.StatsDerivedReply) {
-		d.StatsDerivedReply = v2.StatsDerivedReply
-	}
-	if !utils.DynamicBoolOptEqual(v1.ThresholdsDerivedReply, v2.ThresholdsDerivedReply) {
-		d.ThresholdsDerivedReply = v2.ThresholdsDerivedReply
-	}
-	if !utils.DynamicBoolOptEqual(v1.MaxUsage, v2.MaxUsage) {
-		d.MaxUsage = v2.MaxUsage
-	}
-	if !utils.DynamicBoolOptEqual(v1.ForceDuration, v2.ForceDuration) {
-		d.ForceDuration = v2.ForceDuration
-	}
-	if !utils.DynamicDurationOptEqual(v1.TTL, v2.TTL) {
-		d.TTL = utils.DurationToStringDynamicOpts(v2.TTL)
-	}
-	if !utils.DynamicBoolOptEqual(v1.Chargeable, v2.Chargeable) {
-		d.Chargeable = v2.Chargeable
-	}
-	if !utils.DynamicDurationPointerOptEqual(v1.TTLLastUsage, v2.TTLLastUsage) {
-		d.TTLLastUsage = utils.DurationPointerToStringDynamicOpts(v2.TTLLastUsage)
-	}
-	if !utils.DynamicDurationPointerOptEqual(v1.TTLLastUsed, v2.TTLLastUsed) {
-		d.TTLLastUsed = utils.DurationPointerToStringDynamicOpts(v2.TTLLastUsed)
-	}
-	if !utils.DynamicDurationOptEqual(v1.DebitInterval, v2.DebitInterval) {
-		d.DebitInterval = utils.DurationToStringDynamicOpts(v2.DebitInterval)
-	}
-	if !utils.DynamicDurationOptEqual(v1.TTLMaxDelay, v2.TTLMaxDelay) {
-		d.TTLMaxDelay = utils.DurationToStringDynamicOpts(v2.TTLMaxDelay)
-	}
-	if !utils.DynamicDurationPointerOptEqual(v1.TTLUsage, v2.TTLUsage) {
-		d.TTLUsage = utils.DurationPointerToStringDynamicOpts(v2.TTLUsage)
-	}
-	return d
-}
-
-func diffSessionSJsonCfg(d *SessionSJsonCfg, v1, v2 *SessionSCfg) *SessionSJsonCfg {
-	if d == nil {
-		d = new(SessionSJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if v1.ListenBijson != v2.ListenBijson {
-		d.Listen_bijson = utils.StringPointer(v2.ListenBijson)
-	}
-	if v1.ListenBigob != v2.ListenBigob {
-		d.Listen_bigob = utils.StringPointer(v2.ListenBigob)
-	}
-	if !utils.SliceStringEqual(v1.ChargerSConns, v2.ChargerSConns) {
-		d.Chargers_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ChargerSConns))
-	}
-	if !utils.SliceStringEqual(v1.ResourceSConns, v2.ResourceSConns) {
-		d.Resources_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ResourceSConns))
-	}
-	if !utils.SliceStringEqual(v1.ThresholdSConns, v2.ThresholdSConns) {
-		d.Thresholds_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ThresholdSConns))
-	}
-	if !utils.SliceStringEqual(v1.StatSConns, v2.StatSConns) {
-		d.Stats_conns = utils.SliceStringPointer(getInternalJSONConns(v2.StatSConns))
-	}
-	if !utils.SliceStringEqual(v1.RouteSConns, v2.RouteSConns) {
-		d.Routes_conns = utils.SliceStringPointer(getInternalJSONConns(v2.RouteSConns))
-	}
-	if !utils.SliceStringEqual(v1.AttributeSConns, v2.AttributeSConns) {
-		d.Cdrs_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AttributeSConns))
-	}
-	if !utils.SliceStringEqual(v1.CDRsConns, v2.CDRsConns) {
-		d.Replication_conns = utils.SliceStringPointer(getInternalJSONConns(v2.CDRsConns))
-	}
-	if !utils.SliceStringEqual(v1.ReplicationConns, v2.ReplicationConns) {
-		d.Attributes_conns = utils.SliceStringPointer(v2.ReplicationConns)
-	}
-	if !utils.SliceStringEqual(v1.RateSConns, v2.RateSConns) {
-		d.Rates_conns = utils.SliceStringPointer(getInternalJSONConns(v2.RateSConns))
-	}
-	if !utils.SliceStringEqual(v1.AccountSConns, v2.AccountSConns) {
-		d.Accounts_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AccountSConns))
-	}
-	if v1.StoreSCosts != v2.StoreSCosts {
-		d.Store_session_costs = utils.BoolPointer(v2.StoreSCosts)
-	}
-	if !v1.SessionIndexes.Equals(v2.SessionIndexes) {
-		d.Session_indexes = utils.SliceStringPointer(v2.SessionIndexes.AsSlice())
-	}
-	if v1.ClientProtocol != v2.ClientProtocol {
-		d.Client_protocol = utils.Float64Pointer(v2.ClientProtocol)
-	}
-	if v1.ChannelSyncInterval != v2.ChannelSyncInterval {
-		d.Channel_sync_interval = utils.StringPointer(v2.ChannelSyncInterval.String())
-	}
-	if v1.TerminateAttempts != v2.TerminateAttempts {
-		d.Terminate_attempts = utils.IntPointer(v2.TerminateAttempts)
-	}
-	if !v1.AlterableFields.Equals(v2.AlterableFields) {
-		d.Alterable_fields = utils.SliceStringPointer(v2.AlterableFields.AsSlice())
-	}
-	if v1.MinDurLowBalance != v2.MinDurLowBalance {
-		d.Min_dur_low_balance = utils.StringPointer(v2.MinDurLowBalance.String())
-	}
-	if !utils.SliceStringEqual(v1.ActionSConns, v2.ActionSConns) {
-		d.Actions_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ActionSConns))
-	}
-	d.Stir = diffSTIRJsonCfg(d.Stir, v1.STIRCfg, v2.STIRCfg)
-	if d.Default_usage == nil {
-		d.Default_usage = make(map[string]string)
-	}
-	for tor, usage2 := range v2.DefaultUsage {
-		if usage1, has := v1.DefaultUsage[tor]; !has || usage1 != usage2 {
-			d.Default_usage[tor] = usage2.String()
-		}
-	}
-	d.Opts = diffSessionsOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

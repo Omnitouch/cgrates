@@ -19,8 +19,12 @@
 },
 
 
-"rates": {
-	"enabled": true,
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+"rals": {
+	"enabled": true,					// enable Rater service: <true|false>
 },
 
 }

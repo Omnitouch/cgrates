@@ -26,7 +26,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewRjReader creates a new rjReader from a io.Reader

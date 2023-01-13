@@ -19,7 +19,9 @@
 },
 
 
-
+"stor_db": {
+	"db_type": "*internal",	
+},
 
 "rals": {
 	"enabled": true,
@@ -68,7 +70,7 @@
 
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },

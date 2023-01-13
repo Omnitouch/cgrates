@@ -22,10 +22,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewDataDBService returns the DataDB Service
@@ -52,25 +51,30 @@ type DataDBService struct {
 }
 
 // Start should handle the sercive start
-func (db *DataDBService) Start(*context.Context, context.CancelFunc) (err error) {
+func (db *DataDBService) Start() (err error) {
 	if db.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 	db.Lock()
 	defer db.Unlock()
 	db.oldDBCfg = db.cfg.DataDbCfg().Clone()
-	var d engine.DataDBDriver
-	d, err = engine.NewDataDBConn(db.cfg.DataDbCfg().Type,
+	d, err := engine.NewDataDBConn(db.cfg.DataDbCfg().Type,
 		db.cfg.DataDbCfg().Host, db.cfg.DataDbCfg().Port,
 		db.cfg.DataDbCfg().Name, db.cfg.DataDbCfg().User,
 		db.cfg.DataDbCfg().Password, db.cfg.GeneralCfg().DBDataEncoding,
 		db.cfg.DataDbCfg().Opts, db.cfg.DataDbCfg().Items)
-	if err != nil { // Cannot configure getter database, show stopper
+	if db.mandatoryDB() && err != nil { // Cannot configure getter database, show stopper
 		utils.Logger.Crit(fmt.Sprintf("Could not configure dataDb: %s exiting!", err))
+		return
+	} else if db.cfg.SessionSCfg().Enabled && err != nil {
+		utils.Logger.Warning(fmt.Sprintf("Could not configure dataDb: %s. Some SessionS APIs will not work", err))
+		err = nil // reset the error in case of only SessionS active
 		return
 	}
 	db.dm = engine.NewDataManager(d, db.cfg.CacheCfg(), db.connMgr)
+	engine.SetDataStorage(db.dm)
 	if err = engine.CheckVersions(db.dm.DataDB()); err != nil {
+		fmt.Println(err)
 		return
 	}
 	db.dbchan <- db.dm
@@ -78,20 +82,14 @@ func (db *DataDBService) Start(*context.Context, context.CancelFunc) (err error)
 }
 
 // Reload handles the change of config
-func (db *DataDBService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (db *DataDBService) Reload() (err error) {
 	db.Lock()
 	defer db.Unlock()
 	if db.needsConnectionReload() {
-		var d engine.DataDBDriver
-		d, err = engine.NewDataDBConn(db.cfg.DataDbCfg().Type,
-			db.cfg.DataDbCfg().Host, db.cfg.DataDbCfg().Port,
-			db.cfg.DataDbCfg().Name, db.cfg.DataDbCfg().User,
-			db.cfg.DataDbCfg().Password, db.cfg.GeneralCfg().DBDataEncoding,
-			db.cfg.DataDbCfg().Opts, db.cfg.DataDbCfg().Items)
-		if err != nil {
+		if err = db.dm.Reconnect(db.cfg.GeneralCfg().DBDataEncoding,
+			db.cfg.DataDbCfg(), db.cfg.DataDbCfg().Items); err != nil {
 			return
 		}
-		db.dm.Reconnect(d)
 		db.oldDBCfg = db.cfg.DataDbCfg().Clone()
 		return
 	}
@@ -107,12 +105,11 @@ func (db *DataDBService) Reload(*context.Context, context.CancelFunc) (err error
 }
 
 // Shutdown stops the service
-func (db *DataDBService) Shutdown() (_ error) {
+func (db *DataDBService) Shutdown() (err error) {
 	db.srvDep[utils.DataDB].Wait()
 	db.Lock()
 	db.dm.DataDB().Close()
 	db.dm = nil
-	<-db.dbchan
 	db.Unlock()
 	return
 }
@@ -130,8 +127,23 @@ func (db *DataDBService) ServiceName() string {
 }
 
 // ShouldRun returns if the service should be running
-func (db *DataDBService) ShouldRun() bool { // db should allways run
-	return true // ||db.mandatoryDB() || db.cfg.SessionSCfg().Enabled
+func (db *DataDBService) ShouldRun() bool {
+	return db.mandatoryDB() || db.cfg.SessionSCfg().Enabled
+}
+
+// mandatoryDB returns if the current configuration needs the DB
+func (db *DataDBService) mandatoryDB() bool {
+	return db.cfg.RalsCfg().Enabled || db.cfg.SchedulerCfg().Enabled || db.cfg.ChargerSCfg().Enabled ||
+		db.cfg.AttributeSCfg().Enabled || db.cfg.ResourceSCfg().Enabled || db.cfg.StatSCfg().Enabled ||
+		db.cfg.ThresholdSCfg().Enabled || db.cfg.RouteSCfg().Enabled || db.cfg.DispatcherSCfg().Enabled ||
+		db.cfg.LoaderCfg().Enabled() || db.cfg.ApierCfg().Enabled || db.cfg.AnalyzerSCfg().Enabled
+}
+
+// GetDM returns the DataManager
+func (db *DataDBService) GetDM() *engine.DataManager {
+	db.RLock()
+	defer db.RUnlock()
+	return db.dm
 }
 
 // needsConnectionReload returns if the DB connection needs to reloaded
@@ -165,16 +177,9 @@ func (db *DataDBService) needsConnectionReload() bool {
 			db.oldDBCfg.Opts.RedisWriteTimeout != db.cfg.DataDbCfg().Opts.RedisWriteTimeout)
 }
 
-// GetDM returns the DataManager
-func (db *DataDBService) WaitForDM(ctx *context.Context) (datadb *engine.DataManager, err error) {
+// GetDMChan returns the DataManager chanel
+func (db *DataDBService) GetDMChan() chan *engine.DataManager {
 	db.RLock()
-	dbCh := db.dbchan
-	db.RUnlock()
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case datadb = <-dbCh:
-		dbCh <- datadb
-	}
-	return
+	defer db.RUnlock()
+	return db.dbchan
 }

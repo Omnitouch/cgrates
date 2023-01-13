@@ -28,12 +28,11 @@ import (
 
 	"github.com/antchfx/xmlquery"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
+	"github.com/cgrates/cgrates/agents"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewXMLFileER(cfg *config.CGRConfig, cfgIdx int,
@@ -155,7 +154,7 @@ func (rdr *XMLFileER) processFile(fPath, fName string) (err error) {
 			utils.FirstNonEmpty(rdr.Config().Timezone,
 				rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 			rdr.fltrS, nil) // create an AgentRequest
-		if pass, err := rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+		if pass, err := rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 			agReq); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> reading file: <%s> row <%d>, ignoring due to filter error: <%s>",
@@ -192,6 +191,6 @@ func (rdr *XMLFileER) processFile(fPath, fName string) (err error) {
 
 	utils.Logger.Info(
 		fmt.Sprintf("%s finished processing file <%s>. Total records processed: %d, events posted: %d, run duration: %s",
-			utils.ERs, absPath, rowNr, evsPosted, time.Now().Sub(timeStart)))
+			utils.ERs, absPath, rowNr, evsPosted, time.Since(timeStart)))
 	return
 }

@@ -24,27 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
-
-func defaultDBPort(dbType, port string) string {
-	if port == utils.MetaDynamic {
-		switch dbType {
-		case utils.MySQL:
-			port = "3306"
-		case utils.Postgres:
-			port = "5432"
-		case utils.Mongo:
-			port = "27017"
-		case utils.Redis:
-			port = "6379"
-		case utils.Internal:
-			port = "internal"
-		}
-	}
-	return port
-}
 
 type DataDBOpts struct {
 	RedisMaxConns           int
@@ -76,30 +57,8 @@ type DataDbCfg struct {
 	RplConns    []string // Replication connIDs
 	RplFiltered bool
 	RplCache    string
-	Items       map[string]*ItemOpts
+	Items       map[string]*ItemOpt
 	Opts        *DataDBOpts
-}
-
-// loadDataDBCfg loads the DataDB section of the configuration
-func (dbcfg *DataDbCfg) Load(ctx *context.Context, jsnCfg ConfigDB, cfg *CGRConfig) (err error) {
-	jsnDataDbCfg := new(DbJsonCfg)
-	if err = jsnCfg.GetSection(ctx, DataDBJSON, jsnDataDbCfg); err != nil {
-		return
-	}
-	if err = dbcfg.loadFromJSONCfg(jsnDataDbCfg); err != nil {
-		return
-	}
-	// in case of internalDB we need to disable the cache
-	// so we enforce it here
-	if cfg.dataDbCfg.Type == utils.Internal {
-		// overwrite only DataDBPartitions and leave other unmodified ( e.g. *diameter_messages, *closed_sessions, etc... )
-		for key := range utils.DataDBPartitions {
-			if _, has := cfg.cacheCfg.Partitions[key]; has {
-				cfg.cacheCfg.Partitions[key] = &CacheParamCfg{}
-			}
-		}
-	}
-	return
 }
 
 func (dbOpts *DataDBOpts) loadFromJSONCfg(jsnCfg *DBOptsJson) (err error) {
@@ -166,7 +125,7 @@ func (dbOpts *DataDBOpts) loadFromJSONCfg(jsnCfg *DBOptsJson) (err error) {
 // loadFromJSONCfg loads Database config from JsonCfg
 func (dbcfg *DataDbCfg) loadFromJSONCfg(jsnDbCfg *DbJsonCfg) (err error) {
 	if jsnDbCfg == nil {
-		return nil
+		return
 	}
 	if jsnDbCfg.Db_type != nil {
 		dbcfg.Type = strings.TrimPrefix(*jsnDbCfg.Db_type, "*")
@@ -179,7 +138,7 @@ func (dbcfg *DataDbCfg) loadFromJSONCfg(jsnDbCfg *DbJsonCfg) (err error) {
 		if port == "-1" {
 			port = utils.MetaDynamic
 		}
-		dbcfg.Port = defaultDBPort(dbcfg.Type, port)
+		dbcfg.Port = dbDefaultsCfg.dbPort(dbcfg.Type, port)
 	}
 	if jsnDbCfg.Db_name != nil {
 		dbcfg.Name = *jsnDbCfg.Db_name
@@ -193,8 +152,9 @@ func (dbcfg *DataDbCfg) loadFromJSONCfg(jsnDbCfg *DbJsonCfg) (err error) {
 	if jsnDbCfg.Remote_conns != nil {
 		dbcfg.RmtConns = make([]string, len(*jsnDbCfg.Remote_conns))
 		for idx, rmtConn := range *jsnDbCfg.Remote_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
 			if rmtConn == utils.MetaInternal {
-				return fmt.Errorf("Remote connection ID needs to be different than <%s> ", utils.MetaInternal)
+				return fmt.Errorf("Remote connection ID needs to be different than *internal")
 			}
 			dbcfg.RmtConns[idx] = rmtConn
 		}
@@ -202,17 +162,18 @@ func (dbcfg *DataDbCfg) loadFromJSONCfg(jsnDbCfg *DbJsonCfg) (err error) {
 	if jsnDbCfg.Replication_conns != nil {
 		dbcfg.RplConns = make([]string, len(*jsnDbCfg.Replication_conns))
 		for idx, rplConn := range *jsnDbCfg.Replication_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
 			if rplConn == utils.MetaInternal {
-				return fmt.Errorf("Remote connection ID needs to be different than <%s> ", utils.MetaInternal)
+				return fmt.Errorf("Replication connection ID needs to be different than *internal")
 			}
 			dbcfg.RplConns[idx] = rplConn
 		}
 	}
 	if jsnDbCfg.Items != nil {
-		for kJsn, vJsn := range jsnDbCfg.Items {
+		for kJsn, vJsn := range *jsnDbCfg.Items {
 			val, has := dbcfg.Items[kJsn]
 			if val == nil || !has {
-				val = &ItemOpts{Limit: -1}
+				val = &ItemOpt{Limit: -1}
 			}
 			if err = val.loadFromJSONCfg(vJsn); err != nil {
 				return
@@ -235,9 +196,6 @@ func (dbcfg *DataDbCfg) loadFromJSONCfg(jsnDbCfg *DbJsonCfg) (err error) {
 	return
 }
 
-func (DataDbCfg) SName() string               { return DataDBJSON }
-func (dbcfg DataDbCfg) CloneSection() Section { return dbcfg.Clone() }
-
 func (dbOpts *DataDBOpts) Clone() *DataDBOpts {
 	return &DataDBOpts{
 		RedisMaxConns:           dbOpts.RedisMaxConns,
@@ -258,7 +216,7 @@ func (dbOpts *DataDBOpts) Clone() *DataDBOpts {
 }
 
 // Clone returns the cloned object
-func (dbcfg DataDbCfg) Clone() (cln *DataDbCfg) {
+func (dbcfg *DataDbCfg) Clone() (cln *DataDbCfg) {
 	cln = &DataDbCfg{
 		Type:        dbcfg.Type,
 		Host:        dbcfg.Host,
@@ -269,23 +227,29 @@ func (dbcfg DataDbCfg) Clone() (cln *DataDbCfg) {
 		RplFiltered: dbcfg.RplFiltered,
 		RplCache:    dbcfg.RplCache,
 		RmtConnID:   dbcfg.RmtConnID,
-		Items:       make(map[string]*ItemOpts),
+		Items:       make(map[string]*ItemOpt),
 		Opts:        dbcfg.Opts.Clone(),
 	}
 	for k, itm := range dbcfg.Items {
 		cln.Items[k] = itm.Clone()
 	}
 	if dbcfg.RmtConns != nil {
-		cln.RmtConns = utils.CloneStringSlice(dbcfg.RmtConns)
+		cln.RmtConns = make([]string, len(dbcfg.RmtConns))
+		for i, conn := range dbcfg.RmtConns {
+			cln.RmtConns[i] = conn
+		}
 	}
 	if dbcfg.RplConns != nil {
-		cln.RplConns = utils.CloneStringSlice(dbcfg.RplConns)
+		cln.RplConns = make([]string, len(dbcfg.RplConns))
+		for i, conn := range dbcfg.RplConns {
+			cln.RplConns[i] = conn
+		}
 	}
 	return
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (dbcfg DataDbCfg) AsMapInterface(string) interface{} {
+func (dbcfg *DataDbCfg) AsMapInterface() (mp map[string]interface{}) {
 	opts := map[string]interface{}{
 		utils.RedisMaxConnsCfg:           dbcfg.Opts.RedisMaxConns,
 		utils.RedisConnectAttemptsCfg:    dbcfg.Opts.RedisConnectAttempts,
@@ -297,12 +261,12 @@ func (dbcfg DataDbCfg) AsMapInterface(string) interface{} {
 		utils.RedisReadTimeoutCfg:        dbcfg.Opts.RedisReadTimeout.String(),
 		utils.RedisWriteTimeoutCfg:       dbcfg.Opts.RedisWriteTimeout.String(),
 		utils.MongoQueryTimeoutCfg:       dbcfg.Opts.MongoQueryTimeout.String(),
-		utils.RedisTLSCfg:                dbcfg.Opts.RedisTLS,
-		utils.RedisClientCertificateCfg:  dbcfg.Opts.RedisClientCertificate,
-		utils.RedisClientKeyCfg:          dbcfg.Opts.RedisClientKey,
-		utils.RedisCACertificateCfg:      dbcfg.Opts.RedisCACertificate,
+		utils.RedisTLS:                   dbcfg.Opts.RedisTLS,
+		utils.RedisClientCertificate:     dbcfg.Opts.RedisClientCertificate,
+		utils.RedisClientKey:             dbcfg.Opts.RedisClientKey,
+		utils.RedisCACertificate:         dbcfg.Opts.RedisCACertificate,
 	}
-	mp := map[string]interface{}{
+	mp = map[string]interface{}{
 		utils.DataDbTypeCfg:          utils.Meta + dbcfg.Type,
 		utils.DataDbHostCfg:          dbcfg.Host,
 		utils.DataDbNameCfg:          dbcfg.Name,
@@ -325,11 +289,11 @@ func (dbcfg DataDbCfg) AsMapInterface(string) interface{} {
 	if dbcfg.Port != "" {
 		mp[utils.DataDbPortCfg], _ = strconv.Atoi(dbcfg.Port)
 	}
-	return mp
+	return
 }
 
-// ItemOpts the options for the stored items
-type ItemOpts struct {
+// ItemOpt the options for the stored items
+type ItemOpt struct {
 	Limit     int
 	TTL       time.Duration
 	StaticTTL bool
@@ -341,7 +305,7 @@ type ItemOpts struct {
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (itm *ItemOpts) AsMapInterface() (initialMP map[string]interface{}) {
+func (itm *ItemOpt) AsMapInterface() (initialMP map[string]interface{}) {
 	initialMP = map[string]interface{}{
 		utils.RemoteCfg:    itm.Remote,
 		utils.ReplicateCfg: itm.Replicate,
@@ -360,7 +324,7 @@ func (itm *ItemOpts) AsMapInterface() (initialMP map[string]interface{}) {
 	return
 }
 
-func (itm *ItemOpts) loadFromJSONCfg(jsonItm *ItemOptsJson) (err error) {
+func (itm *ItemOpt) loadFromJSONCfg(jsonItm *ItemOptJson) (err error) {
 	if jsonItm == nil {
 		return
 	}
@@ -389,8 +353,8 @@ func (itm *ItemOpts) loadFromJSONCfg(jsonItm *ItemOptsJson) (err error) {
 }
 
 // Clone returns a deep copy of ItemOpt
-func (itm *ItemOpts) Clone() *ItemOpts {
-	return &ItemOpts{
+func (itm *ItemOpt) Clone() *ItemOpt {
+	return &ItemOpt{
 		Limit:     itm.Limit,
 		TTL:       itm.TTL,
 		StaticTTL: itm.StaticTTL,
@@ -399,203 +363,4 @@ func (itm *ItemOpts) Clone() *ItemOpts {
 		APIKey:    itm.APIKey,
 		RouteID:   itm.RouteID,
 	}
-}
-
-func (itm *ItemOpts) Equals(itm2 *ItemOpts) bool {
-	return (itm == nil && itm2 == nil) ||
-		(itm != nil && itm2 != nil &&
-			itm.Remote == itm2.Remote &&
-			itm.Replicate == itm2.Replicate &&
-			itm.RouteID == itm2.RouteID &&
-			itm.APIKey == itm2.APIKey &&
-			itm.Limit == itm2.Limit &&
-			itm.TTL == itm2.TTL &&
-			itm.StaticTTL == itm2.StaticTTL)
-}
-
-type ItemOptsJson struct {
-	Limit      *int
-	Ttl        *string
-	Static_ttl *bool
-	Remote     *bool
-	Replicate  *bool
-	// used for ArgDispatcher in case we send this to a dispatcher engine
-	Route_id *string
-	Api_key  *string
-}
-
-func diffItemOptJson(d *ItemOptsJson, v1, v2 *ItemOpts) *ItemOptsJson {
-	if d == nil {
-		d = new(ItemOptsJson)
-	}
-	if v2.Remote != v1.Remote {
-		d.Remote = utils.BoolPointer(v2.Remote)
-	}
-	if v2.Replicate != v1.Replicate {
-		d.Replicate = utils.BoolPointer(v2.Replicate)
-	}
-	if v2.Limit != v1.Limit {
-		d.Limit = utils.IntPointer(v2.Limit)
-	}
-	if v2.StaticTTL != v1.StaticTTL {
-		d.Static_ttl = utils.BoolPointer(v2.StaticTTL)
-	}
-	if v2.TTL != v1.TTL {
-		d.Ttl = utils.StringPointer(v2.TTL.String())
-	}
-	if v2.RouteID != v1.RouteID {
-		d.Route_id = utils.StringPointer(v2.RouteID)
-	}
-	if v2.APIKey != v1.APIKey {
-		d.Api_key = utils.StringPointer(v2.APIKey)
-	}
-	return d
-}
-
-func diffMapItemOptJson(d map[string]*ItemOptsJson, v1, v2 map[string]*ItemOpts) map[string]*ItemOptsJson {
-	if d == nil {
-		d = make(map[string]*ItemOptsJson)
-	}
-	for k, val2 := range v2 {
-		if val1, has := v1[k]; !has {
-			d[k] = diffItemOptJson(d[k], new(ItemOpts), val2)
-		} else if !val1.Equals(val2) {
-			d[k] = diffItemOptJson(d[k], val1, val2)
-		}
-	}
-	return d
-}
-
-type DBOptsJson struct {
-	RedisMaxConns           *int              `json:"redisMaxConns"`
-	RedisConnectAttempts    *int              `json:"redisConnectAttempts"`
-	RedisSentinel           *string           `json:"redisSentinel"`
-	RedisCluster            *bool             `json:"redisCluster"`
-	RedisClusterSync        *string           `json:"redisClusterSync"`
-	RedisClusterOndownDelay *string           `json:"redisClusterOndownDelay"`
-	RedisConnectTimeout     *string           `json:"redisConnectTimeout"`
-	RedisReadTimeout        *string           `json:"redisReadTimeout"`
-	RedisWriteTimeout       *string           `json:"redisWriteTimeout"`
-	MongoQueryTimeout       *string           `json:"mongoQueryTimeout"`
-	RedisTLS                *bool             `json:"redisTLS"`
-	RedisClientCertificate  *string           `json:"redisClientCertificate"`
-	RedisClientKey          *string           `json:"redisClientKey"`
-	RedisCACertificate      *string           `json:"redisCACertificate"`
-	SQLMaxOpenConns         *int              `json:"sqlMaxOpenConns"`
-	SQLMaxIdleConns         *int              `json:"sqlMaxIdleConns"`
-	SQLConnMaxLifetime      *string           `json:"sqlConnMaxLifetime"`
-	MYSQLDSNParams          map[string]string `json:"mysqlDSNParams"`
-	PgSSLMode               *string           `json:"pgSSLMode"`
-	MySQLLocation           *string           `json:"mysqlLocation"`
-}
-
-// Database config
-type DbJsonCfg struct {
-	Db_type               *string
-	Db_host               *string
-	Db_port               *int
-	Db_name               *string
-	Db_user               *string
-	Db_password           *string
-	String_indexed_fields *[]string
-	Prefix_indexed_fields *[]string
-	Remote_conns          *[]string
-	Remote_conn_id        *string
-	Replication_conns     *[]string
-	Replication_filtered  *bool
-	Replication_cache     *string
-	Items                 map[string]*ItemOptsJson
-	Opts                  *DBOptsJson
-}
-
-func diffDataDBOptsJsonCfg(d *DBOptsJson, v1, v2 *DataDBOpts) *DBOptsJson {
-	if d == nil {
-		d = new(DBOptsJson)
-	}
-	if v1.RedisMaxConns != v2.RedisMaxConns {
-		d.RedisMaxConns = utils.IntPointer(v2.RedisMaxConns)
-	}
-	if v1.RedisConnectAttempts != v2.RedisConnectAttempts {
-		d.RedisConnectAttempts = utils.IntPointer(v2.RedisConnectAttempts)
-	}
-	if v1.RedisSentinel != v2.RedisSentinel {
-		d.RedisSentinel = utils.StringPointer(v2.RedisSentinel)
-	}
-	if v1.RedisCluster != v2.RedisCluster {
-		d.RedisCluster = utils.BoolPointer(v2.RedisCluster)
-	}
-	if v1.RedisClusterSync != v2.RedisClusterSync {
-		d.RedisClusterSync = utils.StringPointer(v2.RedisClusterSync.String())
-	}
-	if v1.RedisClusterOndownDelay != v2.RedisClusterOndownDelay {
-		d.RedisClusterOndownDelay = utils.StringPointer(v2.RedisClusterOndownDelay.String())
-	}
-	if v1.RedisConnectTimeout != v2.RedisConnectTimeout {
-		d.RedisConnectTimeout = utils.StringPointer(v2.RedisConnectTimeout.String())
-	}
-	if v1.RedisReadTimeout != v2.RedisReadTimeout {
-		d.RedisReadTimeout = utils.StringPointer(v2.RedisReadTimeout.String())
-	}
-	if v1.RedisWriteTimeout != v2.RedisWriteTimeout {
-		d.RedisWriteTimeout = utils.StringPointer(v2.RedisWriteTimeout.String())
-	}
-	if v1.MongoQueryTimeout != v2.MongoQueryTimeout {
-		d.MongoQueryTimeout = utils.StringPointer(v2.MongoQueryTimeout.String())
-	}
-	if v1.RedisTLS != v2.RedisTLS {
-		d.RedisTLS = utils.BoolPointer(v2.RedisTLS)
-	}
-	if v1.RedisClientCertificate != v2.RedisClientCertificate {
-		d.RedisClientCertificate = utils.StringPointer(v2.RedisClientCertificate)
-	}
-	if v1.RedisClientKey != v2.RedisClientKey {
-		d.RedisClientKey = utils.StringPointer(v2.RedisClientKey)
-	}
-	if v1.RedisCACertificate != v2.RedisCACertificate {
-		d.RedisCACertificate = utils.StringPointer(v2.RedisCACertificate)
-	}
-	return d
-}
-
-func diffDataDbJsonCfg(d *DbJsonCfg, v1, v2 *DataDbCfg) *DbJsonCfg {
-	if d == nil {
-		d = new(DbJsonCfg)
-	}
-	if v1.Type != v2.Type {
-		d.Db_type = utils.StringPointer(v2.Type)
-	}
-	if v1.Host != v2.Host {
-		d.Db_host = utils.StringPointer(v2.Host)
-	}
-	if v1.Port != v2.Port {
-		port, _ := strconv.Atoi(v2.Port)
-		d.Db_port = utils.IntPointer(port)
-	}
-	if v1.Name != v2.Name {
-		d.Db_name = utils.StringPointer(v2.Name)
-	}
-	if v1.User != v2.User {
-		d.Db_user = utils.StringPointer(v2.User)
-	}
-	if v1.Password != v2.Password {
-		d.Db_password = utils.StringPointer(v2.Password)
-	}
-	if !utils.SliceStringEqual(v1.RmtConns, v2.RmtConns) {
-		d.Remote_conns = &v2.RmtConns
-	}
-	if v1.RmtConnID != v2.RmtConnID {
-		d.Remote_conn_id = utils.StringPointer(v2.RmtConnID)
-	}
-	if !utils.SliceStringEqual(v1.RplConns, v2.RplConns) {
-		d.Replication_conns = &v2.RplConns
-	}
-	if v1.RplFiltered != v2.RplFiltered {
-		d.Replication_filtered = utils.BoolPointer(v2.RplFiltered)
-	}
-	if v1.RplCache != v2.RplCache {
-		d.Replication_cache = utils.StringPointer(v2.RplCache)
-	}
-	d.Items = diffMapItemOptJson(d.Items, v1.Items, v2.Items)
-	d.Opts = diffDataDBOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

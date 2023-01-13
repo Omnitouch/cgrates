@@ -26,10 +26,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/guardian"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
@@ -38,19 +37,19 @@ func init() {
 
 // ResourceProfile represents the user configuration for the resource
 type ResourceProfile struct {
-	Tenant            string
-	ID                string // identifier of this resource
-	FilterIDs         []string
-	UsageTTL          time.Duration // auto-expire the usage after this duration
-	Limit             float64       // limixt value
-	AllocationMessage string        // message returned by the winning resource on allocation
-	Blocker           bool          // blocker flag to stop processing on filters matched
-	Stored            bool
-	Weights           utils.DynamicWeights // Weight to sort the resources
-	ThresholdIDs      []string             // Thresholds to check after changing Limit
+	Tenant             string
+	ID                 string // identifier of this resource
+	FilterIDs          []string
+	ActivationInterval *utils.ActivationInterval // time when this resource becomes active and expires
+	UsageTTL           time.Duration             // auto-expire the usage after this duration
+	Limit              float64                   // limit value
+	AllocationMessage  string                    // message returned by the winning resource on allocation
+	Blocker            bool                      // blocker flag to stop processing on filters matched
+	Stored             bool
+	Weight             float64  // Weight to sort the resources
+	ThresholdIDs       []string // Thresholds to check after changing Limit
 
 	lkID string // holds the reference towards guardian lock key
-
 }
 
 // ResourceProfileWithAPIOpts is used in replicatorV1 for dispatcher
@@ -131,7 +130,6 @@ type Resource struct {
 	tUsage *float64         // sum of all usages
 	dirty  *bool            // the usages were modified, needs save, *bool so we only save if enabled in config
 	rPrf   *ResourceProfile // for ordering purposes
-	weight float64
 }
 
 // resourceLockKey returns the ID used to lock a resource with guardian
@@ -276,7 +274,7 @@ type Resources []*Resource
 
 // Sort sorts based on Weight
 func (rs Resources) Sort() {
-	sort.Slice(rs, func(i, j int) bool { return rs[i].weight > rs[j].weight })
+	sort.Slice(rs, func(i, j int) bool { return rs[i].rPrf.Weight > rs[j].rPrf.Weight })
 }
 
 // unlock will unlock resources part of this slice
@@ -365,11 +363,11 @@ func (rs Resources) allocateResource(ru *ResourceUsage, dryRun bool) (alcMessage
 
 // NewResourceService  returns a new ResourceService
 func NewResourceService(dm *DataManager, cgrcfg *config.CGRConfig,
-	filterS *FilterS, connMgr *ConnManager) *ResourceS {
-	return &ResourceS{dm: dm,
+	filterS *FilterS, connMgr *ConnManager) *ResourceService {
+	return &ResourceService{dm: dm,
 		storedResources: make(utils.StringSet),
-		cfg:             cgrcfg,
-		fltrS:           filterS,
+		cgrcfg:          cgrcfg,
+		filterS:         filterS,
 		loopStopped:     make(chan struct{}),
 		stopBackup:      make(chan struct{}),
 		connMgr:         connMgr,
@@ -377,48 +375,48 @@ func NewResourceService(dm *DataManager, cgrcfg *config.CGRConfig,
 
 }
 
-// ResourceS is the service handling resources
-type ResourceS struct {
+// ResourceService is the service handling resources
+type ResourceService struct {
 	dm              *DataManager // So we can load the data in cache and index it
-	fltrS           *FilterS
+	filterS         *FilterS
 	storedResources utils.StringSet // keep a record of resources which need saving, map[resID]bool
 	srMux           sync.RWMutex    // protects storedResources
-	cfg             *config.CGRConfig
+	cgrcfg          *config.CGRConfig
 	stopBackup      chan struct{} // control storing process
 	loopStopped     chan struct{}
 	connMgr         *ConnManager
 }
 
 // Reload stops the backupLoop and restarts it
-func (rS *ResourceS) Reload(ctx *context.Context) {
+func (rS *ResourceService) Reload() {
 	close(rS.stopBackup)
 	<-rS.loopStopped // wait until the loop is done
 	rS.stopBackup = make(chan struct{})
-	go rS.runBackup(ctx)
+	go rS.runBackup()
 }
 
 // StartLoop starts the gorutine with the backup loop
-func (rS *ResourceS) StartLoop(ctx *context.Context) {
-	go rS.runBackup(ctx)
+func (rS *ResourceService) StartLoop() {
+	go rS.runBackup()
 }
 
 // Shutdown is called to shutdown the service
-func (rS *ResourceS) Shutdown(ctx *context.Context) {
+func (rS *ResourceService) Shutdown() {
 	utils.Logger.Info("<ResourceS> service shutdown initialized")
 	close(rS.stopBackup)
-	rS.storeResources(ctx)
+	rS.storeResources()
 	utils.Logger.Info("<ResourceS> service shutdown complete")
 }
 
 // backup will regularly store resources changed to dataDB
-func (rS *ResourceS) runBackup(ctx *context.Context) {
-	storeInterval := rS.cfg.ResourceSCfg().StoreInterval
+func (rS *ResourceService) runBackup() {
+	storeInterval := rS.cgrcfg.ResourceSCfg().StoreInterval
 	if storeInterval <= 0 {
 		rS.loopStopped <- struct{}{}
 		return
 	}
 	for {
-		rS.storeResources(ctx)
+		rS.storeResources()
 		select {
 		case <-rS.stopBackup:
 			rS.loopStopped <- struct{}{}
@@ -429,7 +427,7 @@ func (rS *ResourceS) runBackup(ctx *context.Context) {
 }
 
 // storeResources represents one task of complete backup
-func (rS *ResourceS) storeResources(ctx *context.Context) {
+func (rS *ResourceService) storeResources() {
 	var failedRIDs []string
 	for { // don't stop until we store all dirty resources
 		rS.srMux.Lock()
@@ -448,7 +446,7 @@ func (rS *ResourceS) storeResources(ctx *context.Context) {
 		}
 		r := rIf.(*Resource)
 		r.lock(utils.EmptyString)
-		if err := rS.storeResource(ctx, r); err != nil {
+		if err := rS.storeResource(r); err != nil {
 			failedRIDs = append(failedRIDs, rID) // record failure so we can schedule it for next backup
 		}
 		r.unlock()
@@ -463,11 +461,11 @@ func (rS *ResourceS) storeResources(ctx *context.Context) {
 }
 
 // StoreResource stores the resource in DB and corrects dirty flag
-func (rS *ResourceS) storeResource(ctx *context.Context, r *Resource) (err error) {
+func (rS *ResourceService) storeResource(r *Resource) (err error) {
 	if r.dirty == nil || !*r.dirty {
 		return
 	}
-	if err = rS.dm.SetResource(ctx, r); err != nil {
+	if err = rS.dm.SetResource(r); err != nil {
 		utils.Logger.Warning(
 			fmt.Sprintf("<ResourceS> failed saving Resource with ID: %s, error: %s",
 				r.ID, err.Error()))
@@ -475,7 +473,7 @@ func (rS *ResourceS) storeResource(ctx *context.Context, r *Resource) (err error
 	}
 	//since we no longer handle cache in DataManager do here a manual caching
 	if tntID := r.TenantID(); Cache.HasItem(utils.CacheResources, tntID) { // only cache if previously there
-		if err = Cache.Set(ctx, utils.CacheResources, tntID, r, nil,
+		if err = Cache.Set(utils.CacheResources, tntID, r, nil,
 			true, utils.NonTransactional); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<ResourceS> failed caching Resource with ID: %s, error: %s",
@@ -488,22 +486,22 @@ func (rS *ResourceS) storeResource(ctx *context.Context, r *Resource) (err error
 }
 
 // storeMatchedResources will store the list of resources based on the StoreInterval
-func (rS *ResourceS) storeMatchedResources(ctx *context.Context, mtcRLs Resources) (err error) {
-	if rS.cfg.ResourceSCfg().StoreInterval == 0 {
+func (rS *ResourceService) storeMatchedResources(mtcRLs Resources) (err error) {
+	if rS.cgrcfg.ResourceSCfg().StoreInterval == 0 {
 		return
 	}
-	if rS.cfg.ResourceSCfg().StoreInterval > 0 {
+	if rS.cgrcfg.ResourceSCfg().StoreInterval > 0 {
 		rS.srMux.Lock()
 		defer rS.srMux.Unlock()
 	}
 	for _, r := range mtcRLs {
 		if r.dirty != nil {
 			*r.dirty = true // mark it to be saved
-			if rS.cfg.ResourceSCfg().StoreInterval > 0 {
+			if rS.cgrcfg.ResourceSCfg().StoreInterval > 0 {
 				rS.storedResources.Add(r.TenantID())
 				continue
 			}
-			if err = rS.storeResource(ctx, r); err != nil {
+			if err = rS.storeResource(r); err != nil {
 				return
 			}
 		}
@@ -513,8 +511,8 @@ func (rS *ResourceS) storeMatchedResources(ctx *context.Context, mtcRLs Resource
 }
 
 // processThresholds will pass the event for resource to ThresholdS
-func (rS *ResourceS) processThresholds(ctx *context.Context, rs Resources, opts map[string]interface{}) (err error) {
-	if len(rS.cfg.ResourceSCfg().ThresholdSConns) == 0 {
+func (rS *ResourceService) processThresholds(rs Resources, opts map[string]interface{}) (err error) {
+	if len(rS.cgrcfg.ResourceSCfg().ThresholdSConns) == 0 {
 		return
 	}
 	if opts == nil {
@@ -524,12 +522,15 @@ func (rS *ResourceS) processThresholds(ctx *context.Context, rs Resources, opts 
 
 	var withErrs bool
 	for _, r := range rs {
-		if len(r.rPrf.ThresholdIDs) == 1 &&
-			r.rPrf.ThresholdIDs[0] == utils.MetaNone {
-			continue
+		var thIDs []string
+		if len(r.rPrf.ThresholdIDs) != 0 {
+			if len(r.rPrf.ThresholdIDs) == 1 &&
+				r.rPrf.ThresholdIDs[0] == utils.MetaNone {
+				continue
+			}
+			thIDs = r.rPrf.ThresholdIDs
 		}
-		opts[utils.OptsThresholdsProfileIDs] = r.rPrf.ThresholdIDs
-
+		opts[utils.OptsThresholdsProfileIDs] = thIDs
 		thEv := &utils.CGREvent{
 			Tenant: r.Tenant,
 			ID:     utils.GenUUID(),
@@ -541,9 +542,9 @@ func (rS *ResourceS) processThresholds(ctx *context.Context, rs Resources, opts 
 			APIOpts: opts,
 		}
 		var tIDs []string
-		if err := rS.connMgr.Call(ctx, rS.cfg.ResourceSCfg().ThresholdSConns,
+		if err := rS.connMgr.Call(rS.cgrcfg.ResourceSCfg().ThresholdSConns, nil,
 			utils.ThresholdSv1ProcessEvent, thEv, &tIDs); err != nil &&
-			(len(r.rPrf.ThresholdIDs) != 0 || err.Error() != utils.ErrNotFound.Error()) {
+			(len(thIDs) != 0 || err.Error() != utils.ErrNotFound.Error()) {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing event %+v with %s.",
 					utils.ResourceS, err.Error(), thEv, utils.ThresholdS))
@@ -557,7 +558,7 @@ func (rS *ResourceS) processThresholds(ctx *context.Context, rs Resources, opts 
 }
 
 // matchingResourcesForEvent returns ordered list of matching resources which are active by the time of the call
-func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string, ev *utils.CGREvent,
+func (rS *ResourceService) matchingResourcesForEvent(tnt string, ev *utils.CGREvent,
 	evUUID string, usageTTL *time.Duration) (rs Resources, err error) {
 	var rIDs utils.StringSet
 	evNm := utils.MapStorage{
@@ -571,7 +572,7 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 		rIDs = x.(utils.StringSet)
 		defer func() { // make sure we uncache if we find errors
 			if err != nil {
-				if errCh := Cache.Remove(ctx, utils.CacheEventResources, evUUID,
+				if errCh := Cache.Remove(utils.CacheEventResources, evUUID,
 					cacheCommit(utils.NonTransactional), utils.NonTransactional); errCh != nil {
 					err = errCh
 				}
@@ -579,19 +580,17 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 		}()
 
 	} else { // select the resourceIDs out of dataDB
-		rIDs, err = MatchingItemIDsForEvent(ctx, evNm,
-			rS.cfg.ResourceSCfg().StringIndexedFields,
-			rS.cfg.ResourceSCfg().PrefixIndexedFields,
-			rS.cfg.ResourceSCfg().SuffixIndexedFields,
-			rS.cfg.ResourceSCfg().ExistsIndexedFields,
-			rS.cfg.ResourceSCfg().NotExistsIndexedFields,
+		rIDs, err = MatchingItemIDsForEvent(evNm,
+			rS.cgrcfg.ResourceSCfg().StringIndexedFields,
+			rS.cgrcfg.ResourceSCfg().PrefixIndexedFields,
+			rS.cgrcfg.ResourceSCfg().SuffixIndexedFields,
 			rS.dm, utils.CacheResourceFilterIndexes, tnt,
-			rS.cfg.ResourceSCfg().IndexedSelects,
-			rS.cfg.ResourceSCfg().NestedFields,
+			rS.cgrcfg.ResourceSCfg().IndexedSelects,
+			rS.cgrcfg.ResourceSCfg().NestedFields,
 		)
 		if err != nil {
 			if err == utils.ErrNotFound {
-				if errCh := Cache.Set(ctx, utils.CacheEventResources, evUUID, nil, nil, true, ""); errCh != nil { // cache negative match
+				if errCh := Cache.Set(utils.CacheEventResources, evUUID, nil, nil, true, ""); errCh != nil { // cache negative match
 					return nil, errCh
 				}
 			}
@@ -604,7 +603,7 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 			config.CgrConfig().GeneralCfg().LockingTimeout,
 			resourceProfileLockKey(tnt, resName))
 		var rPrf *ResourceProfile
-		if rPrf, err = rS.dm.GetResourceProfile(ctx, tnt, resName,
+		if rPrf, err = rS.dm.GetResourceProfile(tnt, resName,
 			true, true, utils.NonTransactional); err != nil {
 			guardian.Guardian.UnguardIDs(lkPrflID)
 			if err == utils.ErrNotFound {
@@ -614,8 +613,13 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 			return
 		}
 		rPrf.lock(lkPrflID)
+		if rPrf.ActivationInterval != nil && ev.Time != nil &&
+			!rPrf.ActivationInterval.IsActiveAtTime(*ev.Time) { // not active
+			rPrf.unlock()
+			continue
+		}
 		var pass bool
-		if pass, err = rS.fltrS.Pass(ctx, tnt, rPrf.FilterIDs,
+		if pass, err = rS.filterS.Pass(tnt, rPrf.FilterIDs,
 			evNm); err != nil {
 			rPrf.unlock()
 			rs.unlock()
@@ -628,7 +632,7 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 			config.CgrConfig().GeneralCfg().LockingTimeout,
 			resourceLockKey(rPrf.Tenant, rPrf.ID))
 		var r *Resource
-		if r, err = rS.dm.GetResource(ctx, rPrf.Tenant, rPrf.ID, true, true, ""); err != nil {
+		if r, err = rS.dm.GetResource(rPrf.Tenant, rPrf.ID, true, true, ""); err != nil {
 			guardian.Guardian.UnguardIDs(lkID)
 			rPrf.unlock()
 			rs.unlock()
@@ -646,10 +650,6 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 			r.ttl = utils.DurationPointer(rPrf.UsageTTL)
 		}
 		r.rPrf = rPrf
-		if r.weight, err = WeightFromDynamics(ctx, rPrf.Weights,
-			rS.fltrS, tnt, evNm); err != nil {
-			return
-		}
 		rs = append(rs, r)
 	}
 
@@ -664,40 +664,27 @@ func (rS *ResourceS) matchingResourcesForEvent(ctx *context.Context, tnt string,
 			break
 		}
 	}
-	if err = Cache.Set(ctx, utils.CacheEventResources, evUUID, rs.resIDsMp(), nil, true, ""); err != nil {
+	if err = Cache.Set(utils.CacheEventResources, evUUID, rs.resIDsMp(), nil, true, ""); err != nil {
 		rs.unlock()
 	}
 	return
 }
 
-// V1GetResourcesForEvent returns active resource configs matching the event
-func (rS *ResourceS) V1GetResourcesForEvent(ctx *context.Context, args *utils.CGREvent, reply *Resources) (err error) {
+// V1ResourcesForEvent returns active resource configs matching the event
+func (rS *ResourceService) V1ResourcesForEvent(args *utils.CGREvent, reply *Resources) (err error) {
 	if args == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	if missing := utils.MissingStructFields(args, []string{utils.ID, utils.Event}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-
-	var usageID string
-	if usageID, err = GetStringOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageID,
-		config.ResourcesUsageIDDftOpt, utils.OptsResourcesUsageID); err != nil {
-		return
-	}
-
-	var ttl time.Duration
-	if ttl, err = GetDurationOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageTTL,
-		config.ResourcesUsageTTLDftOpt, utils.OptsResourcesUsageTTL); err != nil {
-		return
-	}
-	usageTTL := utils.DurationPointer(ttl)
-
+	usageID := utils.GetStringOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageID, utils.OptsResourcesUsageID)
 	if usageID == utils.EmptyString {
 		return utils.NewErrMandatoryIeMissing(utils.UsageID)
 	}
 	tnt := args.Tenant
 	if tnt == utils.EmptyString {
-		tnt = rS.cfg.GeneralCfg().DefaultTenant
+		tnt = rS.cgrcfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
@@ -713,14 +700,19 @@ func (rS *ResourceS) V1GetResourcesForEvent(ctx *context.Context, args *utils.CG
 			}
 			return cachedResp.Error
 		}
-		defer Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: reply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
 
+	var usageTTL *time.Duration
+	if usageTTL, err = utils.GetDurationPointerOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageTTL,
+		utils.OptsResourcesUsageTTL); err != nil {
+		return
+	}
 	var mtcRLs Resources
-	if mtcRLs, err = rS.matchingResourcesForEvent(ctx, tnt, args, usageID, usageTTL); err != nil {
+	if mtcRLs, err = rS.matchingResourcesForEvent(tnt, args, usageID, usageTTL); err != nil {
 		return err
 	}
 	*reply = mtcRLs
@@ -729,40 +721,20 @@ func (rS *ResourceS) V1GetResourcesForEvent(ctx *context.Context, args *utils.CG
 }
 
 // V1AuthorizeResources queries service to find if an Usage is allowed
-func (rS *ResourceS) V1AuthorizeResources(ctx *context.Context, args *utils.CGREvent, reply *string) (err error) {
+func (rS *ResourceService) V1AuthorizeResources(args *utils.CGREvent, reply *string) (err error) {
 	if args == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	if missing := utils.MissingStructFields(args, []string{utils.ID, utils.Event}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-
-	var usageID string
-	if usageID, err = GetStringOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageID,
-		config.ResourcesUsageIDDftOpt, utils.OptsResourcesUsageID); err != nil {
-		return
-	}
-
-	var units float64
-	if units, err = GetFloat64Opts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.Units,
-		config.ResourcesUnitsDftOpt, utils.OptsResourcesUnits); err != nil {
-		return
-	}
-
-	var ttl time.Duration
-	if ttl, err = GetDurationOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageTTL,
-		config.ResourcesUsageTTLDftOpt, utils.OptsResourcesUsageTTL); err != nil {
-		return
-	}
-	usageTTL := utils.DurationPointer(ttl)
-
+	usageID := utils.GetStringOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageID, utils.OptsResourcesUsageID)
 	if usageID == utils.EmptyString {
 		return utils.NewErrMandatoryIeMissing(utils.UsageID)
 	}
-
 	tnt := args.Tenant
 	if tnt == utils.EmptyString {
-		tnt = rS.cfg.GeneralCfg().DefaultTenant
+		tnt = rS.cgrcfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
@@ -778,23 +750,34 @@ func (rS *ResourceS) V1AuthorizeResources(ctx *context.Context, args *utils.CGRE
 			}
 			return cachedResp.Error
 		}
-		defer Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: reply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
 
+	var usageTTL *time.Duration
+	if usageTTL, err = utils.GetDurationPointerOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageTTL,
+		utils.OptsResourcesUsageTTL); err != nil {
+		return
+	}
 	var mtcRLs Resources
-	if mtcRLs, err = rS.matchingResourcesForEvent(ctx, tnt, args, usageID, usageTTL); err != nil {
+	if mtcRLs, err = rS.matchingResourcesForEvent(tnt, args, usageID, usageTTL); err != nil {
 		return err
 	}
 	defer mtcRLs.unlock()
 
+	var units float64
+	if units, err = utils.GetFloat64Opts(args, rS.cgrcfg.ResourceSCfg().Opts.Units,
+		utils.OptsResourcesUnits); err != nil {
+		return
+	}
 	var alcMessage string
-	if alcMessage, err = mtcRLs.allocateResource(&ResourceUsage{
-		Tenant: tnt,
-		ID:     usageID,
-		Units:  units}, true); err != nil {
+	if alcMessage, err = mtcRLs.allocateResource(
+		&ResourceUsage{
+			Tenant: tnt,
+			ID:     usageID,
+			Units:  units}, true); err != nil {
 		if err == utils.ErrResourceUnavailable {
 			err = utils.ErrResourceUnauthorized
 		}
@@ -805,40 +788,20 @@ func (rS *ResourceS) V1AuthorizeResources(ctx *context.Context, args *utils.CGRE
 }
 
 // V1AllocateResources is called when a resource requires allocation
-func (rS *ResourceS) V1AllocateResources(ctx *context.Context, args *utils.CGREvent, reply *string) (err error) {
+func (rS *ResourceService) V1AllocateResources(args *utils.CGREvent, reply *string) (err error) {
 	if args == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	if missing := utils.MissingStructFields(args, []string{utils.ID, utils.Event}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-
-	var usageID string
-	if usageID, err = GetStringOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageID,
-		config.ResourcesUsageIDDftOpt, utils.OptsResourcesUsageID); err != nil {
-		return
-	}
-
-	var units float64
-	if units, err = GetFloat64Opts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.Units,
-		config.ResourcesUnitsDftOpt, utils.OptsResourcesUnits); err != nil {
-		return
-	}
-
-	var ttl time.Duration
-	if ttl, err = GetDurationOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageTTL,
-		config.ResourcesUsageTTLDftOpt, utils.OptsResourcesUsageTTL); err != nil {
-		return
-	}
-	usageTTL := utils.DurationPointer(ttl)
-
+	usageID := utils.GetStringOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageID, utils.OptsResourcesUsageID)
 	if usageID == utils.EmptyString {
 		return utils.NewErrMandatoryIeMissing(utils.UsageID)
 	}
-
 	tnt := args.Tenant
 	if tnt == utils.EmptyString {
-		tnt = rS.cfg.GeneralCfg().DefaultTenant
+		tnt = rS.cgrcfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
@@ -854,30 +817,41 @@ func (rS *ResourceS) V1AllocateResources(ctx *context.Context, args *utils.CGREv
 			}
 			return cachedResp.Error
 		}
-		defer Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: reply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
 
+	var usageTTL *time.Duration
+	if usageTTL, err = utils.GetDurationPointerOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageTTL,
+		utils.OptsResourcesUsageTTL); err != nil {
+		return
+	}
 	var mtcRLs Resources
-	if mtcRLs, err = rS.matchingResourcesForEvent(ctx, tnt, args, usageID,
+	if mtcRLs, err = rS.matchingResourcesForEvent(tnt, args, usageID,
 		usageTTL); err != nil {
 		return err
 	}
 	defer mtcRLs.unlock()
 
+	var units float64
+	if units, err = utils.GetFloat64Opts(args, rS.cgrcfg.ResourceSCfg().Opts.Units,
+		utils.OptsResourcesUnits); err != nil {
+		return
+	}
 	var alcMsg string
-	if alcMsg, err = mtcRLs.allocateResource(&ResourceUsage{Tenant: tnt, ID: usageID,
-		Units: units}, false); err != nil {
+	if alcMsg, err = mtcRLs.allocateResource(
+		&ResourceUsage{Tenant: tnt, ID: usageID,
+			Units: units}, false); err != nil {
 		return
 	}
 
 	// index it for storing
-	if err = rS.storeMatchedResources(ctx, mtcRLs); err != nil {
+	if err = rS.storeMatchedResources(mtcRLs); err != nil {
 		return
 	}
-	if err = rS.processThresholds(ctx, mtcRLs, args.APIOpts); err != nil {
+	if err = rS.processThresholds(mtcRLs, args.APIOpts); err != nil {
 		return
 	}
 	*reply = alcMsg
@@ -885,34 +859,20 @@ func (rS *ResourceS) V1AllocateResources(ctx *context.Context, args *utils.CGREv
 }
 
 // V1ReleaseResources is called when we need to clear an allocation
-func (rS *ResourceS) V1ReleaseResources(ctx *context.Context, args *utils.CGREvent, reply *string) (err error) {
+func (rS *ResourceService) V1ReleaseResources(args *utils.CGREvent, reply *string) (err error) {
 	if args == nil {
 		return utils.NewErrMandatoryIeMissing(utils.Event)
 	}
 	if missing := utils.MissingStructFields(args, []string{utils.ID, utils.Event}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-
-	var usageID string
-	if usageID, err = GetStringOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageID,
-		config.ResourcesUsageIDDftOpt, utils.OptsResourcesUsageID); err != nil {
-		return
-	}
-
-	var ttl time.Duration
-	if ttl, err = GetDurationOpts(ctx, args.Tenant, args, rS.fltrS, rS.cfg.ResourceSCfg().Opts.UsageTTL,
-		config.ResourcesUsageTTLDftOpt, utils.OptsResourcesUsageTTL); err != nil {
-		return
-	}
-	usageTTL := utils.DurationPointer(ttl)
-
+	usageID := utils.GetStringOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageID, utils.OptsResourcesUsageID)
 	if usageID == utils.EmptyString {
 		return utils.NewErrMandatoryIeMissing(utils.UsageID)
 	}
-
 	tnt := args.Tenant
 	if tnt == utils.EmptyString {
-		tnt = rS.cfg.GeneralCfg().DefaultTenant
+		tnt = rS.cgrcfg.GeneralCfg().DefaultTenant
 	}
 
 	// RPC caching
@@ -928,14 +888,19 @@ func (rS *ResourceS) V1ReleaseResources(ctx *context.Context, args *utils.CGREve
 			}
 			return cachedResp.Error
 		}
-		defer Cache.Set(ctx, utils.CacheRPCResponses, cacheKey,
+		defer Cache.Set(utils.CacheRPCResponses, cacheKey,
 			&utils.CachedRPCResponse{Result: reply, Error: err},
 			nil, true, utils.NonTransactional)
 	}
 	// end of RPC caching
 
+	var usageTTL *time.Duration
+	if usageTTL, err = utils.GetDurationPointerOpts(args, rS.cgrcfg.ResourceSCfg().Opts.UsageTTL,
+		utils.OptsResourcesUsageTTL); err != nil {
+		return
+	}
 	var mtcRLs Resources
-	if mtcRLs, err = rS.matchingResourcesForEvent(ctx, tnt, args, usageID,
+	if mtcRLs, err = rS.matchingResourcesForEvent(tnt, args, usageID,
 		usageTTL); err != nil {
 		return
 	}
@@ -946,10 +911,10 @@ func (rS *ResourceS) V1ReleaseResources(ctx *context.Context, args *utils.CGREve
 	}
 
 	// Handle storing
-	if err = rS.storeMatchedResources(ctx, mtcRLs); err != nil {
+	if err = rS.storeMatchedResources(mtcRLs); err != nil {
 		return
 	}
-	if err = rS.processThresholds(ctx, mtcRLs, args.APIOpts); err != nil {
+	if err = rS.processThresholds(mtcRLs, args.APIOpts); err != nil {
 		return
 	}
 
@@ -958,13 +923,13 @@ func (rS *ResourceS) V1ReleaseResources(ctx *context.Context, args *utils.CGREve
 }
 
 // V1GetResource returns a resource configuration
-func (rS *ResourceS) V1GetResource(ctx *context.Context, arg *utils.TenantIDWithAPIOpts, reply *Resource) error {
+func (rS *ResourceService) V1GetResource(arg *utils.TenantIDWithAPIOpts, reply *Resource) error {
 	if missing := utils.MissingStructFields(arg, []string{utils.ID}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	tnt := arg.Tenant
 	if tnt == utils.EmptyString {
-		tnt = rS.cfg.GeneralCfg().DefaultTenant
+		tnt = rS.cgrcfg.GeneralCfg().DefaultTenant
 	}
 
 	// make sure resource is locked at process level
@@ -973,7 +938,7 @@ func (rS *ResourceS) V1GetResource(ctx *context.Context, arg *utils.TenantIDWith
 		resourceLockKey(tnt, arg.ID))
 	defer guardian.Guardian.UnguardIDs(lkID)
 
-	res, err := rS.dm.GetResource(ctx, tnt, arg.ID, true, true, utils.NonTransactional)
+	res, err := rS.dm.GetResource(tnt, arg.ID, true, true, utils.NonTransactional)
 	if err != nil {
 		return err
 	}
@@ -986,13 +951,13 @@ type ResourceWithConfig struct {
 	Config *ResourceProfile
 }
 
-func (rS *ResourceS) V1GetResourceWithConfig(ctx *context.Context, arg *utils.TenantIDWithAPIOpts, reply *ResourceWithConfig) (err error) {
+func (rS *ResourceService) V1GetResourceWithConfig(arg *utils.TenantIDWithAPIOpts, reply *ResourceWithConfig) (err error) {
 	if missing := utils.MissingStructFields(arg, []string{utils.ID}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	tnt := arg.Tenant
 	if tnt == utils.EmptyString {
-		tnt = rS.cfg.GeneralCfg().DefaultTenant
+		tnt = rS.cgrcfg.GeneralCfg().DefaultTenant
 	}
 
 	// make sure resource is locked at process level
@@ -1002,7 +967,7 @@ func (rS *ResourceS) V1GetResourceWithConfig(ctx *context.Context, arg *utils.Te
 	defer guardian.Guardian.UnguardIDs(lkID)
 
 	var res *Resource
-	res, err = rS.dm.GetResource(ctx, tnt, arg.ID, true, true, utils.NonTransactional)
+	res, err = rS.dm.GetResource(tnt, arg.ID, true, true, utils.NonTransactional)
 	if err != nil {
 		return
 	}
@@ -1015,7 +980,7 @@ func (rS *ResourceS) V1GetResourceWithConfig(ctx *context.Context, arg *utils.Te
 
 	if res.rPrf == nil {
 		var cfg *ResourceProfile
-		cfg, err = rS.dm.GetResourceProfile(ctx, tnt, arg.ID, true, true, utils.NonTransactional)
+		cfg, err = rS.dm.GetResourceProfile(tnt, arg.ID, true, true, utils.NonTransactional)
 		if err != nil {
 			return
 		}
@@ -1028,122 +993,4 @@ func (rS *ResourceS) V1GetResourceWithConfig(ctx *context.Context, arg *utils.Te
 	}
 
 	return
-}
-
-func (rp *ResourceProfile) Set(path []string, val interface{}, _ bool, _ string) (err error) {
-	if len(path) != 1 {
-		return utils.ErrWrongPath
-	}
-	switch path[0] {
-	default:
-		return utils.ErrWrongPath
-	case utils.Tenant:
-		rp.Tenant = utils.IfaceAsString(val)
-	case utils.ID:
-		rp.ID = utils.IfaceAsString(val)
-	case utils.FilterIDs:
-		var valA []string
-		valA, err = utils.IfaceAsStringSlice(val)
-		rp.FilterIDs = append(rp.FilterIDs, valA...)
-	case utils.UsageTTL:
-		rp.UsageTTL, err = utils.IfaceAsDuration(val)
-	case utils.Limit:
-		if val != utils.EmptyString {
-			rp.Limit, err = utils.IfaceAsFloat64(val)
-		}
-	case utils.AllocationMessage:
-		rp.AllocationMessage = utils.IfaceAsString(val)
-	case utils.Blocker:
-		rp.Blocker, err = utils.IfaceAsBool(val)
-	case utils.Stored:
-		rp.Stored, err = utils.IfaceAsBool(val)
-	case utils.Weights:
-		if val != utils.EmptyString {
-			rp.Weights, err = utils.NewDynamicWeightsFromString(utils.IfaceAsString(val), utils.InfieldSep, utils.ANDSep)
-		}
-	case utils.ThresholdIDs:
-		var valA []string
-		valA, err = utils.IfaceAsStringSlice(val)
-		rp.ThresholdIDs = append(rp.ThresholdIDs, valA...)
-	}
-	return
-}
-
-func (rp *ResourceProfile) Merge(v2 interface{}) {
-	vi := v2.(*ResourceProfile)
-	if len(vi.Tenant) != 0 {
-		rp.Tenant = vi.Tenant
-	}
-	if len(vi.ID) != 0 {
-		rp.ID = vi.ID
-	}
-	rp.FilterIDs = append(rp.FilterIDs, vi.FilterIDs...)
-	rp.ThresholdIDs = append(rp.ThresholdIDs, vi.ThresholdIDs...)
-	if len(vi.AllocationMessage) != 0 {
-		rp.AllocationMessage = vi.AllocationMessage
-	}
-	if vi.UsageTTL != 0 {
-		rp.UsageTTL = vi.UsageTTL
-	}
-	if vi.Limit != 0 {
-		rp.Limit = vi.Limit
-	}
-	if vi.Blocker {
-		rp.Blocker = vi.Blocker
-	}
-	if vi.Stored {
-		rp.Stored = vi.Stored
-	}
-	rp.Weights = append(rp.Weights, vi.Weights...)
-}
-
-func (rp *ResourceProfile) String() string { return utils.ToJSON(rp) }
-func (rp *ResourceProfile) FieldAsString(fldPath []string) (_ string, err error) {
-	var val interface{}
-	if val, err = rp.FieldAsInterface(fldPath); err != nil {
-		return
-	}
-	return utils.IfaceAsString(val), nil
-}
-func (rp *ResourceProfile) FieldAsInterface(fldPath []string) (_ interface{}, err error) {
-	if len(fldPath) != 1 {
-		return nil, utils.ErrNotFound
-	}
-	switch fldPath[0] {
-	default:
-		fld, idx := utils.GetPathIndex(fldPath[0])
-		if idx != nil {
-			switch fld {
-			case utils.ThresholdIDs:
-				if *idx < len(rp.ThresholdIDs) {
-					return rp.ThresholdIDs[*idx], nil
-				}
-			case utils.FilterIDs:
-				if *idx < len(rp.FilterIDs) {
-					return rp.FilterIDs[*idx], nil
-				}
-			}
-		}
-		return nil, utils.ErrNotFound
-	case utils.Tenant:
-		return rp.Tenant, nil
-	case utils.ID:
-		return rp.ID, nil
-	case utils.FilterIDs:
-		return rp.FilterIDs, nil
-	case utils.UsageTTL:
-		return rp.UsageTTL, nil
-	case utils.Limit:
-		return rp.Limit, nil
-	case utils.AllocationMessage:
-		return rp.AllocationMessage, nil
-	case utils.Blocker:
-		return rp.Blocker, nil
-	case utils.Stored:
-		return rp.Stored, nil
-	case utils.Weights:
-		return rp.Weights, nil
-	case utils.ThresholdIDs:
-		return rp.ThresholdIDs, nil
-	}
 }

@@ -502,7 +502,7 @@ const benchPath = "Field1[1000000000000000]"
 // Benchmark results:
 // goos: linux
 // goarch: amd64
-// pkg: github.com/Omnitouch/cgrates/utils
+// pkg: github.com/cgrates/cgrates/utils
 // cpu: Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz
 // BenchmarkGetPathIndexSlice
 // BenchmarkGetPathIndexSlice             	16462084	       360.8 ns/op	     160 B/op	       2 allocs/op
@@ -513,7 +513,7 @@ const benchPath = "Field1[1000000000000000]"
 // BenchmarkGetPathIndexString
 // BenchmarkGetPathIndexString            	96080587	        61.19 ns/op	      16 B/op	       1 allocs/op
 // PASS
-// ok  	github.com/Omnitouch/cgrates/utils	25.372s
+// ok  	github.com/cgrates/cgrates/utils	25.372s
 
 func GetPathIndexSlice1(spath string) (opath string, idx []string) {
 	idxStart := strings.Index(spath, IdxStart)

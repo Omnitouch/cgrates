@@ -21,8 +21,7 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // ERsCfg the config for ERs
@@ -33,16 +32,7 @@ type ERsCfg struct {
 	PartialCacheTTL time.Duration
 }
 
-// loadErsCfg loads the Ers section of the configuration
-func (erS *ERsCfg) Load(ctx *context.Context, jsnCfg ConfigDB, cfg *CGRConfig) (err error) {
-	jsnERsCfg := new(ERsJsonCfg)
-	if err = jsnCfg.GetSection(ctx, ERsJSON, jsnERsCfg); err != nil {
-		return
-	}
-	return erS.loadFromJSONCfg(jsnERsCfg, cfg.templates, cfg.generalCfg.RSRSep)
-}
-
-func (erS *ERsCfg) loadFromJSONCfg(jsnCfg *ERsJsonCfg, msgTemplates map[string][]*FCTemplate, sep string) (err error) {
+func (erS *ERsCfg) loadFromJSONCfg(jsnCfg *ERsJsonCfg, msgTemplates map[string][]*FCTemplate, sep string, dfltRdrCfg *EventReaderCfg, separator string) (err error) {
 	if jsnCfg == nil {
 		return
 	}
@@ -50,17 +40,25 @@ func (erS *ERsCfg) loadFromJSONCfg(jsnCfg *ERsJsonCfg, msgTemplates map[string][
 		erS.Enabled = *jsnCfg.Enabled
 	}
 	if jsnCfg.Sessions_conns != nil {
-		erS.SessionSConns = updateInternalConns(*jsnCfg.Sessions_conns, utils.MetaSessionS)
+		erS.SessionSConns = make([]string, len(*jsnCfg.Sessions_conns))
+		for i, fID := range *jsnCfg.Sessions_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			erS.SessionSConns[i] = fID
+			if fID == utils.MetaInternal {
+				erS.SessionSConns[i] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS)
+			}
+		}
 	}
 	if jsnCfg.Partial_cache_ttl != nil {
 		if erS.PartialCacheTTL, err = utils.ParseDurationWithNanosecs(*jsnCfg.Partial_cache_ttl); err != nil {
 			return
 		}
 	}
-	return erS.appendERsReaders(jsnCfg.Readers, msgTemplates, sep)
+	return erS.appendERsReaders(jsnCfg.Readers, msgTemplates, sep, dfltRdrCfg)
 }
 
-func (erS *ERsCfg) appendERsReaders(jsnReaders *[]*EventReaderJsonCfg, msgTemplates map[string][]*FCTemplate, sep string) (err error) {
+func (erS *ERsCfg) appendERsReaders(jsnReaders *[]*EventReaderJsonCfg, msgTemplates map[string][]*FCTemplate, sep string,
+	dfltRdrCfg *EventReaderCfg) (err error) {
 	if jsnReaders == nil {
 		return
 	}
@@ -75,7 +73,12 @@ func (erS *ERsCfg) appendERsReaders(jsnReaders *[]*EventReaderJsonCfg, msgTempla
 			}
 		}
 		if rdr == nil {
-			rdr = getDftEvRdrCfg()
+			if dfltRdrCfg != nil {
+				rdr = dfltRdrCfg.Clone()
+			} else {
+				rdr = new(EventReaderCfg)
+				rdr.Opts = &EventReaderOpts{}
+			}
 			erS.Readers = append(erS.Readers, rdr)
 		}
 		if err := rdr.loadFromJSONCfg(jsnReader, msgTemplates, sep); err != nil {
@@ -85,19 +88,17 @@ func (erS *ERsCfg) appendERsReaders(jsnReaders *[]*EventReaderJsonCfg, msgTempla
 	}
 	return nil
 }
-func (ERsCfg) SName() string             { return ERsJSON }
-func (erS ERsCfg) CloneSection() Section { return erS.Clone() }
 
 // Clone returns a deep copy of ERsCfg
-func (erS ERsCfg) Clone() (cln *ERsCfg) {
+func (erS *ERsCfg) Clone() (cln *ERsCfg) {
 	cln = &ERsCfg{
 		Enabled:         erS.Enabled,
 		SessionSConns:   make([]string, len(erS.SessionSConns)),
 		Readers:         make([]*EventReaderCfg, len(erS.Readers)),
 		PartialCacheTTL: erS.PartialCacheTTL,
 	}
-	if erS.SessionSConns != nil {
-		cln.SessionSConns = utils.CloneStringSlice(erS.SessionSConns)
+	for idx, sConn := range erS.SessionSConns {
+		cln.SessionSConns[idx] = sConn
 	}
 	for idx, rdr := range erS.Readers {
 		cln.Readers[idx] = rdr.Clone()
@@ -106,25 +107,32 @@ func (erS ERsCfg) Clone() (cln *ERsCfg) {
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (erS ERsCfg) AsMapInterface(separator string) interface{} {
-	mp := map[string]interface{}{
+func (erS *ERsCfg) AsMapInterface(separator string) (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
 		utils.EnabledCfg:         erS.Enabled,
 		utils.PartialCacheTTLCfg: "0",
 	}
 	if erS.PartialCacheTTL != 0 {
-		mp[utils.PartialCacheTTLCfg] = erS.PartialCacheTTL.String()
+		initialMP[utils.PartialCacheTTLCfg] = erS.PartialCacheTTL.String()
 	}
 	if erS.SessionSConns != nil {
-		mp[utils.SessionSConnsCfg] = getInternalJSONConns(erS.SessionSConns)
+		sessionSConns := make([]string, len(erS.SessionSConns))
+		for i, item := range erS.SessionSConns {
+			sessionSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS) {
+				sessionSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.SessionSConnsCfg] = sessionSConns
 	}
 	if erS.Readers != nil {
 		readers := make([]map[string]interface{}, len(erS.Readers))
 		for i, item := range erS.Readers {
 			readers[i] = item.AsMapInterface(separator)
 		}
-		mp[utils.ReadersCfg] = readers
+		initialMP[utils.ReadersCfg] = readers
 	}
-	return mp
+	return
 }
 
 type EventReaderOpts struct {
@@ -149,13 +157,7 @@ type EventReaderOpts struct {
 	KafkaTopic                        *string
 	KafkaGroupID                      *string
 	KafkaMaxWait                      *time.Duration
-	KafkaTLS                          *bool
-	KafkaCAPath                       *string
-	KafkaSkipTLSVerify                *bool
 	KafkaTopicProcessed               *string
-	KafkaTLSProcessed                 *bool
-	KafkaCAPathProcessed              *string
-	KafkaSkipTLSVerifyProcessed       *bool
 	SQLDBName                         *string
 	SQLTableName                      *string
 	PgSSLMode                         *string
@@ -284,26 +286,8 @@ func (erOpts *EventReaderOpts) loadFromJSONCfg(jsnCfg *EventReaderOptsJson) (err
 		}
 		erOpts.KafkaMaxWait = utils.DurationPointer(kafkaMaxWait)
 	}
-	if jsnCfg.KafkaTLS != nil {
-		erOpts.KafkaTLS = jsnCfg.KafkaTLS
-	}
-	if jsnCfg.KafkaCAPath != nil {
-		erOpts.KafkaCAPath = jsnCfg.KafkaCAPath
-	}
-	if jsnCfg.KafkaSkipTLSVerify != nil {
-		erOpts.KafkaSkipTLSVerify = jsnCfg.KafkaSkipTLSVerify
-	}
 	if jsnCfg.KafkaTopicProcessed != nil {
 		erOpts.KafkaTopicProcessed = jsnCfg.KafkaTopicProcessed
-	}
-	if jsnCfg.KafkaTLSProcessed != nil {
-		erOpts.KafkaTLSProcessed = jsnCfg.KafkaTLSProcessed
-	}
-	if jsnCfg.KafkaCAPathProcessed != nil {
-		erOpts.KafkaCAPathProcessed = jsnCfg.KafkaCAPathProcessed
-	}
-	if jsnCfg.KafkaSkipTLSVerifyProcessed != nil {
-		erOpts.KafkaSkipTLSVerifyProcessed = jsnCfg.KafkaSkipTLSVerifyProcessed
 	}
 	if jsnCfg.SQLDBName != nil {
 		erOpts.SQLDBName = jsnCfg.SQLDBName
@@ -460,7 +444,10 @@ func (er *EventReaderCfg) loadFromJSONCfg(jsnCfg *EventReaderJsonCfg, msgTemplat
 		er.Timezone = *jsnCfg.Timezone
 	}
 	if jsnCfg.Filters != nil {
-		er.Filters = utils.CloneStringSlice(*jsnCfg.Filters)
+		er.Filters = make([]string, len(*jsnCfg.Filters))
+		for i, fltr := range *jsnCfg.Filters {
+			er.Filters[i] = fltr
+		}
 	}
 	if jsnCfg.Flags != nil {
 		er.Flags = utils.FlagsWithParamsFromSlice(*jsnCfg.Flags)
@@ -566,26 +553,8 @@ func (erOpts *EventReaderOpts) Clone() *EventReaderOpts {
 	if erOpts.KafkaMaxWait != nil {
 		cln.KafkaMaxWait = utils.DurationPointer(*erOpts.KafkaMaxWait)
 	}
-	if erOpts.KafkaTLS != nil {
-		cln.KafkaTLS = utils.BoolPointer(*erOpts.KafkaTLS)
-	}
-	if erOpts.KafkaCAPath != nil {
-		cln.KafkaCAPath = utils.StringPointer(*erOpts.KafkaCAPath)
-	}
-	if erOpts.KafkaSkipTLSVerify != nil {
-		cln.KafkaSkipTLSVerify = utils.BoolPointer(*erOpts.KafkaSkipTLSVerify)
-	}
 	if erOpts.KafkaTopicProcessed != nil {
 		cln.KafkaTopicProcessed = utils.StringPointer(*erOpts.KafkaTopicProcessed)
-	}
-	if erOpts.KafkaTLSProcessed != nil {
-		cln.KafkaTLSProcessed = utils.BoolPointer(*erOpts.KafkaTLSProcessed)
-	}
-	if erOpts.KafkaCAPathProcessed != nil {
-		cln.KafkaCAPathProcessed = utils.StringPointer(*erOpts.KafkaCAPathProcessed)
-	}
-	if erOpts.KafkaSkipTLSVerifyProcessed != nil {
-		cln.KafkaSkipTLSVerifyProcessed = utils.BoolPointer(*erOpts.KafkaSkipTLSVerifyProcessed)
 	}
 	if erOpts.SQLDBName != nil {
 		cln.SQLDBName = utils.StringPointer(*erOpts.SQLDBName)
@@ -716,7 +685,10 @@ func (er EventReaderCfg) Clone() (cln *EventReaderCfg) {
 		Opts:           er.Opts.Clone(),
 	}
 	if er.Filters != nil {
-		cln.Filters = utils.CloneStringSlice(er.Filters)
+		cln.Filters = make([]string, len(er.Filters))
+		for idx, val := range er.Filters {
+			cln.Filters[idx] = val
+		}
 	}
 	if er.Fields != nil {
 		cln.Fields = make([]*FCTemplate, len(er.Fields))
@@ -806,26 +778,8 @@ func (er *EventReaderCfg) AsMapInterface(separator string) (initialMP map[string
 	if er.Opts.KafkaMaxWait != nil {
 		opts[utils.KafkaMaxWait] = er.Opts.KafkaMaxWait.String()
 	}
-	if er.Opts.KafkaTLS != nil {
-		opts[utils.KafkaTLS] = *er.Opts.KafkaTLS
-	}
-	if er.Opts.KafkaCAPath != nil {
-		opts[utils.KafkaCAPath] = *er.Opts.KafkaCAPath
-	}
-	if er.Opts.KafkaSkipTLSVerify != nil {
-		opts[utils.KafkaSkipTLSVerify] = *er.Opts.KafkaSkipTLSVerify
-	}
 	if er.Opts.KafkaTopicProcessed != nil {
 		opts[utils.KafkaTopicProcessedCfg] = *er.Opts.KafkaTopicProcessed
-	}
-	if er.Opts.KafkaTLSProcessed != nil {
-		opts[utils.KafkaTLSProcessedCfg] = *er.Opts.KafkaTLSProcessed
-	}
-	if er.Opts.KafkaCAPathProcessed != nil {
-		opts[utils.KafkaCAPathProcessedCfg] = *er.Opts.KafkaCAPathProcessed
-	}
-	if er.Opts.KafkaSkipTLSVerifyProcessed != nil {
-		opts[utils.KafkaSkipTLSVerifyProcessedCfg] = *er.Opts.KafkaSkipTLSVerifyProcessed
 	}
 	if er.Opts.SQLDBName != nil {
 		opts[utils.SQLDBNameOpt] = *er.Opts.SQLDBName
@@ -953,6 +907,8 @@ func (er *EventReaderCfg) AsMapInterface(separator string) (initialMP map[string
 		utils.OptsCfg:               opts,
 	}
 
+	initialMP[utils.OptsCfg] = opts
+
 	if flags := er.Flags.SliceFlags(); flags != nil {
 		initialMP[utils.FlagsCfg] = flags
 	}
@@ -985,748 +941,4 @@ func (er *EventReaderCfg) AsMapInterface(separator string) (initialMP map[string
 		initialMP[utils.RunDelayCfg] = "-1"
 	}
 	return
-}
-
-type EventReaderOptsJson struct {
-	PartialPath                       *string `json:"partialPath"`
-	PartialCacheAction                *string `json:"partialCacheAction"`
-	PartialOrderField                 *string `json:"partialOrderField"`
-	PartialCSVFieldSeparator          *string `json:"partialcsvFieldSeparator"`
-	CSVRowLength                      *int    `json:"csvRowLength"`
-	CSVFieldSeparator                 *string `json:"csvFieldSeparator"`
-	CSVHeaderDefineChar               *string `json:"csvHeaderDefineChar"`
-	CSVLazyQuotes                     *bool   `json:"csvLazyQuotes"`
-	XMLRootPath                       *string `json:"xmlRootPath"`
-	AMQPQueueID                       *string `json:"amqpQueueID"`
-	AMQPQueueIDProcessed              *string `json:"amqpQueueIDProcessed"`
-	AMQPConsumerTag                   *string `json:"amqpConsumerTag"`
-	AMQPExchange                      *string `json:"amqpExchange"`
-	AMQPExchangeType                  *string `json:"amqpExchangeType"`
-	AMQPRoutingKey                    *string `json:"amqpRoutingKey"`
-	AMQPExchangeProcessed             *string `json:"amqpExchangeProcessed"`
-	AMQPExchangeTypeProcessed         *string `json:"amqpExchangeTypeProcessed"`
-	AMQPRoutingKeyProcessed           *string `json:"amqpRoutingKeyProcessed"`
-	KafkaTopic                        *string `json:"kafkaTopic"`
-	KafkaGroupID                      *string `json:"kafkaGroupID"`
-	KafkaMaxWait                      *string `json:"kafkaMaxWait"`
-	KafkaTLS                          *bool   `json:"kafkaTLS"`
-	KafkaCAPath                       *string `json:"kafkaCAPath"`
-	KafkaSkipTLSVerify                *bool   `json:"kafkaSkipTLSVerify"`
-	KafkaTopicProcessed               *string `json:"kafkaTopicProcessed"`
-	KafkaTLSProcessed                 *bool   `json:"kafkaTLSProcessed"`
-	KafkaCAPathProcessed              *string `json:"kafkaCAPathProcessed"`
-	KafkaSkipTLSVerifyProcessed       *bool   `json:"kafkaSkipTLSVerifyProcessed"`
-	SQLDBName                         *string `json:"sqlDBName"`
-	SQLTableName                      *string `json:"sqlTableName"`
-	PgSSLMode                         *string `json:"pgSSLMode"`
-	SQLDBNameProcessed                *string `json:"sqlDBNameProcessed"`
-	SQLTableNameProcessed             *string `json:"sqlTableNameProcessed"`
-	PgSSLModeProcessed                *string `json:"pgSSLModeProcessed"`
-	AWSRegion                         *string `json:"awsRegion"`
-	AWSKey                            *string `json:"awsKey"`
-	AWSSecret                         *string `json:"awsSecret"`
-	AWSToken                          *string `json:"awsToken"`
-	AWSRegionProcessed                *string `json:"awsRegionProcessed"`
-	AWSKeyProcessed                   *string `json:"awsKeyProcessed"`
-	AWSSecretProcessed                *string `json:"awsSecretProcessed"`
-	AWSTokenProcessed                 *string `json:"awsTokenProcessed"`
-	SQSQueueID                        *string `json:"sqsQueueID"`
-	SQSQueueIDProcessed               *string `json:"sqsQueueIDProcessed"`
-	S3BucketID                        *string `json:"s3BucketID"`
-	S3FolderPathProcessed             *string `json:"s3FolderPathProcessed"`
-	S3BucketIDProcessed               *string `json:"s3BucketIDProcessed"`
-	NATSJetStream                     *bool   `json:"natsJetStream"`
-	NATSConsumerName                  *string `json:"natsConsumerName"`
-	NATSSubject                       *string `json:"natsSubject"`
-	NATSQueueID                       *string `json:"natsQueueID"`
-	NATSJWTFile                       *string `json:"natsJWTFile"`
-	NATSSeedFile                      *string `json:"natsSeedFile"`
-	NATSCertificateAuthority          *string `json:"natsCertificateAuthority"`
-	NATSClientCertificate             *string `json:"natsClientCertificate"`
-	NATSClientKey                     *string `json:"natsClientKey"`
-	NATSJetStreamMaxWait              *string `json:"natsJetStreamMaxWait"`
-	NATSJetStreamProcessed            *bool   `json:"natsJetStreamProcessed"`
-	NATSSubjectProcessed              *string `json:"natsSubjectProcessed"`
-	NATSJWTFileProcessed              *string `json:"natsJWTFileProcessed"`
-	NATSSeedFileProcessed             *string `json:"natsSeedFileProcessed"`
-	NATSCertificateAuthorityProcessed *string `json:"natsCertificateAuthorityProcessed"`
-	NATSClientCertificateProcessed    *string `json:"natsClientCertificateProcessed"`
-	NATSClientKeyProcessed            *string `json:"natsClientKeyProcessed"`
-	NATSJetStreamMaxWaitProcessed     *string `json:"natsJetStreamMaxWaitProcessed"`
-}
-
-// EventReaderSJsonCfg is the configuration of a single EventReader
-type EventReaderJsonCfg struct {
-	Id                    *string
-	Type                  *string
-	Run_delay             *string
-	Concurrent_requests   *int
-	Source_path           *string
-	Processed_path        *string
-	Opts                  *EventReaderOptsJson
-	Tenant                *string
-	Timezone              *string
-	Filters               *[]string
-	Flags                 *[]string
-	Fields                *[]*FcTemplateJsonCfg
-	Partial_commit_fields *[]*FcTemplateJsonCfg
-	Cache_dump_fields     *[]*FcTemplateJsonCfg
-}
-
-func diffEventReaderOptsJsonCfg(d *EventReaderOptsJson, v1, v2 *EventReaderOpts) *EventReaderOptsJson {
-	if d == nil {
-		d = new(EventReaderOptsJson)
-	}
-	if v2.PartialPath != nil {
-		if v1.PartialPath == nil ||
-			*v1.PartialPath != *v2.PartialPath {
-			d.PartialPath = v2.PartialPath
-		}
-	} else {
-		d.PartialPath = nil
-	}
-	if v2.PartialCacheAction != nil {
-		if v1.PartialCacheAction == nil ||
-			*v1.PartialCacheAction != *v2.PartialCacheAction {
-			d.PartialCacheAction = v2.PartialCacheAction
-		}
-	} else {
-		d.PartialCacheAction = nil
-	}
-	if v2.PartialOrderField != nil {
-		if v1.PartialOrderField == nil ||
-			*v1.PartialOrderField != *v2.PartialOrderField {
-			d.PartialOrderField = v2.PartialOrderField
-		}
-	} else {
-		d.PartialOrderField = nil
-	}
-	if v2.PartialCSVFieldSeparator != nil {
-		if v1.PartialCSVFieldSeparator == nil ||
-			*v1.PartialCSVFieldSeparator != *v2.PartialCSVFieldSeparator {
-			d.PartialCSVFieldSeparator = v2.PartialCSVFieldSeparator
-		}
-	} else {
-		d.PartialCSVFieldSeparator = nil
-	}
-	if v2.CSVRowLength != nil {
-		if v1.CSVRowLength == nil ||
-			*v1.CSVRowLength != *v2.CSVRowLength {
-			d.CSVRowLength = v2.CSVRowLength
-		}
-	} else {
-		d.CSVRowLength = nil
-	}
-	if v2.CSVFieldSeparator != nil {
-		if v1.CSVFieldSeparator == nil ||
-			*v1.CSVFieldSeparator != *v2.CSVFieldSeparator {
-			d.CSVFieldSeparator = v2.CSVFieldSeparator
-		}
-	} else {
-		d.CSVFieldSeparator = nil
-	}
-	if v2.CSVHeaderDefineChar != nil {
-		if v1.CSVHeaderDefineChar == nil ||
-			*v1.CSVHeaderDefineChar != *v2.CSVHeaderDefineChar {
-			d.CSVHeaderDefineChar = v2.CSVHeaderDefineChar
-		}
-	} else {
-		d.CSVHeaderDefineChar = nil
-	}
-	if v2.CSVLazyQuotes != nil {
-		if v1.CSVLazyQuotes == nil ||
-			*v1.CSVLazyQuotes != *v2.CSVLazyQuotes {
-			d.CSVLazyQuotes = v2.CSVLazyQuotes
-		}
-	} else {
-		d.CSVLazyQuotes = nil
-	}
-	if v2.XMLRootPath != nil {
-		if v1.XMLRootPath == nil ||
-			*v1.XMLRootPath != *v2.XMLRootPath {
-			d.XMLRootPath = v2.XMLRootPath
-		}
-	} else {
-		d.XMLRootPath = nil
-	}
-	if v2.AMQPQueueID != nil {
-		if v1.AMQPQueueID == nil ||
-			*v1.AMQPQueueID != *v2.AMQPQueueID {
-			d.AMQPQueueID = v2.AMQPQueueID
-		}
-	} else {
-		d.AMQPQueueID = nil
-	}
-	if v2.AMQPQueueIDProcessed != nil {
-		if v1.AMQPQueueIDProcessed == nil ||
-			*v1.AMQPQueueIDProcessed != *v2.AMQPQueueIDProcessed {
-			d.AMQPQueueIDProcessed = v2.AMQPQueueIDProcessed
-		}
-	} else {
-		d.AMQPQueueIDProcessed = nil
-	}
-	if v2.AMQPConsumerTag != nil {
-		if v1.AMQPConsumerTag == nil ||
-			*v1.AMQPConsumerTag != *v2.AMQPConsumerTag {
-			d.AMQPConsumerTag = v2.AMQPConsumerTag
-		}
-	} else {
-		d.AMQPConsumerTag = nil
-	}
-	if v2.AMQPExchange != nil {
-		if v1.AMQPExchange == nil ||
-			*v1.AMQPExchange != *v2.AMQPExchange {
-			d.AMQPExchange = v2.AMQPExchange
-		}
-	} else {
-		d.AMQPExchange = nil
-	}
-	if v2.AMQPExchangeType != nil {
-		if v1.AMQPExchangeType == nil ||
-			*v1.AMQPExchangeType != *v2.AMQPExchangeType {
-			d.AMQPExchangeType = v2.AMQPExchangeType
-		}
-	} else {
-		d.AMQPExchangeType = nil
-	}
-	if v2.AMQPRoutingKey != nil {
-		if v1.AMQPRoutingKey == nil ||
-			*v1.AMQPRoutingKey != *v2.AMQPRoutingKey {
-			d.AMQPRoutingKey = v2.AMQPRoutingKey
-		}
-	} else {
-		d.AMQPRoutingKey = nil
-	}
-	if v2.AMQPExchangeProcessed != nil {
-		if v1.AMQPExchangeProcessed == nil ||
-			*v1.AMQPExchangeProcessed != *v2.AMQPExchangeProcessed {
-			d.AMQPExchangeProcessed = v2.AMQPExchangeProcessed
-		}
-	} else {
-		d.AMQPExchangeProcessed = nil
-	}
-	if v2.AMQPExchangeTypeProcessed != nil {
-		if v1.AMQPExchangeTypeProcessed == nil ||
-			*v1.AMQPExchangeTypeProcessed != *v2.AMQPExchangeTypeProcessed {
-			d.AMQPExchangeTypeProcessed = v2.AMQPExchangeTypeProcessed
-		}
-	} else {
-		d.AMQPExchangeTypeProcessed = nil
-	}
-	if v2.AMQPRoutingKeyProcessed != nil {
-		if v1.AMQPRoutingKeyProcessed == nil ||
-			*v1.AMQPRoutingKeyProcessed != *v2.AMQPRoutingKeyProcessed {
-			d.AMQPRoutingKeyProcessed = v2.AMQPRoutingKeyProcessed
-		}
-	} else {
-		d.AMQPRoutingKeyProcessed = nil
-	}
-	if v2.KafkaTopic != nil {
-		if v1.KafkaTopic == nil ||
-			*v1.KafkaTopic != *v2.KafkaTopic {
-			d.KafkaTopic = v2.KafkaTopic
-		}
-	} else {
-		d.KafkaTopic = nil
-	}
-	if v2.KafkaGroupID != nil {
-		if v1.KafkaGroupID == nil ||
-			*v1.KafkaGroupID != *v2.KafkaGroupID {
-			d.KafkaGroupID = v2.KafkaGroupID
-		}
-	} else {
-		d.KafkaGroupID = nil
-	}
-	if v2.KafkaMaxWait != nil {
-		if v1.KafkaMaxWait == nil ||
-			*v1.KafkaMaxWait != *v2.KafkaMaxWait {
-			d.KafkaMaxWait = utils.StringPointer(v2.KafkaMaxWait.String())
-		}
-	} else {
-		d.KafkaMaxWait = nil
-	}
-	if v2.KafkaTLS != nil {
-		if v1.KafkaTLS == nil ||
-			*v1.KafkaTLS != *v2.KafkaTLS {
-			d.KafkaTLS = v2.KafkaTLS
-		}
-	} else {
-		d.KafkaTLS = nil
-	}
-	if v2.KafkaCAPath != nil {
-		if v1.KafkaCAPath == nil ||
-			*v1.KafkaCAPath != *v2.KafkaCAPath {
-			d.KafkaCAPath = v2.KafkaCAPath
-		}
-	} else {
-		d.KafkaCAPath = nil
-	}
-	if v2.KafkaSkipTLSVerify != nil {
-		if v1.KafkaSkipTLSVerify == nil ||
-			*v1.KafkaSkipTLSVerify != *v2.KafkaSkipTLSVerify {
-			d.KafkaSkipTLSVerify = v2.KafkaSkipTLSVerify
-		}
-	} else {
-		d.KafkaSkipTLSVerify = nil
-	}
-	if v2.KafkaTopicProcessed != nil {
-		if v1.KafkaTopicProcessed == nil ||
-			*v1.KafkaTopicProcessed != *v2.KafkaTopicProcessed {
-			d.KafkaTopicProcessed = v2.KafkaTopicProcessed
-		}
-	} else {
-		d.KafkaTopicProcessed = nil
-	}
-	if v2.KafkaTLSProcessed != nil {
-		if v1.KafkaTLSProcessed == nil ||
-			*v1.KafkaTLSProcessed != *v2.KafkaTLSProcessed {
-			d.KafkaTLSProcessed = v2.KafkaTLSProcessed
-		}
-	} else {
-		d.KafkaTLSProcessed = nil
-	}
-	if v2.KafkaCAPathProcessed != nil {
-		if v1.KafkaCAPathProcessed == nil ||
-			*v1.KafkaCAPathProcessed != *v2.KafkaCAPathProcessed {
-			d.KafkaCAPathProcessed = v2.KafkaCAPathProcessed
-		}
-	} else {
-		d.KafkaCAPathProcessed = nil
-	}
-	if v2.KafkaSkipTLSVerifyProcessed != nil {
-		if v1.KafkaSkipTLSVerifyProcessed == nil ||
-			*v1.KafkaSkipTLSVerifyProcessed != *v2.KafkaSkipTLSVerifyProcessed {
-			d.KafkaSkipTLSVerifyProcessed = v2.KafkaSkipTLSVerifyProcessed
-		}
-	} else {
-		d.KafkaSkipTLSVerifyProcessed = nil
-	}
-	if v2.SQLDBName != nil {
-		if v1.SQLDBName == nil ||
-			*v1.SQLDBName != *v2.SQLDBName {
-			d.SQLDBName = v2.SQLDBName
-		}
-	} else {
-		d.SQLDBName = nil
-	}
-	if v2.SQLTableName != nil {
-		if v1.SQLTableName == nil ||
-			*v1.SQLTableName != *v2.SQLTableName {
-			d.SQLTableName = v2.SQLTableName
-		}
-	} else {
-		d.SQLTableName = nil
-	}
-	if v2.PgSSLMode != nil {
-		if v1.PgSSLMode == nil ||
-			*v1.PgSSLMode != *v2.PgSSLMode {
-			d.PgSSLMode = v2.PgSSLMode
-		}
-	} else {
-		d.PgSSLMode = nil
-	}
-	if v2.SQLDBNameProcessed != nil {
-		if v1.SQLDBNameProcessed == nil ||
-			*v1.SQLDBNameProcessed != *v2.SQLDBNameProcessed {
-			d.SQLDBNameProcessed = v2.SQLDBNameProcessed
-		}
-	} else {
-		d.SQLDBNameProcessed = nil
-	}
-	if v2.SQLTableNameProcessed != nil {
-		if v1.SQLTableNameProcessed == nil ||
-			*v1.SQLTableNameProcessed != *v2.SQLTableNameProcessed {
-			d.SQLTableNameProcessed = v2.SQLTableNameProcessed
-		}
-	} else {
-		d.SQLTableNameProcessed = nil
-	}
-	if v2.PgSSLModeProcessed != nil {
-		if v1.PgSSLModeProcessed == nil ||
-			*v1.PgSSLModeProcessed != *v2.PgSSLModeProcessed {
-			d.PgSSLModeProcessed = v2.PgSSLModeProcessed
-		}
-	} else {
-		d.PgSSLModeProcessed = nil
-	}
-	if v2.AWSRegion != nil {
-		if v1.AWSRegion == nil ||
-			*v1.AWSRegion != *v2.AWSRegion {
-			d.AWSRegion = v2.AWSRegion
-		}
-	} else {
-		d.AWSRegion = nil
-	}
-	if v2.AWSKey != nil {
-		if v1.AWSKey == nil ||
-			*v1.AWSKey != *v2.AWSKey {
-			d.AWSKey = v2.AWSKey
-		}
-	} else {
-		d.AWSKey = nil
-	}
-	if v2.AWSSecret != nil {
-		if v1.AWSSecret == nil ||
-			*v1.AWSSecret != *v2.AWSSecret {
-			d.AWSSecret = v2.AWSSecret
-		}
-	} else {
-		d.AWSSecret = nil
-	}
-	if v2.AWSToken != nil {
-		if v1.AWSToken == nil ||
-			*v1.AWSToken != *v2.AWSToken {
-			d.AWSToken = v2.AWSToken
-		}
-	} else {
-		d.AWSToken = nil
-	}
-	if v2.AWSRegionProcessed != nil {
-		if v1.AWSRegionProcessed == nil ||
-			*v1.AWSRegionProcessed != *v2.AWSRegionProcessed {
-			d.AWSRegionProcessed = v2.AWSRegionProcessed
-		}
-	} else {
-		d.AWSRegionProcessed = nil
-	}
-	if v2.AWSKeyProcessed != nil {
-		if v1.AWSKeyProcessed == nil ||
-			*v1.AWSKeyProcessed != *v2.AWSKeyProcessed {
-			d.AWSKeyProcessed = v2.AWSKeyProcessed
-		}
-	} else {
-		d.AWSKeyProcessed = nil
-	}
-	if v2.AWSSecretProcessed != nil {
-		if v1.AWSSecretProcessed == nil ||
-			*v1.AWSSecretProcessed != *v2.AWSSecretProcessed {
-			d.AWSSecretProcessed = v2.AWSSecretProcessed
-		}
-	} else {
-		d.AWSSecretProcessed = nil
-	}
-	if v2.AWSTokenProcessed != nil {
-		if v1.AWSTokenProcessed == nil ||
-			*v1.AWSTokenProcessed != *v2.AWSTokenProcessed {
-			d.AWSTokenProcessed = v2.AWSTokenProcessed
-		}
-	} else {
-		d.AWSTokenProcessed = nil
-	}
-	if v2.SQSQueueID != nil {
-		if v1.SQSQueueID == nil ||
-			*v1.SQSQueueID != *v2.SQSQueueID {
-			d.SQSQueueID = v2.SQSQueueID
-		}
-	} else {
-		d.SQSQueueID = nil
-	}
-	if v2.SQSQueueIDProcessed != nil {
-		if v1.SQSQueueIDProcessed == nil ||
-			*v1.SQSQueueIDProcessed != *v2.SQSQueueIDProcessed {
-			d.SQSQueueIDProcessed = v2.SQSQueueIDProcessed
-		}
-	} else {
-		d.SQSQueueIDProcessed = nil
-	}
-	if v2.S3BucketID != nil {
-		if v1.S3BucketID == nil ||
-			*v1.S3BucketID != *v2.S3BucketID {
-			d.S3BucketID = v2.S3BucketID
-		}
-	} else {
-		d.S3BucketID = nil
-	}
-	if v2.S3FolderPathProcessed != nil {
-		if v1.S3FolderPathProcessed == nil ||
-			*v1.S3FolderPathProcessed != *v2.S3FolderPathProcessed {
-			d.S3FolderPathProcessed = v2.S3FolderPathProcessed
-		}
-	} else {
-		d.S3FolderPathProcessed = nil
-	}
-	if v2.S3BucketIDProcessed != nil {
-		if v1.S3BucketIDProcessed == nil ||
-			*v1.S3BucketIDProcessed != *v2.S3BucketIDProcessed {
-			d.S3BucketIDProcessed = v2.S3BucketIDProcessed
-		}
-	} else {
-		d.S3BucketIDProcessed = nil
-	}
-	if v2.NATSJetStream != nil {
-		if v1.NATSJetStream == nil ||
-			*v1.NATSJetStream != *v2.NATSJetStream {
-			d.NATSJetStream = v2.NATSJetStream
-		}
-	} else {
-		d.NATSJetStream = nil
-	}
-	if v2.NATSConsumerName != nil {
-		if v1.NATSConsumerName == nil ||
-			*v1.NATSConsumerName != *v2.NATSConsumerName {
-			d.NATSConsumerName = v2.NATSConsumerName
-		}
-	} else {
-		d.NATSConsumerName = nil
-	}
-	if v2.NATSSubject != nil {
-		if v1.NATSSubject == nil ||
-			*v1.NATSSubject != *v2.NATSSubject {
-			d.NATSSubject = v2.NATSSubject
-		}
-	} else {
-		d.NATSSubject = nil
-	}
-	if v2.NATSQueueID != nil {
-		if v1.NATSQueueID == nil ||
-			*v1.NATSQueueID != *v2.NATSQueueID {
-			d.NATSQueueID = v2.NATSQueueID
-		}
-	} else {
-		d.NATSQueueID = nil
-	}
-	if v2.NATSJWTFile != nil {
-		if v1.NATSJWTFile == nil ||
-			*v1.NATSJWTFile != *v2.NATSJWTFile {
-			d.NATSJWTFile = v2.NATSJWTFile
-		}
-	} else {
-		d.NATSJWTFile = nil
-	}
-	if v2.NATSSeedFile != nil {
-		if v1.NATSSeedFile == nil ||
-			*v1.NATSSeedFile != *v2.NATSSeedFile {
-			d.NATSSeedFile = v2.NATSSeedFile
-		}
-	} else {
-		d.NATSSeedFile = nil
-	}
-	if v2.NATSCertificateAuthority != nil {
-		if v1.NATSCertificateAuthority == nil ||
-			*v1.NATSCertificateAuthority != *v2.NATSCertificateAuthority {
-			d.NATSCertificateAuthority = v2.NATSCertificateAuthority
-		}
-	} else {
-		d.NATSCertificateAuthority = nil
-	}
-	if v2.NATSClientCertificate != nil {
-		if v1.NATSClientCertificate == nil ||
-			*v1.NATSClientCertificate != *v2.NATSClientCertificate {
-			d.NATSClientCertificate = v2.NATSClientCertificate
-		}
-	} else {
-		d.NATSClientCertificate = nil
-	}
-	if v2.NATSClientKey != nil {
-		if v1.NATSClientKey == nil ||
-			*v1.NATSClientKey != *v2.NATSClientKey {
-			d.NATSClientKey = v2.NATSClientKey
-		}
-	} else {
-		d.NATSClientKey = nil
-	}
-	if v2.NATSJetStreamMaxWait != nil {
-		if v1.NATSJetStreamMaxWait == nil ||
-			*v1.NATSJetStreamMaxWait != *v2.NATSJetStreamMaxWait {
-			d.NATSJetStreamMaxWait = utils.StringPointer(v2.NATSJetStreamMaxWait.String())
-		}
-	} else {
-		d.NATSJetStreamMaxWait = nil
-	}
-	if v2.NATSJetStreamProcessed != nil {
-		if v1.NATSJetStreamProcessed == nil ||
-			*v1.NATSJetStreamProcessed != *v2.NATSJetStreamProcessed {
-			d.NATSJetStreamProcessed = v2.NATSJetStreamProcessed
-		}
-	} else {
-		d.NATSJetStreamProcessed = nil
-	}
-	if v2.NATSSubjectProcessed != nil {
-		if v1.NATSSubjectProcessed == nil ||
-			*v1.NATSSubjectProcessed != *v2.NATSSubjectProcessed {
-			d.NATSSubjectProcessed = v2.NATSSubjectProcessed
-		}
-	} else {
-		d.NATSSubjectProcessed = nil
-	}
-	if v2.NATSJWTFileProcessed != nil {
-		if v1.NATSJWTFileProcessed == nil ||
-			*v1.NATSJWTFileProcessed != *v2.NATSJWTFileProcessed {
-			d.NATSJWTFileProcessed = v2.NATSJWTFileProcessed
-		}
-	} else {
-		d.NATSJWTFileProcessed = nil
-	}
-	if v2.NATSSeedFileProcessed != nil {
-		if v1.NATSSeedFileProcessed == nil ||
-			*v1.NATSSeedFileProcessed != *v2.NATSSeedFileProcessed {
-			d.NATSSeedFileProcessed = v2.NATSSeedFileProcessed
-		}
-	} else {
-		d.NATSSeedFileProcessed = nil
-	}
-	if v2.NATSCertificateAuthorityProcessed != nil {
-		if v1.NATSCertificateAuthorityProcessed == nil ||
-			*v1.NATSCertificateAuthorityProcessed != *v2.NATSCertificateAuthorityProcessed {
-			d.NATSCertificateAuthorityProcessed = v2.NATSCertificateAuthorityProcessed
-		}
-	} else {
-		d.NATSCertificateAuthorityProcessed = nil
-	}
-	if v2.NATSClientCertificateProcessed != nil {
-		if v1.NATSClientCertificateProcessed == nil ||
-			*v1.NATSClientCertificateProcessed != *v2.NATSClientCertificateProcessed {
-			d.NATSClientCertificateProcessed = v2.NATSClientCertificateProcessed
-		}
-	} else {
-		d.NATSClientCertificateProcessed = nil
-	}
-	if v2.NATSClientKeyProcessed != nil {
-		if v1.NATSClientKeyProcessed == nil ||
-			*v1.NATSClientKeyProcessed != *v2.NATSClientKeyProcessed {
-			d.NATSClientKeyProcessed = v2.NATSClientKeyProcessed
-		}
-	} else {
-		d.NATSClientKeyProcessed = nil
-	}
-	if v2.NATSJetStreamMaxWaitProcessed != nil {
-		if v1.NATSJetStreamMaxWaitProcessed == nil ||
-			*v1.NATSJetStreamMaxWaitProcessed != *v2.NATSJetStreamMaxWaitProcessed {
-			d.NATSJetStreamMaxWaitProcessed = utils.StringPointer(v2.NATSJetStreamMaxWaitProcessed.String())
-		}
-	} else {
-		d.NATSJetStreamMaxWaitProcessed = nil
-	}
-	return d
-}
-
-func diffEventReaderJsonCfg(d *EventReaderJsonCfg, v1, v2 *EventReaderCfg, separator string) *EventReaderJsonCfg {
-	if d == nil {
-		d = new(EventReaderJsonCfg)
-	}
-	if v1.ID != v2.ID {
-		d.Id = utils.StringPointer(v2.ID)
-	}
-	if v1.Type != v2.Type {
-		d.Type = utils.StringPointer(v2.Type)
-	}
-	if v1.RunDelay != v2.RunDelay {
-		d.Run_delay = utils.StringPointer(v2.RunDelay.String())
-	}
-	if v1.ConcurrentReqs != v2.ConcurrentReqs {
-		d.Concurrent_requests = utils.IntPointer(v2.ConcurrentReqs)
-	}
-	if v1.SourcePath != v2.SourcePath {
-		d.Source_path = utils.StringPointer(v2.SourcePath)
-	}
-	if v1.ProcessedPath != v2.ProcessedPath {
-		d.Processed_path = utils.StringPointer(v2.ProcessedPath)
-	}
-	d.Opts = diffEventReaderOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	tnt1 := v1.Tenant.GetRule(separator)
-	tnt2 := v2.Tenant.GetRule(separator)
-	if tnt1 != tnt2 {
-		d.Tenant = utils.StringPointer(tnt2)
-	}
-	if v1.Timezone != v2.Timezone {
-		d.Timezone = utils.StringPointer(v2.Timezone)
-	}
-	if !utils.SliceStringEqual(v1.Filters, v2.Filters) {
-		d.Filters = &v2.Filters
-	}
-	flgs1 := v1.Flags.SliceFlags()
-	flgs2 := v2.Flags.SliceFlags()
-	if !utils.SliceStringEqual(flgs1, flgs2) {
-		d.Flags = &flgs2
-	}
-	var flds []*FcTemplateJsonCfg
-	if d.Fields != nil {
-		flds = *d.Fields
-	}
-	flds = diffFcTemplateJsonCfg(flds, v1.Fields, v2.Fields, separator)
-	if flds != nil {
-		d.Fields = &flds
-	}
-
-	var pcf []*FcTemplateJsonCfg
-	if d.Partial_commit_fields != nil {
-		pcf = *d.Partial_commit_fields
-	}
-	pcf = diffFcTemplateJsonCfg(pcf, v1.PartialCommitFields, v2.PartialCommitFields, separator)
-	if pcf != nil {
-		d.Partial_commit_fields = &pcf
-	}
-
-	var cdf []*FcTemplateJsonCfg
-	if d.Cache_dump_fields != nil {
-		cdf = *d.Cache_dump_fields
-	}
-	cdf = diffFcTemplateJsonCfg(cdf, v1.CacheDumpFields, v2.CacheDumpFields, separator)
-	if cdf != nil {
-		d.Cache_dump_fields = &cdf
-	}
-
-	return d
-}
-
-func getEventReaderJsonCfg(d []*EventReaderJsonCfg, id string) (*EventReaderJsonCfg, int) {
-	for i, v := range d {
-		if v.Id != nil && *v.Id == id {
-			return v, i
-		}
-	}
-	return nil, -1
-}
-
-func getEventReaderCfg(d []*EventReaderCfg, id string) *EventReaderCfg {
-	for _, v := range d {
-		if v.ID == id {
-			return v
-		}
-	}
-	return &EventReaderCfg{
-		Opts: &EventReaderOpts{},
-	}
-}
-
-func diffEventReadersJsonCfg(d *[]*EventReaderJsonCfg, v1, v2 []*EventReaderCfg, separator string) *[]*EventReaderJsonCfg {
-	if d == nil || *d == nil {
-		d = &[]*EventReaderJsonCfg{}
-	}
-	for _, val := range v2 {
-		dv, i := getEventReaderJsonCfg(*d, val.ID)
-		dv = diffEventReaderJsonCfg(dv, getEventReaderCfg(v1, val.ID), val, separator)
-		if i == -1 {
-			*d = append(*d, dv)
-		} else {
-			(*d)[i] = dv
-		}
-	}
-
-	return d
-}
-
-// EventReaderSJsonCfg contains the configuration of EventReaderService
-type ERsJsonCfg struct {
-	Enabled           *bool
-	Sessions_conns    *[]string
-	Readers           *[]*EventReaderJsonCfg
-	Partial_cache_ttl *string
-}
-
-func diffERsJsonCfg(d *ERsJsonCfg, v1, v2 *ERsCfg, separator string) *ERsJsonCfg {
-	if d == nil {
-		d = new(ERsJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if !utils.SliceStringEqual(v1.SessionSConns, v2.SessionSConns) {
-		d.Sessions_conns = utils.SliceStringPointer(getInternalJSONConns(v2.SessionSConns))
-	}
-	if v1.PartialCacheTTL != v2.PartialCacheTTL {
-		d.Partial_cache_ttl = utils.StringPointer(v2.PartialCacheTTL.String())
-	}
-	d.Readers = diffEventReadersJsonCfg(d.Readers, v1.Readers, v2.Readers, separator)
-	return d
 }

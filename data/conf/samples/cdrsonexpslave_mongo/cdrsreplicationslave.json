@@ -16,22 +16,28 @@
 	"db_port": 27017,
 },
 
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
+
+"rals": {
+	"enabled": true,						// enable Rater service: <true|false>
+},
+
 "cdrs": {
 	"enabled": true,						// start the CDR Server service:  <true|false>
 	"chargers_conns":["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 "chargers": {
 	"enabled": true,
 },
 
-"rates": {
-	"enabled": true,
-},
 
-
-"admins": {
+"apiers": {
 	"enabled": true,
 },
 

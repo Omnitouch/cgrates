@@ -27,46 +27,48 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/rpcclient"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestDataDBReload(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
-	chS := engine.NewCacheS(cfg, nil, nil, nil)
+	chS := engine.NewCacheS(cfg, nil, nil)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	close(chS.GetPrecacheChannel(utils.CacheAttributeProfiles))
 	close(chS.GetPrecacheChannel(utils.CacheAttributeFilterIndexes))
-	chSCh := make(chan *engine.CacheS, 1)
-	chSCh <- chS
-	css := &CacheService{cacheCh: chSCh}
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
-	cM := engine.NewConnManager(cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	srvMngr.AddServices(NewAttributeService(cfg, db,
-		css, filterSChan, server, make(chan birpc.ClientConnector, 1), anz, &DispatcherService{srvsReload: make(map[string]chan struct{})}, srvDep),
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	ctx, cancel := context.WithCancel(context.TODO())
-	srvMngr.StartServices(ctx, cancel)
+		chS, filterSChan, server, make(chan rpcclient.ClientConnector, 1), anz, srvDep),
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Error(err)
+	}
 	if db.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 	var reply string
 	cfg.AttributeSCfg().Enabled = true
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.DataDBJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"),
+		Section: config.DATADB_JSN,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -76,6 +78,10 @@ func TestDataDBReload(t *testing.T) {
 	if !db.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
+	getDm := db.GetDM()
+	if !reflect.DeepEqual(getDm, db.dm) {
+		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", db.dm, getDm)
+	}
 	oldcfg := &config.DataDbCfg{
 		Type: utils.Mongo,
 		Host: "127.0.0.1",
@@ -83,66 +89,77 @@ func TestDataDBReload(t *testing.T) {
 		Name: "10",
 		User: "cgrates",
 		Opts: &config.DataDBOpts{
-			MongoQueryTimeout: 10 * time.Second,
-			RedisClusterSync:  5 * time.Second,
+			RedisMaxConns:           10,
+			RedisConnectAttempts:    20,
+			RedisSentinel:           "",
+			RedisCluster:            false,
+			RedisClusterSync:        5 * time.Second,
+			RedisClusterOndownDelay: 0,
+			RedisConnectTimeout:     0,
+			RedisReadTimeout:        0,
+			RedisWriteTimeout:       0,
+			MongoQueryTimeout:       10 * time.Second,
+			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
-		Items: map[string]*config.ItemOpts{
-			utils.MetaAccounts:           {Limit: -1},
-			utils.MetaActions:            {Limit: -1},
-			utils.MetaResourceProfile:    {Limit: -1},
-			utils.MetaStatQueues:         {Limit: -1},
-			utils.MetaResources:          {Limit: -1},
-			utils.MetaStatQueueProfiles:  {Limit: -1},
-			utils.MetaThresholds:         {Limit: -1},
-			utils.MetaThresholdProfiles:  {Limit: -1},
-			utils.MetaFilters:            {Limit: -1},
-			utils.MetaRouteProfiles:      {Limit: -1},
-			utils.MetaAttributeProfiles:  {Limit: -1},
-			utils.MetaDispatcherHosts:    {Limit: -1},
-			utils.MetaChargerProfiles:    {Limit: -1},
-			utils.MetaDispatcherProfiles: {Limit: -1},
-			utils.MetaLoadIDs:            {Limit: -1},
-			utils.MetaRateProfiles:       {Limit: -1},
-			utils.MetaActionProfiles:     {Limit: -1},
+		Items: map[string]*config.ItemOpt{
+			utils.MetaAccounts:            {Limit: -1},
+			utils.MetaReverseDestinations: {Limit: -1},
+			utils.MetaDestinations:        {Limit: -1},
+			utils.MetaRatingPlans:         {Limit: -1},
+			utils.MetaRatingProfiles:      {Limit: -1},
+			utils.MetaActions:             {Limit: -1},
+			utils.MetaActionPlans:         {Limit: -1},
+			utils.MetaAccountActionPlans:  {Limit: -1},
+			utils.MetaActionTriggers:      {Limit: -1},
+			utils.MetaSharedGroups:        {Limit: -1},
+			utils.MetaTimings:             {Limit: -1},
+			utils.MetaResourceProfile:     {Limit: -1},
+			utils.MetaStatQueues:          {Limit: -1},
+			utils.MetaResources:           {Limit: -1},
+			utils.MetaStatQueueProfiles:   {Limit: -1},
+			utils.MetaThresholds:          {Limit: -1},
+			utils.MetaThresholdProfiles:   {Limit: -1},
+			utils.MetaFilters:             {Limit: -1},
+			utils.MetaRouteProfiles:       {Limit: -1},
+			utils.MetaAttributeProfiles:   {Limit: -1},
+			utils.MetaDispatcherHosts:     {Limit: -1},
+			utils.MetaChargerProfiles:     {Limit: -1},
+			utils.MetaDispatcherProfiles:  {Limit: -1},
+			utils.MetaLoadIDs:             {Limit: -1},
+			utils.CacheVersions:           {Limit: -1},
 
-			utils.CacheResourceFilterIndexes:       {Limit: -1},
-			utils.CacheStatFilterIndexes:           {Limit: -1},
-			utils.CacheThresholdFilterIndexes:      {Limit: -1},
-			utils.CacheRouteFilterIndexes:          {Limit: -1},
-			utils.CacheAttributeFilterIndexes:      {Limit: -1},
-			utils.CacheChargerFilterIndexes:        {Limit: -1},
-			utils.CacheDispatcherFilterIndexes:     {Limit: -1},
-			utils.CacheRateProfilesFilterIndexes:   {Limit: -1},
-			utils.CacheActionProfilesFilterIndexes: {Limit: -1},
-			utils.CacheAccountsFilterIndexes:       {Limit: -1},
-			utils.CacheVersions:                    {Limit: -1},
-			utils.CacheReverseFilterIndexes:        {Limit: -1},
-			utils.CacheRateFilterIndexes:           {Limit: -1},
+			utils.CacheResourceFilterIndexes:   {Limit: -1},
+			utils.CacheStatFilterIndexes:       {Limit: -1},
+			utils.CacheThresholdFilterIndexes:  {Limit: -1},
+			utils.CacheRouteFilterIndexes:      {Limit: -1},
+			utils.CacheAttributeFilterIndexes:  {Limit: -1},
+			utils.CacheChargerFilterIndexes:    {Limit: -1},
+			utils.CacheDispatcherFilterIndexes: {Limit: -1},
+			utils.CacheReverseFilterIndexes:    {Limit: -1},
 		},
 	}
 	if !reflect.DeepEqual(oldcfg, db.oldDBCfg) {
 		t.Errorf("Expected %s \n received:%s", utils.ToJSON(oldcfg), utils.ToJSON(db.oldDBCfg))
 	}
 
-	err := db.Reload(ctx, cancel)
+	err := db.Reload()
 	if err != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
-	// cfg.AttributeSCfg().Enabled = false
-	// cfg.GetReloadChan() <- config.SectionToService[config.DataDBJSON]
-	// runtime.Gosched()
-	// time.Sleep(10 * time.Millisecond)
-	// if db.IsRunning() {
-	// 	t.Errorf("Expected service to be down")
-	// }
-	cancel()
+	cfg.AttributeSCfg().Enabled = false
+	cfg.GetReloadChan(config.DATADB_JSN) <- struct{}{}
+	time.Sleep(10 * time.Millisecond)
+	if db.IsRunning() {
+		t.Errorf("Expected service to be down")
+	}
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 
 func TestDataDBReloadBadType(t *testing.T) {
-	cfg, err := config.NewCGRConfigFromPath(context.Background(), path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"))
+	cfg, err := config.NewCGRConfigFromPath(path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,29 +177,38 @@ func TestDataDBReloadBadType(t *testing.T) {
 	}()
 
 	err = dbConn.SetVersions(engine.Versions{
-		utils.Stats:      4,
-		utils.Accounts:   3,
-		utils.Actions:    2,
-		utils.Thresholds: 4,
-		utils.Routes:     2,
+		utils.StatS:          4,
+		utils.Accounts:       3,
+		utils.Actions:        2,
+		utils.ActionTriggers: 2,
+		utils.ActionPlans:    3,
+		utils.SharedGroups:   2,
+		utils.Thresholds:     4,
+		utils.Routes:         2,
 		// old version for Attributes
-		utils.Attributes:     5,
-		utils.RQF:            5,
-		utils.Resource:       1,
-		utils.Subscribers:    1,
-		utils.Chargers:       2,
-		utils.Dispatchers:    2,
-		utils.LoadIDsVrs:     1,
-		utils.RateProfiles:   1,
-		utils.ActionProfiles: 1,
+		utils.Attributes:          5,
+		utils.Timing:              1,
+		utils.RQF:                 5,
+		utils.Resource:            1,
+		utils.Subscribers:         1,
+		utils.Destinations:        1,
+		utils.ReverseDestinations: 1,
+		utils.RatingPlan:          1,
+		utils.RatingProfile:       1,
+		utils.Chargers:            2,
+		utils.Dispatchers:         2,
+		utils.LoadIDsVrs:          1,
 	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
 	db.oldDBCfg = &config.DataDbCfg{
 		Type: utils.Mongo,
@@ -191,51 +217,116 @@ func TestDataDBReloadBadType(t *testing.T) {
 		Name: "10",
 		User: "cgrates",
 		Opts: &config.DataDBOpts{
-			MongoQueryTimeout: 10 * time.Second,
-			RedisClusterSync:  5 * time.Second,
+			RedisMaxConns:           10,
+			RedisConnectAttempts:    20,
+			RedisSentinel:           "",
+			RedisCluster:            false,
+			RedisClusterSync:        5 * time.Second,
+			RedisClusterOndownDelay: 0,
+			RedisConnectTimeout:     0,
+			RedisReadTimeout:        0,
+			RedisWriteTimeout:       0,
+			MongoQueryTimeout:       10 * time.Second,
+			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
-		Items: map[string]*config.ItemOpts{
-			utils.MetaAccounts:           {},
-			utils.MetaActions:            {},
-			utils.MetaCronExp:            {},
-			utils.MetaResourceProfile:    {},
-			utils.MetaStatQueues:         {},
-			utils.MetaResources:          {},
-			utils.MetaStatQueueProfiles:  {},
-			utils.MetaThresholds:         {},
-			utils.MetaThresholdProfiles:  {},
-			utils.MetaFilters:            {},
-			utils.MetaRouteProfiles:      {},
-			utils.MetaAttributeProfiles:  {},
-			utils.MetaDispatcherHosts:    {},
-			utils.MetaChargerProfiles:    {},
-			utils.MetaDispatcherProfiles: {},
-			utils.MetaLoadIDs:            {},
-			utils.MetaRateProfiles:       {},
-			utils.MetaActionProfiles:     {},
+		Items: map[string]*config.ItemOpt{
+			utils.MetaAccounts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaReverseDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActions: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAccountActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionTriggers: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaSharedGroups: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaTimings: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResourceProfile: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueues: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResources: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueueProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholds: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholdProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaFilters: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRouteProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAttributeProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherHosts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaChargerProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaLoadIDs: {
+				Replicate: false,
+				Remote:    false},
 		},
 	}
 	cfg.DataDbCfg().Type = "dbtype"
 	db.dm = nil
-	ctx, cancel := context.WithCancel(context.TODO())
-	err = db.Reload(ctx, cancel)
+	err = db.Reload()
 	if err == nil || err.Error() != "unsupported db_type <dbtype>" {
 		t.Fatal(err)
 	}
 
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 
 func TestDataDBReloadErrorMarsheler(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.GeneralCfg().DBDataEncoding = ""
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
 
 	if db.IsRunning() {
@@ -248,44 +339,106 @@ func TestDataDBReloadErrorMarsheler(t *testing.T) {
 		Name: "10",
 		User: "cgrates",
 		Opts: &config.DataDBOpts{
-			MongoQueryTimeout: 10 * time.Second,
-			RedisClusterSync:  5 * time.Second,
+			RedisMaxConns:           10,
+			RedisConnectAttempts:    20,
+			RedisSentinel:           "",
+			RedisCluster:            false,
+			RedisClusterSync:        5 * time.Second,
+			RedisClusterOndownDelay: 0,
+			RedisConnectTimeout:     0,
+			RedisReadTimeout:        0,
+			RedisWriteTimeout:       0,
+			MongoQueryTimeout:       10 * time.Second,
+			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
-		Items: map[string]*config.ItemOpts{
-			utils.MetaAccounts:           {},
-			utils.MetaActions:            {},
-			utils.MetaCronExp:            {},
-			utils.MetaResourceProfile:    {},
-			utils.MetaStatQueues:         {},
-			utils.MetaResources:          {},
-			utils.MetaStatQueueProfiles:  {},
-			utils.MetaThresholds:         {},
-			utils.MetaThresholdProfiles:  {},
-			utils.MetaFilters:            {},
-			utils.MetaRouteProfiles:      {},
-			utils.MetaAttributeProfiles:  {},
-			utils.MetaDispatcherHosts:    {},
-			utils.MetaChargerProfiles:    {},
-			utils.MetaDispatcherProfiles: {},
-			utils.MetaLoadIDs:            {},
-			utils.MetaRateProfiles:       {},
-			utils.MetaActionProfiles:     {},
+		Items: map[string]*config.ItemOpt{
+			utils.MetaAccounts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaReverseDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActions: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAccountActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionTriggers: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaSharedGroups: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaTimings: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResourceProfile: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueues: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResources: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueueProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholds: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholdProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaFilters: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRouteProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAttributeProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherHosts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaChargerProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaLoadIDs: {
+				Replicate: false,
+				Remote:    false},
 		},
 	}
 
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := db.Reload(ctx, cancel)
+	err := db.Reload()
 	if err == nil || err.Error() != "Unsupported marshaler: " {
 		t.Fatal(err)
 	}
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 
 func TestDataDBStartVersion(t *testing.T) {
-	cfg, err := config.NewCGRConfigFromPath(context.Background(), path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"))
+	cfg, err := config.NewCGRConfigFromPath(path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,41 +455,50 @@ func TestDataDBStartVersion(t *testing.T) {
 		dbConn.Close()
 	}()
 	err = dbConn.SetVersions(engine.Versions{
-		utils.Stats:      4,
-		utils.Accounts:   3,
-		utils.Actions:    2,
-		utils.Thresholds: 4,
-		utils.Routes:     2,
+		utils.StatS:          4,
+		utils.Accounts:       3,
+		utils.Actions:        2,
+		utils.ActionTriggers: 2,
+		utils.ActionPlans:    3,
+		utils.SharedGroups:   2,
+		utils.Thresholds:     4,
+		utils.Routes:         2,
 		// old version for Attributes
-		utils.Attributes:     5,
-		utils.RQF:            5,
-		utils.Resource:       1,
-		utils.Subscribers:    1,
-		utils.Chargers:       2,
-		utils.Dispatchers:    2,
-		utils.LoadIDsVrs:     1,
-		utils.RateProfiles:   1,
-		utils.ActionProfiles: 1,
+		utils.Attributes:          5,
+		utils.Timing:              1,
+		utils.RQF:                 5,
+		utils.Resource:            1,
+		utils.Subscribers:         1,
+		utils.Destinations:        1,
+		utils.ReverseDestinations: 1,
+		utils.RatingPlan:          1,
+		utils.RatingProfile:       1,
+		utils.Chargers:            2,
+		utils.Dispatchers:         2,
+		utils.LoadIDsVrs:          1,
 	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err = db.Start(ctx, cancel)
+	err = db.Start()
 	if err == nil || err.Error() != "Migration needed: please backup cgr data and run : <cgr-migrator -exec=*attributes>" {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", "Migration needed: please backup cgr data and run : <cgr-migrator -exec=*attributes>", err)
 	}
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 
 func TestDataDBReloadCastError(t *testing.T) {
-	cfg, err := config.NewCGRConfigFromPath(context.Background(), path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"))
+	cfg, err := config.NewCGRConfigFromPath(path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,29 +516,38 @@ func TestDataDBReloadCastError(t *testing.T) {
 	}()
 
 	err = dbConn.SetVersions(engine.Versions{
-		utils.Stats:      4,
-		utils.Accounts:   3,
-		utils.Actions:    2,
-		utils.Thresholds: 4,
-		utils.Routes:     2,
+		utils.StatS:          4,
+		utils.Accounts:       3,
+		utils.Actions:        2,
+		utils.ActionTriggers: 2,
+		utils.ActionPlans:    3,
+		utils.SharedGroups:   2,
+		utils.Thresholds:     4,
+		utils.Routes:         2,
 		// old version for Attributes
-		utils.Attributes:     5,
-		utils.RQF:            5,
-		utils.Resource:       1,
-		utils.Subscribers:    1,
-		utils.Chargers:       2,
-		utils.Dispatchers:    2,
-		utils.LoadIDsVrs:     1,
-		utils.RateProfiles:   1,
-		utils.ActionProfiles: 1,
+		utils.Attributes:          5,
+		utils.Timing:              1,
+		utils.RQF:                 5,
+		utils.Resource:            1,
+		utils.Subscribers:         1,
+		utils.Destinations:        1,
+		utils.ReverseDestinations: 1,
+		utils.RatingPlan:          1,
+		utils.RatingProfile:       1,
+		utils.Chargers:            2,
+		utils.Dispatchers:         2,
+		utils.LoadIDsVrs:          1,
 	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
 	db.oldDBCfg = &config.DataDbCfg{
 		Type: utils.Mongo,
@@ -385,54 +556,129 @@ func TestDataDBReloadCastError(t *testing.T) {
 		Name: "10",
 		User: "cgrates",
 		Opts: &config.DataDBOpts{
-			MongoQueryTimeout: 10 * time.Second,
-			RedisClusterSync:  5 * time.Second,
+			RedisMaxConns:           10,
+			RedisConnectAttempts:    20,
+			RedisSentinel:           "",
+			RedisCluster:            false,
+			RedisClusterSync:        5 * time.Second,
+			RedisClusterOndownDelay: 0,
+			RedisConnectTimeout:     0,
+			RedisReadTimeout:        0,
+			RedisWriteTimeout:       0,
+			MongoQueryTimeout:       10 * time.Second,
+			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
-		Items: map[string]*config.ItemOpts{
-			utils.MetaAccounts:           {},
-			utils.MetaActions:            {},
-			utils.MetaCronExp:            {},
-			utils.MetaResourceProfile:    {},
-			utils.MetaStatQueues:         {},
-			utils.MetaResources:          {},
-			utils.MetaStatQueueProfiles:  {},
-			utils.MetaThresholds:         {},
-			utils.MetaThresholdProfiles:  {},
-			utils.MetaFilters:            {},
-			utils.MetaRouteProfiles:      {},
-			utils.MetaAttributeProfiles:  {},
-			utils.MetaDispatcherHosts:    {},
-			utils.MetaChargerProfiles:    {},
-			utils.MetaDispatcherProfiles: {},
-			utils.MetaLoadIDs:            {},
-			utils.MetaRateProfiles:       {},
-			utils.MetaActionProfiles:     {},
+		Items: map[string]*config.ItemOpt{
+			utils.MetaAccounts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaReverseDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActions: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAccountActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionTriggers: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaSharedGroups: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaTimings: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResourceProfile: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueues: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResources: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueueProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholds: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholdProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaFilters: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRouteProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAttributeProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherHosts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaChargerProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaLoadIDs: {
+				Replicate: false,
+				Remote:    false},
 		},
 	}
 
 	db.dm = nil
-	ctx, cancel := context.WithCancel(context.TODO())
-	err = db.Reload(ctx, cancel)
+	err = db.Reload()
 	if err == nil || err.Error() != "can't conver DataDB of type mongo to MongoStorage" {
 		t.Fatal(err)
 	}
 
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 
-func TestDataDBStartAttributeSCfgErr(t *testing.T) {
+func TestDataDBStartSessionSCfgErr(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
 	cfg.DataDbCfg().Type = "badtype"
-	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().Enabled = true
 	cfg.SessionSCfg().ListenBijson = ""
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := db.Start(ctx, cancel)
+	err := db.Start()
+	if err != nil {
+		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", nil, err)
+	}
+}
+
+func TestDataDBStartRalsSCfgErr(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
+	cM := engine.NewConnManager(cfg, nil)
+	db := NewDataDBService(cfg, cM, srvDep)
+	cfg.DataDbCfg().Type = "badtype"
+	db.cfg.RalsCfg().Enabled = true
+	cfg.SessionSCfg().ListenBijson = ""
+	err := db.Start()
 	if err == nil || err.Error() != "unsupported db_type <badtype>" {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", "unsupported db_type <badtype>", err)
 	}
@@ -441,7 +687,7 @@ func TestDataDBStartAttributeSCfgErr(t *testing.T) {
 func TestDataDBReloadError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
 	cfg.GeneralCfg().DBDataEncoding = utils.JSON
 	db.oldDBCfg = &config.DataDbCfg{
@@ -451,36 +697,98 @@ func TestDataDBReloadError(t *testing.T) {
 		Name: "10",
 		User: "cgrates",
 		Opts: &config.DataDBOpts{
-			MongoQueryTimeout: 10 * time.Second,
-			RedisClusterSync:  5 * time.Second,
+			RedisMaxConns:           10,
+			RedisConnectAttempts:    20,
+			RedisSentinel:           "",
+			RedisCluster:            false,
+			RedisClusterSync:        5 * time.Second,
+			RedisClusterOndownDelay: 0,
+			RedisConnectTimeout:     0,
+			RedisReadTimeout:        0,
+			RedisWriteTimeout:       0,
+			MongoQueryTimeout:       10 * time.Second,
+			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
-		Items: map[string]*config.ItemOpts{
-			utils.MetaAccounts:           {},
-			utils.MetaActions:            {},
-			utils.MetaCronExp:            {},
-			utils.MetaResourceProfile:    {},
-			utils.MetaStatQueues:         {},
-			utils.MetaResources:          {},
-			utils.MetaStatQueueProfiles:  {},
-			utils.MetaThresholds:         {},
-			utils.MetaThresholdProfiles:  {},
-			utils.MetaFilters:            {},
-			utils.MetaRouteProfiles:      {},
-			utils.MetaAttributeProfiles:  {},
-			utils.MetaDispatcherHosts:    {},
-			utils.MetaChargerProfiles:    {},
-			utils.MetaDispatcherProfiles: {},
-			utils.MetaLoadIDs:            {},
-			utils.MetaRateProfiles:       {},
-			utils.MetaActionProfiles:     {},
+		Items: map[string]*config.ItemOpt{
+			utils.MetaAccounts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaReverseDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActions: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAccountActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionTriggers: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaSharedGroups: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaTimings: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResourceProfile: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueues: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResources: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueueProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholds: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholdProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaFilters: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRouteProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAttributeProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherHosts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaChargerProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaLoadIDs: {
+				Replicate: false,
+				Remote:    false},
 		},
 	}
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	db.dm = engine.NewDataManager(data, nil, nil)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := db.Reload(ctx, cancel)
+	err := db.Reload()
 	if err != nil {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", nil, err)
 	}

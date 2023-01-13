@@ -26,10 +26,9 @@ import (
 	"path"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -41,6 +40,7 @@ var (
 	reloadTests = []func(t *testing.T){
 		testReloadITCreateCdrDirs,
 		testReloadITInitConfig,
+		testReloadITInitCdrDb,
 		testReloadITResetDataDb,
 		testReloadITStartEngine,
 		testReloadITRpcConn,
@@ -73,14 +73,21 @@ func TestERsReload(t *testing.T) {
 func testReloadITInitConfig(t *testing.T) {
 	var err error
 	reloadCfgPath = path.Join(*dataDir, "conf", "samples", "ers_reload", ersReloadConfigDIR)
-	if reloadCfg, err = config.NewCGRConfigFromPath(context.Background(), reloadCfgPath); err != nil {
+	if reloadCfg, err = config.NewCGRConfigFromPath(reloadCfgPath); err != nil {
 		t.Fatal("Got config error: ", err.Error())
+	}
+}
+
+// InitDb so we can rely on count
+func testReloadITInitCdrDb(t *testing.T) {
+	if err := engine.InitStorDb(reloadCfg); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // Remove data in both rating and accounting db
 func testReloadITResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(reloadCfg); err != nil {
+	if err := engine.InitDataDb(reloadCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -123,8 +130,8 @@ func testReloadVerifyDisabledReaders(t *testing.T) {
 func testReloadReloadConfigFromPath(t *testing.T) {
 	var reply string
 	if err := reloadRPC.Call(utils.ConfigSv1ReloadConfig, &config.ReloadArgs{
-		// Path:    path.Join(*dataDir, "conf", "samples", "ers_reload", "first_reload"),
-		Section: config.ERsJSON,
+		Path:    path.Join(*dataDir, "conf", "samples", "ers_reload", "first_reload"),
+		Section: config.ERsJson,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -135,11 +142,11 @@ func testReloadReloadConfigFromPath(t *testing.T) {
 func testReloadVerifyFirstReload(t *testing.T) {
 	var reply map[string]interface{}
 	if err := reloadRPC.Call(utils.ConfigSv1GetConfig, &config.SectionWithAPIOpts{
-		Sections: []string{config.ERsJSON},
+		Section: config.ERsJson,
 	}, &reply); err != nil {
 		t.Error(err)
-	} else if mp, can := reply[config.ERsJSON].(map[string]interface{}); !can {
-		t.Errorf("expected a map received: %T", reply[config.ERsJSON])
+	} else if mp, can := reply[config.ERsJson].(map[string]interface{}); !can {
+		t.Errorf("expected a map received: %T", reply[config.ERsJson])
 	} else if mp[utils.EnabledCfg] != true {
 		t.Errorf("Expecting: <true>, received: <%+v>", mp[utils.EnabledCfg])
 	} else if readers, canConvert := mp[utils.ReadersCfg].([]interface{}); !canConvert {

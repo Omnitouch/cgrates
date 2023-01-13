@@ -24,10 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -37,7 +35,7 @@ func TestChargersmatchingChargerProfilesForEventErrPass(t *testing.T) {
 	cfg.ChargerSCfg().IndexedSelects = false
 
 	dbm := &DataDBMock{
-		GetChargerProfileDrvF: func(ctx *context.Context, s1, s2 string) (*ChargerProfile, error) {
+		GetChargerProfileDrvF: func(s1, s2 string) (*ChargerProfile, error) {
 			return &ChargerProfile{
 				Tenant:    s1,
 				ID:        s2,
@@ -45,22 +43,23 @@ func TestChargersmatchingChargerProfilesForEventErrPass(t *testing.T) {
 				FilterIDs: []string{"fltr1"},
 			}, nil
 		},
-		GetKeysForPrefixF: func(ctx *context.Context, s string) ([]string, error) {
+		GetKeysForPrefixF: func(s string) ([]string, error) {
 			return []string{s + "cgrates.org:chr1"}, nil
 		},
-		GetFilterDrvF: func(ctx *context.Context, s1, s2 string) (*Filter, error) {
+		GetFilterDrvF: func(s1, s2 string) (*Filter, error) {
 			return nil, utils.ErrNotImplemented
 		},
 	}
 	dmFilter := NewDataManager(dbm, cfg.CacheCfg(), nil)
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dmFilter,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dmFilter,
 			cfg: cfg,
 		},
 		cfg: cfg,
 	}
+	cgrEvTm := time.Date(2021, 4, 19, 12, 0, 0, 0, time.UTC)
 	cgrEv := &utils.CGREvent{
 		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
 		ID:     "cgrEvID",
@@ -73,17 +72,154 @@ func TestChargersmatchingChargerProfilesForEventErrPass(t *testing.T) {
 		APIOpts: map[string]interface{}{
 			utils.MetaSubsys: utils.MetaChargers,
 		},
+		Time: &cgrEvTm,
 	}
 
 	experr := utils.ErrNotImplemented
-	rcv, err := cS.matchingChargerProfilesForEvent(context.Background(), cgrEv.Tenant, cgrEv)
+	rcv, err := cS.matchingChargerProfilesForEvent(cgrEv.Tenant, cgrEv)
 
 	if err == nil || err != experr {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
 	}
 
 	if rcv != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, rcv)
+	}
+}
+
+func TestChargersmatchingChargerProfilesForEventNotActive(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.ChargerSCfg().IndexedSelects = false
+
+	dbm := &DataDBMock{
+		GetChargerProfileDrvF: func(s1, s2 string) (*ChargerProfile, error) {
+			return &ChargerProfile{
+				Tenant:    s1,
+				ID:        s2,
+				RunID:     utils.MetaDefault,
+				FilterIDs: []string{"fltr1"},
+				ActivationInterval: &utils.ActivationInterval{
+					ActivationTime: time.Date(2021, 4, 19, 17, 0, 0, 0, time.UTC),
+				},
+			}, nil
+		},
+		GetKeysForPrefixF: func(s string) ([]string, error) {
+			return []string{s + "cgrates.org:chr1"}, nil
+		},
+		GetFilterDrvF: func(s1, s2 string) (*Filter, error) {
+			return nil, utils.ErrNotImplemented
+		},
+	}
+	dmFilter := NewDataManager(dbm, cfg.CacheCfg(), nil)
+	cS := &ChargerService{
+		dm: dmFilter,
+		filterS: &FilterS{
+			dm:  dmFilter,
+			cfg: cfg,
+		},
+		cfg: cfg,
+	}
+	cgrEvTm := time.Date(2021, 4, 19, 12, 0, 0, 0, time.UTC)
+	cgrEv := &utils.CGREvent{
+		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:     "cgrEvID",
+		Event: map[string]interface{}{
+			"Charger":        "ChargerProfile1",
+			utils.AnswerTime: time.Date(2021, 4, 19, 12, 0, 0, 0, time.UTC),
+			"UsageInterval":  "10s",
+			utils.Weight:     "10.0",
+		},
+		APIOpts: map[string]interface{}{
+			utils.MetaSubsys: utils.MetaChargers,
+		},
+		Time: &cgrEvTm,
+	}
+
+	experr := utils.ErrNotFound
+	rcv, err := cS.matchingChargerProfilesForEvent(cgrEv.Tenant, cgrEv)
+
+	if err == nil || err != experr {
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+
+	if rcv != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, rcv)
+	}
+}
+
+func TestChargersprocessEventNoConnIDs(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.ChargerSCfg().IndexedSelects = false
+
+	dbm := &DataDBMock{
+		GetChargerProfileDrvF: func(s1, s2 string) (*ChargerProfile, error) {
+			return &ChargerProfile{
+				Tenant:    s1,
+				ID:        s2,
+				RunID:     utils.MetaDefault,
+				FilterIDs: []string{"fltr1"},
+			}, nil
+		},
+		GetKeysForPrefixF: func(s string) ([]string, error) {
+			return []string{s + "cgrates.org:chr1"}, nil
+		},
+		GetFilterDrvF: func(s1, s2 string) (*Filter, error) {
+			return &Filter{
+				Tenant: s1,
+				ID:     s2,
+			}, nil
+		},
+	}
+	dmFilter := NewDataManager(dbm, cfg.CacheCfg(), nil)
+	cS := &ChargerService{
+		dm: dmFilter,
+		filterS: &FilterS{
+			dm:  dmFilter,
+			cfg: cfg,
+		},
+		cfg: cfg,
+	}
+	cgrEvTm := time.Date(2021, 4, 19, 12, 0, 0, 0, time.UTC)
+	cgrEv := &utils.CGREvent{
+		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:     "cgrEvID",
+		Event: map[string]interface{}{
+			"Charger":        "ChargerProfile1",
+			utils.AnswerTime: time.Date(2021, 4, 19, 12, 0, 0, 0, time.UTC),
+			"UsageInterval":  "10s",
+			utils.Weight:     "10.0",
+		},
+		APIOpts: map[string]interface{}{
+			utils.MetaSubsys:                utils.MetaChargers,
+			utils.OptsAttributesProcessRuns: 2,
+		},
+		Time: &cgrEvTm,
+	}
+
+	experr := fmt.Sprintf("MANDATORY_IE_MISSING: [%s]", "connIDs")
+	rcv, err := cS.processEvent(cgrEv.Tenant, cgrEv)
+
+	if err == nil || err.Error() != experr {
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+
+	if rcv != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, rcv)
+	}
+
+}
+
+type ccMock struct {
+	calls map[string]func(args interface{}, reply interface{}) error
+}
+
+func (ccM *ccMock) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	if call, has := ccM.calls[serviceMethod]; !has {
+		return rpcclient.ErrUnsupporteServiceMethod
+	} else {
+		return call(args, reply)
 	}
 }
 
@@ -94,7 +230,7 @@ func TestChargersprocessEventCallNilErr(t *testing.T) {
 	cfg.ChargerSCfg().AttributeSConns = []string{
 		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
 
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := NewDataManager(data, cfg.CacheCfg(), nil)
 	cP := &ChargerProfile{
 		Tenant:    "cgrates.org",
@@ -102,23 +238,20 @@ func TestChargersprocessEventCallNilErr(t *testing.T) {
 		RunID:     utils.MetaDefault,
 		FilterIDs: []string{"*string:~*req.Account:1001"},
 	}
-	if err := dm.SetChargerProfile(context.Background(), cP, true); err != nil {
+	if err := dm.SetChargerProfile(cP, true); err != nil {
 		t.Fatal(err)
 	}
 
 	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.AttributeSv1ProcessEvent: func(args, reply interface{}) error {
 				rply := AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{{
-						MatchedProfileID: "attr1",
-						Fields:           []string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-					}},
+					AlteredFields: []string{utils.AccountField},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "cgrEvID",
 						Event: map[string]interface{}{
-							utils.AccountField: "1002",
+							utils.AccountField: "1001",
 						},
 					},
 				}
@@ -127,19 +260,21 @@ func TestChargersprocessEventCallNilErr(t *testing.T) {
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
+	rpcInternal := make(chan rpcclient.ClientConnector, 1)
 	rpcInternal <- ccM
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
-		cfg:     cfg,
-		connMgr: NewConnManager(cfg),
+		cfg: cfg,
+		connMgr: NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+			utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): rpcInternal,
+		}),
 	}
-	cS.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
+
 	cgrEv := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "cgrEvID",
@@ -151,28 +286,20 @@ func TestChargersprocessEventCallNilErr(t *testing.T) {
 	exp := []*ChrgSProcessEventReply{
 		{
 			ChargerSProfile: "1001",
-			AlteredFields: []*FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-				{
-					MatchedProfileID: "attr1",
-					Fields:           []string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-				},
-			},
+			AlteredFields:   []string{utils.MetaReqRunID, utils.AccountField},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     "cgrEvID",
 				Event: map[string]interface{}{
-					utils.AccountField: "1002",
+					utils.AccountField: "1001",
 				},
 			},
 		},
 	}
-	rcv, err := cS.processEvent(context.Background(), cgrEv.Tenant, cgrEv)
+	rcv, err := cS.processEvent(cgrEv.Tenant, cgrEv)
+
 	if err != nil {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	}
 
 	if !reflect.DeepEqual(exp, rcv) {
@@ -192,7 +319,7 @@ func TestChargersprocessEventCallErr(t *testing.T) {
 	cfg.ChargerSCfg().IndexedSelects = false
 	cfg.ChargerSCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
 
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := NewDataManager(data, cfg.CacheCfg(), nil)
 	cP := &ChargerProfile{
 		Tenant:    "cgrates.org",
@@ -200,30 +327,32 @@ func TestChargersprocessEventCallErr(t *testing.T) {
 		RunID:     utils.MetaDefault,
 		FilterIDs: []string{"*string:~*req.Account:1001"},
 	}
-	if err := dm.SetChargerProfile(context.Background(), cP, true); err != nil {
+	if err := dm.SetChargerProfile(cP, true); err != nil {
 		t.Fatal(err)
 	}
 
 	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.AttributeSv1ProcessEvent: func(args, reply interface{}) error {
 				return utils.ErrNotFound
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
+	rpcInternal := make(chan rpcclient.ClientConnector, 1)
 	rpcInternal <- ccM
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
-		cfg:     cfg,
-		connMgr: NewConnManager(cfg),
+		cfg: cfg,
+		connMgr: NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+			utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): rpcInternal,
+		}),
 	}
-	cS.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
+
 	cgrEv := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "cgrEvID",
@@ -235,38 +364,30 @@ func TestChargersprocessEventCallErr(t *testing.T) {
 	exp := []*ChrgSProcessEventReply{
 		{
 			ChargerSProfile: "1001",
-			AlteredFields: []*FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-			},
+			AlteredFields:   []string{utils.MetaReqRunID},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     "cgrEvID",
 				Event: map[string]interface{}{
 					utils.AccountField: "1001",
+					"RunID":            utils.MetaDefault,
 				},
 				APIOpts: map[string]interface{}{
-					utils.OptsAttributesProfileIDs: []string{},
-					utils.OptsContext:              "*chargers",
-					utils.MetaRunID:                "*default",
-					utils.MetaSubsys:               "*chargers",
+					utils.MetaSubsys:               utils.MetaChargers,
+					utils.OptsAttributesProfileIDs: []string(nil),
 				},
 			},
 		},
 	}
-	rcv, err := cS.processEvent(context.Background(), cgrEv.Tenant, cgrEv)
+	rcv, err := cS.processEvent(cgrEv.Tenant, cgrEv)
+
 	if err != nil {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	}
-	exp[0].CGREvent.APIOpts[utils.MetaChargeID] = rcv[0].CGREvent.APIOpts[utils.MetaChargeID]
-	exp[0].CGREvent.APIOpts[utils.OptsAttributesProfileIDs] = rcv[0].CGREvent.APIOpts[utils.OptsAttributesProfileIDs]
+
 	if !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("\nexpected: <%v>, \nreceived: <%v>",
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>",
 			utils.ToJSON(exp), utils.ToJSON(rcv))
-		t.Errorf("\nexpected: <%T>, \nreceived: <%T>",
-			exp[0].CGREvent.APIOpts[utils.OptsAttributesProfileIDs], rcv[0].CGREvent.APIOpts[utils.OptsAttributesProfileIDs])
 	}
 
 	if err := dm.DataDB().Flush(""); err != nil {
@@ -277,7 +398,7 @@ func TestChargersprocessEventCallErr(t *testing.T) {
 func TestChargersV1ProcessEventErrNotFound(t *testing.T) {
 	Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	dataDB := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	cfg.ChargerSCfg().IndexedSelects = false
 	cfg.ChargerSCfg().AttributeSConns = []string{
 		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
@@ -289,17 +410,15 @@ func TestChargersV1ProcessEventErrNotFound(t *testing.T) {
 		RunID:     utils.MetaDefault,
 		FilterIDs: []string{"*string:~*req.Account:1001"},
 	}
-	if err := dm.SetChargerProfile(context.Background(), cP, true); err != nil {
+	if err := dm.SetChargerProfile(cP, true); err != nil {
 		t.Fatal(err)
 	}
 
 	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.AttributeSv1ProcessEvent: func(args, reply interface{}) error {
 				rply := AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{{
-						Fields: []string{utils.AccountField},
-					}},
+					AlteredFields: []string{utils.AccountField},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "cgrEvID",
@@ -313,19 +432,20 @@ func TestChargersV1ProcessEventErrNotFound(t *testing.T) {
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
+	rpcInternal := make(chan rpcclient.ClientConnector, 1)
 	rpcInternal <- ccM
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
-		cfg:     cfg,
-		connMgr: NewConnManager(cfg),
+		cfg: cfg,
+		connMgr: NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+			utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): rpcInternal,
+		}),
 	}
-	cS.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
 	args := &utils.CGREvent{
 		ID: "cgrEvID",
 		Event: map[string]interface{}{
@@ -335,7 +455,7 @@ func TestChargersV1ProcessEventErrNotFound(t *testing.T) {
 	reply := &[]*ChrgSProcessEventReply{}
 
 	experr := utils.ErrNotFound
-	err := cS.V1ProcessEvent(context.Background(), args, reply)
+	err := cS.V1ProcessEvent(args, reply)
 
 	if err == nil || err != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -349,7 +469,7 @@ func TestChargersV1ProcessEventErrNotFound(t *testing.T) {
 func TestChargersV1ProcessEventErrOther(t *testing.T) {
 	Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	dataDB := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	cfg.ChargerSCfg().IndexedSelects = false
 	cfg.ChargerSCfg().AttributeSConns = []string{
 		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
@@ -361,17 +481,15 @@ func TestChargersV1ProcessEventErrOther(t *testing.T) {
 		RunID:     utils.MetaDefault,
 		FilterIDs: []string{"*string:~*req.Account:1001"},
 	}
-	if err := dm.SetChargerProfile(context.Background(), cP, true); err != nil {
+	if err := dm.SetChargerProfile(cP, true); err != nil {
 		t.Fatal(err)
 	}
 
 	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			"invalidMethod": func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			"invalidMethod": func(args, reply interface{}) error {
 				rply := AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{{
-						Fields: []string{utils.AccountField},
-					}},
+					AlteredFields: []string{utils.AccountField},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "cgrEvID",
@@ -385,19 +503,20 @@ func TestChargersV1ProcessEventErrOther(t *testing.T) {
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
+	rpcInternal := make(chan rpcclient.ClientConnector, 1)
 	rpcInternal <- ccM
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
-		cfg:     cfg,
-		connMgr: NewConnManager(cfg),
+		cfg: cfg,
+		connMgr: NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+			utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): rpcInternal,
+		}),
 	}
-	cS.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
 	args := &utils.CGREvent{
 		ID: "cgrEvID",
 		Event: map[string]interface{}{
@@ -408,7 +527,7 @@ func TestChargersV1ProcessEventErrOther(t *testing.T) {
 
 	exp := &[]*ChrgSProcessEventReply{}
 	experr := fmt.Sprintf("SERVER_ERROR: %s", rpcclient.ErrUnsupporteServiceMethod)
-	err := cS.V1ProcessEvent(context.Background(), args, reply)
+	err := cS.V1ProcessEvent(args, reply)
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -427,7 +546,7 @@ func TestChargersV1ProcessEventErrOther(t *testing.T) {
 func TestChargersV1ProcessEvent(t *testing.T) {
 	Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	dataDB := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	cfg.ChargerSCfg().IndexedSelects = false
 	cfg.ChargerSCfg().AttributeSConns = []string{
 		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
@@ -439,29 +558,20 @@ func TestChargersV1ProcessEvent(t *testing.T) {
 		RunID:     utils.MetaDefault,
 		FilterIDs: []string{"*string:~*req.Account:1001"},
 	}
-	if err := dm.SetChargerProfile(context.Background(), cP, true); err != nil {
+	if err := dm.SetChargerProfile(cP, true); err != nil {
 		t.Fatal(err)
 	}
 
 	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.AttributeSv1ProcessEvent: func(args, reply interface{}) error {
 				rply := AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{{
-						MatchedProfileID: "attr2",
-						Fields:           []string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-					}},
+					AlteredFields: []string{utils.AccountField},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "cgrEvID",
 						Event: map[string]interface{}{
-							utils.AccountField: "1007",
-						},
-						APIOpts: map[string]interface{}{
-							utils.OptsAttributesProfileIDs: []string{},
-							utils.OptsContext:              "*chargers",
-							utils.MetaRunID:                "*default",
-							utils.MetaSubsys:               "*chargers",
+							utils.AccountField: "1001",
 						},
 					},
 				}
@@ -470,60 +580,45 @@ func TestChargersV1ProcessEvent(t *testing.T) {
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
+	rpcInternal := make(chan rpcclient.ClientConnector, 1)
 	rpcInternal <- ccM
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
-		cfg:     cfg,
-		connMgr: NewConnManager(cfg),
+		cfg: cfg,
+		connMgr: NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+			utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): rpcInternal,
+		}),
 	}
-	cS.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
 	args := &utils.CGREvent{
 		ID: "cgrEvID",
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 		},
 	}
-	reply := []*ChrgSProcessEventReply{}
+	reply := &[]*ChrgSProcessEventReply{}
 
-	exp := []*ChrgSProcessEventReply{
+	exp := &[]*ChrgSProcessEventReply{
 		{
 			ChargerSProfile: "1001",
-			AlteredFields: []*FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-				{
-					MatchedProfileID: "attr2",
-					Fields:           []string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-				},
-			},
+			AlteredFields:   []string{utils.MetaReqRunID, utils.AccountField},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     "cgrEvID",
 				Event: map[string]interface{}{
-					utils.AccountField: "1007",
-				},
-				APIOpts: map[string]interface{}{
-					utils.OptsAttributesProfileIDs: []string{},
-					utils.OptsContext:              "*chargers",
-					utils.MetaRunID:                "*default",
-					utils.MetaSubsys:               "*chargers",
+					utils.AccountField: "1001",
 				},
 			},
 		},
 	}
-	//exp[0].CGREvent.APIOpts[utils.MetaChargeID] = reply[0].CGREvent.APIOpts[utils.MetaChargeID]
-	err := cS.V1ProcessEvent(context.Background(), args, &reply)
+	err := cS.V1ProcessEvent(args, reply)
 
 	if err != nil {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	}
 
 	if !reflect.DeepEqual(reply, exp) {
@@ -539,7 +634,7 @@ func TestChargersV1ProcessEvent(t *testing.T) {
 func TestChargersV1GetChargersForEventNilErr(t *testing.T) {
 	Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	dataDB := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	cfg.ChargerSCfg().IndexedSelects = false
 	cfg.ChargerSCfg().AttributeSConns = []string{
 		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
@@ -551,13 +646,13 @@ func TestChargersV1GetChargersForEventNilErr(t *testing.T) {
 		RunID:     utils.MetaDefault,
 		FilterIDs: []string{"*string:~*req.Account:1001"},
 	}
-	if err := dm.SetChargerProfile(context.Background(), cP, true); err != nil {
+	if err := dm.SetChargerProfile(cP, true); err != nil {
 		t.Fatal(err)
 	}
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
@@ -579,10 +674,10 @@ func TestChargersV1GetChargersForEventNilErr(t *testing.T) {
 			RunID:     "*default",
 		},
 	}
-	err := cS.V1GetChargersForEvent(context.Background(), args, reply)
+	err := cS.V1GetChargersForEvent(args, reply)
 
 	if err != nil {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	}
 
 	if !reflect.DeepEqual(reply, exp) {
@@ -601,15 +696,15 @@ func TestChargersV1GetChargersForEventErr(t *testing.T) {
 	cfg.ChargerSCfg().IndexedSelects = false
 
 	dbm := &DataDBMock{
-		GetKeysForPrefixF: func(ctx *context.Context, s string) ([]string, error) {
+		GetKeysForPrefixF: func(s string) ([]string, error) {
 			return []string{":"}, nil
 		},
 	}
 	dm := NewDataManager(dbm, cfg.CacheCfg(), nil)
 
-	cS := &ChargerS{
+	cS := &ChargerService{
 		dm: dm,
-		fltrS: &FilterS{
+		filterS: &FilterS{
 			dm:  dm,
 			cfg: cfg,
 		},
@@ -625,10 +720,10 @@ func TestChargersV1GetChargersForEventErr(t *testing.T) {
 
 	exp := &ChargerProfiles{}
 	experr := fmt.Sprintf("SERVER_ERROR: %s", utils.ErrNotImplemented)
-	err := cS.V1GetChargersForEvent(context.Background(), args, reply)
+	err := cS.V1GetChargersForEvent(args, reply)
 
 	if err == nil || err.Error() != experr {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
 	}
 
 	if !reflect.DeepEqual(reply, exp) {

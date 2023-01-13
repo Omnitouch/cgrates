@@ -20,6 +20,11 @@
 	"db_name": "11",
 },
 
+
+"stor_db": {
+	"db_type": "*internal",
+},
+
 "caches":{
 	"partitions": {
 		"*dispatcher_routes": {"limit": -1, "ttl": "1h", "replicate": true},
@@ -34,6 +39,11 @@
 		"conns": [{"address": "127.0.0.1:2013", "transport":"*gob"}],
 	},
 },
+
+
+"schedulers": {
+	"enabled": true,
+},
 	
 	
 "dispatchers":{
@@ -41,8 +51,9 @@
 },
 	
 	
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 	

@@ -19,14 +19,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
 	c := &CmdGetFilterIDs{
 		name:      "filter_ids",
-		rpcMethod: utils.AdminSv1GetFilterIDs,
-		rpcParams: &utils.ArgsItemIDs{},
+		rpcMethod: utils.APIerSv1GetFilterIDs,
+		rpcParams: &utils.PaginatorWithTenant{},
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
@@ -36,7 +36,7 @@ func init() {
 type CmdGetFilterIDs struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.ArgsItemIDs
+	rpcParams *utils.PaginatorWithTenant
 	*CommandExecuter
 }
 
@@ -50,7 +50,7 @@ func (self *CmdGetFilterIDs) RpcMethod() string {
 
 func (self *CmdGetFilterIDs) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = &utils.ArgsItemIDs{}
+		self.rpcParams = &utils.PaginatorWithTenant{}
 	}
 	return self.rpcParams
 }

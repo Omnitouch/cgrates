@@ -20,7 +20,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 package engine
 
-/*
+import (
+	"net/rpc"
+	"path"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
+)
+
 var (
 	actsCdrStore CdrStorage
 	actsCfgPath  string
@@ -33,7 +43,7 @@ var sTestsActions = []func(t *testing.T){
 	testActionsInitCfg,
 	testActionsInitCdrsStore,
 	testActionsInitDataDb,
-
+	testActionsResetStorDb,
 	testActionsStartEngine,
 	testActionsRPCConn,
 	testActionsSetSMCosts,
@@ -74,13 +84,44 @@ func testActionsInitCfg(t *testing.T) {
 	}
 }
 
+func testActionsInitCdrsStore(t *testing.T) {
+	switch *dbType {
+	case utils.MetaInternal:
+		actsCdrStore = NewInternalDB(nil, nil, true, actsCfg.DataDbCfg().Items)
+	case utils.MetaMySQL:
+		if actsCdrStore, err = NewMySQLStorage(actsCfg.StorDbCfg().Host,
+			actsCfg.StorDbCfg().Port, actsCfg.StorDbCfg().Name,
+			actsCfg.StorDbCfg().User, actsCfg.StorDbCfg().Password,
+			100, 10, 0, "UTC", make(map[string]string)); err != nil {
+			t.Fatal("Could not connect to mysql", err.Error())
+		}
+	case utils.MetaMongo:
+		if actsCdrStore, err = NewMongoStorage(actsCfg.StorDbCfg().Host,
+			actsCfg.StorDbCfg().Port, actsCfg.StorDbCfg().Name,
+			actsCfg.StorDbCfg().User, actsCfg.StorDbCfg().Password,
+			actsCfg.GeneralCfg().DBDataEncoding,
+			utils.StorDB, nil, 10*time.Second); err != nil {
+			t.Fatal("Could not connect to mongo", err.Error())
+		}
+	case utils.MetaPostgres:
+		t.SkipNow()
+	default:
+		t.Fatal("Unknown Database type")
+	}
+}
 
 func testActionsInitDataDb(t *testing.T) {
-	if err := InitDataDB(actsCfg); err != nil {
+	if err := InitDataDb(actsCfg); err != nil {
 		t.Fatal(err)
 	}
 }
 
+// Wipe out the cdr database
+func testActionsResetStorDb(t *testing.T) {
+	if err := InitStorDb(actsCfg); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Start CGR Engine
 func testActionsStartEngine(t *testing.T) {
@@ -142,6 +183,7 @@ func testActionsExecuteRemoveSMCos1(t *testing.T) {
 		Actions: []*utils.TPAction{
 			{
 				Identifier:      utils.MetaRemoveSessionCosts,
+				TimingTags:      utils.MetaASAP,
 				ExtraParameters: "*string:~*sc.OriginID:13;*notstring:~*sc.OriginID:12",
 				Weight:          20,
 			},
@@ -174,6 +216,7 @@ func testActionsExecuteRemoveSMCos2(t *testing.T) {
 		Actions: []*utils.TPAction{
 			{
 				Identifier:      utils.MetaRemoveSessionCosts,
+				TimingTags:      utils.MetaASAP,
 				ExtraParameters: "",
 				Weight:          20,
 			},
@@ -250,4 +293,3 @@ func testActionsKillEngine(t *testing.T) {
 		t.Error(err)
 	}
 }
-*/

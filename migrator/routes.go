@@ -23,9 +23,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -87,7 +86,7 @@ func (m *Migrator) migrateFromSupplierToRoute() (err error) {
 		if spp == nil || m.dryRun {
 			continue
 		}
-		if err := m.dmOut.DataManager().SetRouteProfile(context.TODO(), convertSupplierToRoute(spp), true); err != nil {
+		if err := m.dmOut.DataManager().SetRouteProfile(convertSupplierToRoute(spp), true); err != nil {
 			return err
 		}
 		m.stats[utils.Routes]++
@@ -111,7 +110,7 @@ func (m *Migrator) migrateFromSupplierToRoute() (err error) {
 
 func (m *Migrator) migrateCurrentRouteProfile() (err error) {
 	var ids []string
-	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(context.TODO(), utils.RouteProfilePrefix)
+	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(utils.RouteProfilePrefix)
 	if err != nil {
 		return err
 	}
@@ -120,17 +119,17 @@ func (m *Migrator) migrateCurrentRouteProfile() (err error) {
 		if len(tntID) < 2 {
 			return fmt.Errorf("invalid key <%s> when migrating route profiles", id)
 		}
-		rPrf, err := m.dmIN.DataManager().GetRouteProfile(context.TODO(), tntID[0], tntID[1], false, false, utils.NonTransactional)
+		rPrf, err := m.dmIN.DataManager().GetRouteProfile(tntID[0], tntID[1], false, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
 		if rPrf == nil || m.dryRun {
 			continue
 		}
-		if err := m.dmOut.DataManager().SetRouteProfile(context.TODO(), rPrf, true); err != nil {
+		if err := m.dmOut.DataManager().SetRouteProfile(rPrf, true); err != nil {
 			return err
 		}
-		if err := m.dmIN.DataManager().RemoveRouteProfile(context.TODO(), tntID[0], tntID[1], true); err != nil {
+		if err := m.dmIN.DataManager().RemoveRouteProfile(tntID[0], tntID[1], true); err != nil {
 			return err
 		}
 		m.stats[utils.Routes]++
@@ -141,7 +140,7 @@ func (m *Migrator) migrateCurrentRouteProfile() (err error) {
 func (m *Migrator) migrateRouteProfiles() (err error) {
 	var vrs engine.Versions
 	current := engine.CurrentDataDBVersions()
-	if vrs, err = m.getVersions(utils.Routes); err != nil {
+	if vrs, err = m.getVersions(utils.ActionTriggers); err != nil {
 		return
 	}
 	routeVersion, has := vrs[utils.Routes]
@@ -185,13 +184,13 @@ func (m *Migrator) migrateRouteProfiles() (err error) {
 			break
 		}
 		if !m.dryRun {
-			if err = m.dmIN.DataManager().SetRouteProfile(context.TODO(), v2, true); err != nil {
+			if err = m.dmIN.DataManager().SetRouteProfile(v2, true); err != nil {
 				return
 			}
 		}
 		m.stats[utils.Routes]++
 	}
-	// All done, update version with current one
+	// All done, update version wtih current one
 	if err = m.setVersions(utils.Routes); err != nil {
 		return
 	}
@@ -201,12 +200,13 @@ func (m *Migrator) migrateRouteProfiles() (err error) {
 
 func convertSupplierToRoute(spp *SupplierProfile) (route *engine.RouteProfile) {
 	route = &engine.RouteProfile{
-		Tenant:            spp.Tenant,
-		ID:                spp.ID,
-		FilterIDs:         spp.FilterIDs,
-		Sorting:           spp.Sorting,
-		SortingParameters: spp.SortingParameters,
-		Weights:           utils.DynamicWeights{{Weight: spp.Weight}},
+		Tenant:             spp.Tenant,
+		ID:                 spp.ID,
+		FilterIDs:          spp.FilterIDs,
+		ActivationInterval: spp.ActivationInterval,
+		Sorting:            spp.Sorting,
+		SortingParameters:  spp.SortingParameters,
+		Weight:             spp.Weight,
 	}
 	route.Routes = make([]*engine.Route, len(spp.Suppliers))
 	for i, supl := range spp.Suppliers {
@@ -214,11 +214,11 @@ func convertSupplierToRoute(spp *SupplierProfile) (route *engine.RouteProfile) {
 			ID:              supl.ID,
 			FilterIDs:       supl.FilterIDs,
 			AccountIDs:      supl.AccountIDs,
-			RateProfileIDs:  supl.RatingPlanIDs,
+			RatingPlanIDs:   supl.RatingPlanIDs,
 			ResourceIDs:     supl.ResourceIDs,
 			StatIDs:         supl.StatIDs,
-			Weights:         utils.DynamicWeights{{Weight: supl.Weight}},
-			Blockers:        utils.DynamicBlockers{{Blocker: supl.Blocker}},
+			Weight:          supl.Weight,
+			Blocker:         supl.Blocker,
 			RouteParameters: supl.SupplierParameters,
 		}
 	}

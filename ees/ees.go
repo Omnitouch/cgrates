@@ -19,31 +19,28 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
-	"archive/zip"
-	"bytes"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
 // onCacheEvicted is called by ltcache when evicting an item
 func onCacheEvicted(_ string, value interface{}) {
-	value.(EventExporter).Close()
+	ee := value.(EventExporter)
+	ee.Close()
 }
 
 // NewEventExporterS instantiates the EventExporterS
 func NewEventExporterS(cfg *config.CGRConfig, filterS *engine.FilterS,
-	connMgr *engine.ConnManager) (eeS *EeS) {
-	eeS = &EeS{
+	connMgr *engine.ConnManager) (eeS *EventExporterS) {
+	eeS = &EventExporterS{
 		cfg:     cfg,
-		fltrS:   filterS,
+		filterS: filterS,
 		connMgr: connMgr,
 		eesChs:  make(map[string]*ltcache.Cache),
 	}
@@ -51,10 +48,10 @@ func NewEventExporterS(cfg *config.CGRConfig, filterS *engine.FilterS,
 	return
 }
 
-// EeS is managing the EventExporters
-type EeS struct {
+// EventExporterS is managing the EventExporters
+type EventExporterS struct {
 	cfg     *config.CGRConfig
-	fltrS   *engine.FilterS
+	filterS *engine.FilterS
 	connMgr *engine.ConnManager
 
 	eesChs map[string]*ltcache.Cache // map[eeType]*ltcache.Cache
@@ -62,7 +59,7 @@ type EeS struct {
 }
 
 // ListenAndServe keeps the service alive
-func (eeS *EeS) ListenAndServe(stopChan, cfgRld chan struct{}) {
+func (eeS *EventExporterS) ListenAndServe(stopChan, cfgRld chan struct{}) {
 	for {
 		select {
 		case <-stopChan: // global exit
@@ -77,13 +74,18 @@ func (eeS *EeS) ListenAndServe(stopChan, cfgRld chan struct{}) {
 }
 
 // Shutdown is called to shutdown the service
-func (eeS *EeS) Shutdown() {
+func (eeS *EventExporterS) Shutdown() {
 	utils.Logger.Info(fmt.Sprintf("<%s> shutdown <%s>", utils.CoreS, utils.EEs))
 	eeS.setupCache(nil) // cleanup exporters
 }
 
+// Call implements rpcclient.ClientConnector interface for internal RPC
+func (eeS *EventExporterS) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	return utils.RPCCall(eeS, serviceMethod, args, reply)
+}
+
 // setupCache deals with cleanup and initialization of the cache of EventExporters
-func (eeS *EeS) setupCache(chCfgs map[string]*config.CacheParamCfg) {
+func (eeS *EventExporterS) setupCache(chCfgs map[string]*config.CacheParamCfg) {
 	eeS.eesMux.Lock()
 	for chID, ch := range eeS.eesChs { // cleanup
 		ch.Clear()
@@ -99,22 +101,18 @@ func (eeS *EeS) setupCache(chCfgs map[string]*config.CacheParamCfg) {
 	eeS.eesMux.Unlock()
 }
 
-func (eeS *EeS) attrSProcessEvent(ctx *context.Context, cgrEv *utils.CGREvent, attrIDs []string, attributeSCtx string) (err error) {
+func (eeS *EventExporterS) attrSProcessEvent(cgrEv *utils.CGREvent, attrIDs []string, ctx string) (err error) {
 	var rplyEv engine.AttrSProcessEventReply
 	if cgrEv.APIOpts == nil {
 		cgrEv.APIOpts = make(map[string]interface{})
 	}
 	cgrEv.APIOpts[utils.MetaSubsys] = utils.MetaEEs
-	cgrEv.APIOpts[utils.OptsContext] = utils.FirstNonEmpty(
-		attributeSCtx,
-		utils.IfaceAsString(cgrEv.APIOpts[utils.OptsContext]),
-		utils.MetaEEs)
 	cgrEv.APIOpts[utils.OptsAttributesProfileIDs] = attrIDs
-
-	if err = eeS.connMgr.Call(ctx,
-		eeS.cfg.EEsNoLksCfg().AttributeSConns,
-		utils.AttributeSv1ProcessEvent,
+	cgrEv.APIOpts[utils.OptsContext] = utils.FirstNonEmpty(ctx,
+		utils.IfaceAsString(cgrEv.APIOpts[utils.OptsContext]), utils.MetaEEs)
+	if err = eeS.connMgr.Call(eeS.cfg.EEsNoLksCfg().AttributeSConns, nil, utils.AttributeSv1ProcessEvent,
 		cgrEv, &rplyEv); err == nil && len(rplyEv.AlteredFields) != 0 {
+		*cgrEv = *rplyEv.CGREvent
 	} else if err != nil &&
 		err.Error() == utils.ErrNotFound.Error() {
 		err = nil // cancel ErrNotFound
@@ -122,9 +120,11 @@ func (eeS *EeS) attrSProcessEvent(ctx *context.Context, cgrEv *utils.CGREvent, a
 	return
 }
 
-func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEeIDs, rply *map[string]map[string]interface{}) (err error) {
-	eeS.cfg.RLocks(config.EEsJSON)
-	defer eeS.cfg.RUnlocks(config.EEsJSON)
+// V1ProcessEvent will be called each time a new event is received from readers
+// rply -> map[string]map[string]interface{}
+func (eeS *EventExporterS) V1ProcessEvent(cgrEv *engine.CGREventWithEeIDs, rply *map[string]map[string]interface{}) (err error) {
+	eeS.cfg.RLocks(config.EEsJson)
+	defer eeS.cfg.RUnlocks(config.EEsJson)
 
 	expIDs := utils.NewStringSet(cgrEv.EeIDs)
 	lenExpIDs := expIDs.Size()
@@ -146,7 +146,7 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 
 		if len(eeCfg.Filters) != 0 {
 			tnt := utils.FirstNonEmpty(cgrEv.Tenant, eeS.cfg.GeneralCfg().DefaultTenant)
-			if pass, errPass := eeS.fltrS.Pass(ctx, tnt,
+			if pass, errPass := eeS.filterS.Pass(tnt,
 				eeCfg.Filters, cgrDp); errPass != nil {
 				return errPass
 			} else if !pass {
@@ -155,8 +155,13 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 		}
 
 		if eeCfg.Flags.GetBool(utils.MetaAttributes) {
-			if err = eeS.attrSProcessEvent(ctx, cgrEv.CGREvent,
-				eeCfg.AttributeSIDs, eeCfg.AttributeSCtx); err != nil {
+			if err = eeS.attrSProcessEvent(
+				cgrEv.CGREvent,
+				eeCfg.AttributeSIDs,
+				utils.FirstNonEmpty(
+					eeCfg.AttributeSCtx,
+					utils.IfaceAsString(cgrEv.APIOpts[utils.OptsContext]),
+					utils.MetaEEs)); err != nil {
 				return
 			}
 		}
@@ -172,8 +177,9 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 				ee = x.(EventExporter)
 			}
 		}
+
 		if !isCached {
-			if ee, err = NewEventExporter(eeS.cfg.EEsCfg().Exporters[cfgIdx], eeS.cfg, eeS.fltrS, eeS.connMgr); err != nil {
+			if ee, err = NewEventExporter(eeS.cfg.EEsCfg().Exporters[cfgIdx], eeS.cfg, eeS.filterS, eeS.connMgr); err != nil {
 				return
 			}
 			if hasCache {
@@ -184,20 +190,19 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 		metricMapLock.Lock()
 		metricsMap[ee.Cfg().ID] = utils.MapStorage{} // will return the ID for all processed exporters
 		metricMapLock.Unlock()
-		ctx := ctx
+
 		if eeCfg.Synchronous {
-			wg.Add(1) // wait for synchronous or file ones since these need to be done before continuing
-		} else {
-			ctx = context.Background() // is async so lose the API context
+			wg.Add(1) // wait for sync to complete before returning
 		}
-		// log the message before starting the goroutine, but still execute the exporter
+
+		// log the message before starting the gorutine, but still execute the exporter
 		if hasVerbose && !eeCfg.Synchronous {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> with id <%s>, running verbosed exporter with syncronous false",
 					utils.EEs, ee.Cfg().ID))
 		}
 		go func(evict, sync bool, ee EventExporter) {
-			if err := exportEventWithExporter(ctx, ee, eeS.connMgr, cgrEv.CGREvent, evict, eeS.cfg, eeS.fltrS, cgrEv.Tenant); err != nil {
+			if err := exportEventWithExporter(ee, cgrEv.CGREvent, evict, eeS.cfg, eeS.filterS); err != nil {
 				withErr = true
 			}
 			if sync {
@@ -209,9 +214,6 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 				wg.Done()
 			}
 		}(!hasCache, eeCfg.Synchronous, ee)
-		if eeCfg.Blocker {
-			break
-		}
 	}
 	wg.Wait()
 	if withErr {
@@ -235,6 +237,7 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 				(*rply)[exporterID][key] = val
 			}
 		}
+
 	}
 	metricMapLock.Unlock()
 	if len(*rply) == 0 {
@@ -243,8 +246,7 @@ func (eeS *EeS) V1ProcessEvent(ctx *context.Context, cgrEv *utils.CGREventWithEe
 	return
 }
 
-func exportEventWithExporter(ctx *context.Context, exp EventExporter, connMngr *engine.ConnManager,
-	ev *utils.CGREvent, oneTime bool, cfg *config.CGRConfig, filterS *engine.FilterS, tnt string) (err error) {
+func exportEventWithExporter(exp EventExporter, ev *utils.CGREvent, oneTime bool, cfg *config.CGRConfig, filterS *engine.FilterS) (err error) {
 	defer func() {
 		updateEEMetrics(exp.GetMetrics(), ev.ID, ev.Event, err != nil, utils.FirstNonEmpty(exp.Cfg().Timezone,
 			cfg.GeneralCfg().DefaultTimezone))
@@ -268,38 +270,26 @@ func exportEventWithExporter(ctx *context.Context, exp EventExporter, connMngr *
 			utils.MetaDC:   exp.GetMetrics(),
 			utils.MetaOpts: utils.MapStorage(ev.APIOpts),
 			utils.MetaCfg:  cfg.GetDataProvider(),
+			utils.MetaEC:   utils.MapStorage{utils.CostDetails: ev.Event[utils.CostDetails]},
 		}, utils.FirstNonEmpty(ev.Tenant, cfg.GeneralCfg().DefaultTenant),
 			filterS,
-			map[string]*utils.OrderedNavigableMap{utils.MetaExp: expNM}).SetFields(ctx, exp.Cfg().ContentFields())
+			map[string]*utils.OrderedNavigableMap{utils.MetaExp: expNM}).SetFields(exp.Cfg().ContentFields())
 		if eEv, err = exp.PrepareOrderMap(expNM); err != nil {
 			return
 		}
 	}
-	extraData := exp.ExtraData(ev)
+	key := utils.ConcatenatedKey(utils.FirstNonEmpty(engine.MapEvent(ev.Event).GetStringIgnoreErrors(utils.CGRID), utils.GenUUID()),
+		utils.FirstNonEmpty(engine.MapEvent(ev.Event).GetStringIgnoreErrors(utils.RunID), utils.MetaDefault))
 
-	return ExportWithAttempts(ctx, exp, eEv, extraData, connMngr, tnt)
+	return ExportWithAttempts(exp, eEv, key)
 }
 
-func ExportWithAttempts(ctx *context.Context, exp EventExporter, eEv interface{}, key interface{},
-	connMngr *engine.ConnManager, tnt string) (err error) {
+func ExportWithAttempts(exp EventExporter, eEv interface{}, key string) (err error) {
 	if exp.Cfg().FailedPostsDir != utils.MetaNone {
 		defer func() {
 			if err != nil {
-				args := &utils.ArgsFailedPosts{
-					Tenant:    tnt,
-					Path:      exp.Cfg().ExportPath,
-					Event:     eEv,
-					FailedDir: exp.Cfg().FailedPostsDir,
-					Module:    utils.EEs,
-					APIOpts:   exp.Cfg().Opts.AsMapInterface(),
-				}
-				var reply string
-				if err = connMngr.Call(ctx, exp.Cfg().EFsConns,
-					utils.EfSv1ProcessEvent, args, &reply); err != nil {
-					utils.Logger.Warning(
-						fmt.Sprintf("<%s> Exporter <%s> could not be written with <%s> service because err: <%s>",
-							utils.EEs, exp.Cfg().ID, utils.EFs, err.Error()))
-				}
+				AddFailedPost(exp.Cfg().FailedPostsDir, exp.Cfg().ExportPath,
+					exp.Cfg().Type, eEv, exp.Cfg().Opts)
 			}
 		}()
 	}
@@ -320,7 +310,7 @@ func ExportWithAttempts(ctx *context.Context, exp EventExporter, eEv interface{}
 		return
 	}
 	for i := 0; i < exp.Cfg().Attempts; i++ {
-		if err = exp.ExportEvent(ctx, eEv, key); err == nil ||
+		if err = exp.ExportEvent(eEv, key); err == nil ||
 			err == utils.ErrDisconnected { // special error in case the exporter was closed
 			break
 		}
@@ -333,132 +323,5 @@ func ExportWithAttempts(ctx *context.Context, exp EventExporter, eEv interface{}
 			fmt.Sprintf("<%s> Exporter <%s> could not export because err: <%s>",
 				utils.EEs, exp.Cfg().ID, err.Error()))
 	}
-	return
-}
-
-type ArchiveEventsArgs struct {
-	Tenant  string
-	APIOpts map[string]interface{}
-	Events  []*utils.EventsWithOpts
-}
-
-// V1ArchiveEventsInReply should archive the events sent with existing exporters. The zipped content should be returned back as a reply.
-func (eeS *EeS) V1ArchiveEventsInReply(ctx *context.Context, args *ArchiveEventsArgs, reply *[]byte) (err error) {
-	if args.Tenant == utils.EmptyString {
-		args.Tenant = eeS.cfg.GeneralCfg().DefaultTenant
-	}
-	expID, has := args.APIOpts[utils.MetaExporterID]
-	if !has {
-		return fmt.Errorf("ExporterID is missing from argument's options")
-	}
-	// check if there are any exporters that match our expID
-	var eesCfg *config.EventExporterCfg
-	for _, exporter := range eeS.cfg.EEsCfg().Exporters {
-		if exporter.ID == expID {
-			eesCfg = exporter
-			break
-		}
-	}
-	if eesCfg == nil {
-		return fmt.Errorf("exporter config with ID: %s is missing", expID)
-	}
-	// also mandatory to be synchronous
-	if !eesCfg.Synchronous {
-		return fmt.Errorf("exporter with ID: %s is not synchronous", expID)
-	}
-	// also mandatory to be type of *buffer
-	if eesCfg.ExportPath != utils.MetaBuffer {
-		return fmt.Errorf("exporter with ID: %s has an invalid ExportPath for archiving", expID)
-	}
-	var dc *utils.SafeMapStorage
-	if dc, err = newEEMetrics(utils.FirstNonEmpty(
-		eesCfg.Timezone,
-		eeS.cfg.GeneralCfg().DefaultTimezone)); err != nil {
-		return
-	}
-	var ee EventExporter
-
-	buff := new(bytes.Buffer)
-	zBuff := zip.NewWriter(buff)
-	var wrtr io.Writer
-	// create the file where will be stored in zip
-	if wrtr, err = zBuff.CreateHeader(&zip.FileHeader{
-		Method:   zip.Deflate, // to be compressed
-		Name:     "events.csv",
-		Modified: time.Now(),
-	}); err != nil {
-		return err
-	}
-	switch eesCfg.Type {
-	case utils.MetaFileCSV:
-		ee, err = NewFileCSVee(eesCfg, eeS.cfg, eeS.fltrS, dc, &buffer{wrtr})
-	case utils.MetaFileFWV:
-		ee, err = NewFileFWVee(eesCfg, eeS.cfg, eeS.fltrS, dc, &buffer{wrtr})
-	default:
-		err = fmt.Errorf("unsupported exporter type: %s>", eesCfg.Type)
-	}
-	if err != nil {
-		return err
-	}
-	// we will build the dataPrvider in order to match the filters
-	cgrDp := utils.MapStorage{
-		utils.MetaOpts: args.APIOpts,
-	}
-	// check if APIOpts have to ignore the filters
-	var ignoreFltr bool
-	if val, has := args.APIOpts[utils.MetaProfileIgnoreFilters]; has {
-		ignoreFltr, err = utils.IfaceAsBool(val)
-		if err != nil {
-			return err
-		}
-	}
-	tnt := utils.FirstNonEmpty(args.Tenant, eeS.cfg.GeneralCfg().DefaultTenant)
-	var exported bool
-	for _, event := range args.Events {
-		if len(eesCfg.Filters) != 0 && !ignoreFltr {
-			cgrDp[utils.MetaReq] = event.Event
-			if pass, errPass := eeS.fltrS.Pass(ctx, tnt,
-				eesCfg.Filters, cgrDp); errPass != nil {
-				return errPass
-			} else if !pass {
-				continue // does not pass the filters, ignore the exporter
-			}
-		}
-		// in case of event's Opts got another *exporterID that is different from the initial Opts, will skip that Event and will continue the iterations
-		if newExpID, ok := event.Opts[utils.MetaExporterID]; ok && newExpID != expID {
-			continue
-		}
-		cgrEv := &utils.CGREvent{
-			ID:      utils.UUIDSha1Prefix(),
-			Tenant:  tnt,
-			Event:   event.Event,
-			APIOpts: make(map[string]interface{}),
-		}
-		// here we will join the APIOpts from the initial args and Opts from every CDR(EventsWithOPts)
-		for key, val := range args.APIOpts {
-			if _, ok := event.Opts[key]; ok {
-				val = event.Opts[key]
-			}
-			event.Opts[key] = val
-		}
-		cgrEv.APIOpts = event.Opts
-
-		// exported will be true if there will be at least one exporter archived
-		exported = true
-		if err = exportEventWithExporter(ctx, ee, eeS.connMgr, cgrEv, false, eeS.cfg, eeS.fltrS, cgrEv.Tenant); err != nil {
-			return err
-		}
-	}
-	// most probably beacause of not matching filters
-	if !exported {
-		return utils.NewErrServerError(fmt.Errorf("NO EXPORTS"))
-	}
-	if err = ee.Close(); err != nil {
-		return err
-	}
-	if err = zBuff.Close(); err != nil {
-		return err
-	}
-	*reply = buff.Bytes()
 	return
 }

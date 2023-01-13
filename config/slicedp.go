@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewSliceDP constructs a utils.DataProvider
@@ -53,7 +53,7 @@ func (cP *SliceDP) FieldAsInterface(fldPath []string) (data interface{}, err err
 		return
 	}
 	if len(fldPath) != 1 {
-		return nil, fmt.Errorf("Invalid fieldPath %+v ", fldPath)
+		return nil, fmt.Errorf("Invalid fieldPath %+v", fldPath)
 	}
 	idx := fldPath[0]
 	if data, err = cP.cache.FieldAsInterface(fldPath); err == nil ||
@@ -62,7 +62,7 @@ func (cP *SliceDP) FieldAsInterface(fldPath []string) (data interface{}, err err
 	}
 	var cfgFieldIdx int
 	if cfgFieldIdx, err = cP.getIndex(idx); err != nil {
-		return nil, fmt.Errorf("Ignoring record: %v with error : %+v ", cP.req, err)
+		return nil, fmt.Errorf("Ignoring record: %v with error : %+v", cP.req, err)
 	}
 	if len(cP.req) <= cfgFieldIdx {
 		return nil, utils.ErrNotFound

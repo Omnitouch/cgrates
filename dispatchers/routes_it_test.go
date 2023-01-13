@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -42,6 +42,7 @@ var (
 		testDspSupTestAuthKey2,
 		testDspSupGetSupplierForEvent,
 	}
+	nowTime = time.Now()
 )
 
 // Test start here
@@ -146,18 +147,18 @@ func testDspSupGetSupFailover(t *testing.T) {
 				RouteID:         "route1",
 				RouteParameters: "",
 				SortingData: map[string]interface{}{
-					utils.Cost:          0.1,
-					utils.RateProfileID: "RP_1002_LOW",
-					utils.Weight:        10.0,
+					utils.Cost:         0.3166,
+					utils.RatingPlanID: "RP_1002_LOW",
+					utils.Weight:       10.0,
 				},
 			},
 			{
 				RouteID:         "route2",
 				RouteParameters: "",
 				SortingData: map[string]interface{}{
-					utils.Cost:          0.12,
-					utils.RateProfileID: "RP_1002",
-					utils.Weight:        20.0,
+					utils.Cost:         0.6334,
+					utils.RatingPlanID: "RP_1002",
+					utils.Weight:       20.0,
 				},
 			},
 		},
@@ -165,6 +166,7 @@ func testDspSupGetSupFailover(t *testing.T) {
 	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
+		Time:   &nowTime,
 		Event: map[string]interface{}{
 			utils.EventName:    "Event1",
 			utils.AccountField: "1002",
@@ -197,7 +199,8 @@ func testDspSupGetSupFailover(t *testing.T) {
 func testDspSupTestAuthKey(t *testing.T) {
 	var rpl engine.SortedRoutesList
 	args := &utils.CGREvent{
-		ID: utils.UUIDSha1Prefix(),
+		ID:   utils.UUIDSha1Prefix(),
+		Time: &nowTime,
 		Event: map[string]interface{}{
 			utils.AccountField: "1002",
 			utils.Subject:      "1002",
@@ -226,18 +229,18 @@ func testDspSupTestAuthKey2(t *testing.T) {
 				RouteID:         "route1",
 				RouteParameters: "",
 				SortingData: map[string]interface{}{
-					utils.Cost:          0.1,
-					utils.RateProfileID: "RP_1002_LOW",
-					utils.Weight:        10.0,
+					utils.Cost:         0.3166,
+					utils.RatingPlanID: "RP_1002_LOW",
+					utils.Weight:       10.0,
 				},
 			},
 			{
 				RouteID:         "route2",
 				RouteParameters: "",
 				SortingData: map[string]interface{}{
-					utils.Cost:          0.12,
-					utils.RateProfileID: "RP_1002",
-					utils.Weight:        20.0,
+					utils.Cost:         0.6334,
+					utils.RatingPlanID: "RP_1002",
+					utils.Weight:       20.0,
 				},
 			},
 		},
@@ -245,6 +248,7 @@ func testDspSupTestAuthKey2(t *testing.T) {
 	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
+		Time:   &nowTime,
 		Event: map[string]interface{}{
 			utils.AccountField: "1002",
 			utils.Subject:      "1002",
@@ -288,18 +292,18 @@ func testDspSupGetSupRoundRobin(t *testing.T) {
 				RouteID:         "route1",
 				RouteParameters: "",
 				SortingData: map[string]interface{}{
-					utils.Cost:          0.1,
-					utils.RateProfileID: "RP_1002_LOW",
-					utils.Weight:        10.0,
+					utils.Cost:         0.3166,
+					utils.RatingPlanID: "RP_1002_LOW",
+					utils.Weight:       10.0,
 				},
 			},
 			{
 				RouteID:         "route2",
 				RouteParameters: "",
 				SortingData: map[string]interface{}{
-					utils.Cost:          0.12,
-					utils.RateProfileID: "RP_1002",
-					utils.Weight:        20.0,
+					utils.Cost:         0.6334,
+					utils.RatingPlanID: "RP_1002",
+					utils.Weight:       20.0,
 				},
 			},
 		},
@@ -307,6 +311,7 @@ func testDspSupGetSupRoundRobin(t *testing.T) {
 	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
+		Time:   &nowTime,
 		Event: map[string]interface{}{
 			utils.EventName:    "RoundRobin",
 			utils.AccountField: "1002",
@@ -351,31 +356,39 @@ func testDspSupGetSupplierForEvent(t *testing.T) {
 		},
 	}
 	expected := engine.RouteProfile{
-		Tenant:            "cgrates.org",
-		ID:                "ROUTE_ACNT_1002",
-		FilterIDs:         []string{"FLTR_ACNT_1002"},
+		Tenant:    "cgrates.org",
+		ID:        "ROUTE_ACNT_1002",
+		FilterIDs: []string{"FLTR_ACNT_1002"},
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2017, 11, 27, 00, 00, 00, 00, time.UTC),
+		},
 		Sorting:           utils.MetaLC,
 		SortingParameters: []string{},
 		Routes: []*engine.Route{
 			{
-				ID:             "route1",
-				RateProfileIDs: []string{"RP_1002_LOW"},
-				Weights:        utils.DynamicWeights{{Weight: 10}},
-				Blockers: utils.DynamicBlockers{
-					{
-						Blocker: false,
-					},
-				},
+				ID:              "route1",
+				FilterIDs:       nil,
+				AccountIDs:      nil,
+				RatingPlanIDs:   []string{"RP_1002_LOW"},
+				ResourceIDs:     nil,
+				StatIDs:         nil,
+				Weight:          10,
+				Blocker:         false,
 				RouteParameters: "",
 			},
 			{
 				ID:              "route2",
-				RateProfileIDs:  []string{"RP_1002"},
-				Weights:         utils.DynamicWeights{{Weight: 20}},
+				FilterIDs:       nil,
+				AccountIDs:      nil,
+				RatingPlanIDs:   []string{"RP_1002"},
+				ResourceIDs:     nil,
+				StatIDs:         nil,
+				Weight:          20,
+				Blocker:         false,
 				RouteParameters: "",
 			},
 		},
-		Weights: utils.DynamicWeights{{Weight: 10}},
+		Weight: 10,
 	}
 	if *encoding == utils.MetaGOB {
 		expected.SortingParameters = nil // empty slices are nil in gob
@@ -385,10 +398,13 @@ func testDspSupGetSupplierForEvent(t *testing.T) {
 		ev, &supProf); err != nil {
 		t.Fatal(err)
 	}
+	sort.Slice(expected.Routes, func(i, j int) bool {
+		return expected.Routes[i].Weight < expected.Routes[j].Weight
+	})
 	sort.Slice(supProf[0].Routes, func(i, j int) bool {
-		return supProf[0].Routes[i].Weights[0].Weight < supProf[0].Routes[j].Weights[0].Weight
+		return supProf[0].Routes[i].Weight < supProf[0].Routes[j].Weight
 	})
 	if !reflect.DeepEqual(expected, *supProf[0]) {
-		t.Errorf("Expected: %s ,received: %s", utils.ToJSON(expected), utils.ToJSON(*supProf[0]))
+		t.Errorf("Expected: %s ,received: %s", utils.ToJSON(expected), utils.ToJSON(supProf))
 	}
 }

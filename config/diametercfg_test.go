@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -75,11 +75,6 @@ func TestDiameterAgentCfgloadFromJsonCfg(t *testing.T) {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, jsnCfg.diameterAgentCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsnCfg.diameterAgentCfg))
-	}
-
-	jsonCFG = nil
-	if err = jsnCfg.diameterAgentCfg.loadFromJSONCfg(jsonCFG, jsnCfg.generalCfg.RSRSep); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -267,130 +262,5 @@ func TestDiameterAgentCfgClone(t *testing.T) {
 	}
 	if rcv.RequestProcessors[0].ID = ""; ban.RequestProcessors[0].ID != "cgrates" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffDiameterAgentJsonCfg(t *testing.T) {
-	var d *DiameterAgentJsonCfg
-
-	v1 := &DiameterAgentCfg{
-		Enabled:           false,
-		ListenNet:         "tcp",
-		Listen:            "localhost:8080",
-		DictionariesPath:  "/path/",
-		SessionSConns:     []string{"*localhost"},
-		OriginHost:        "originHost",
-		OriginRealm:       "originRealm",
-		VendorID:          2,
-		ProductName:       "productName",
-		ConcurrentReqs:    2,
-		SyncedConnReqs:    false,
-		ASRTemplate:       "ASRTemplate",
-		RARTemplate:       "RARTemplate",
-		ForcedDisconnect:  "ForcedDisconnect",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	v2 := &DiameterAgentCfg{
-		Enabled:          true,
-		ListenNet:        "udp",
-		Listen:           "localhost:8037",
-		DictionariesPath: "/path/different",
-		SessionSConns:    []string{"*birpc"},
-		OriginHost:       "diffOriginHost",
-		OriginRealm:      "diffOriginRealm",
-		VendorID:         5,
-		ProductName:      "diffProductName",
-		ConcurrentReqs:   3,
-		SyncedConnReqs:   true,
-		ASRTemplate:      "diffASRTemplate",
-		RARTemplate:      "diffRARTemplate",
-		ForcedDisconnect: "diffForcedDisconnect",
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID: "id",
-			},
-		},
-	}
-
-	expected := &DiameterAgentJsonCfg{
-		Enabled:              utils.BoolPointer(true),
-		Listen_net:           utils.StringPointer("udp"),
-		Listen:               utils.StringPointer("localhost:8037"),
-		Dictionaries_path:    utils.StringPointer("/path/different"),
-		Sessions_conns:       &[]string{"*birpc"},
-		Origin_host:          utils.StringPointer("diffOriginHost"),
-		Origin_realm:         utils.StringPointer("diffOriginRealm"),
-		Vendor_id:            utils.IntPointer(5),
-		Product_name:         utils.StringPointer("diffProductName"),
-		Concurrent_requests:  utils.IntPointer(3),
-		Synced_conn_requests: utils.BoolPointer(true),
-		Asr_template:         utils.StringPointer("diffASRTemplate"),
-		Rar_template:         utils.StringPointer("diffRARTemplate"),
-		Forced_disconnect:    utils.StringPointer("diffForcedDisconnect"),
-		Request_processors: &[]*ReqProcessorJsnCfg{
-			{
-				ID: utils.StringPointer("id"),
-			},
-		},
-	}
-
-	rcv := diffDiameterAgentJsonCfg(d, v1, v2, "")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &DiameterAgentJsonCfg{
-		Request_processors: &[]*ReqProcessorJsnCfg{
-			{},
-		},
-	}
-	rcv = diffDiameterAgentJsonCfg(d, v1, v2, "")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiameterAgentCloneSection(t *testing.T) {
-	dmtCfg := &DiameterAgentCfg{
-		Enabled:           false,
-		ListenNet:         "tcp",
-		Listen:            "localhost:8080",
-		DictionariesPath:  "/path/",
-		SessionSConns:     []string{"*localhost"},
-		OriginHost:        "originHost",
-		OriginRealm:       "originRealm",
-		VendorID:          2,
-		ProductName:       "productName",
-		ConcurrentReqs:    2,
-		SyncedConnReqs:    false,
-		ASRTemplate:       "ASRTemplate",
-		RARTemplate:       "RARTemplate",
-		ForcedDisconnect:  "ForcedDisconnect",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	exp := &DiameterAgentCfg{
-		Enabled:           false,
-		ListenNet:         "tcp",
-		Listen:            "localhost:8080",
-		DictionariesPath:  "/path/",
-		SessionSConns:     []string{"*localhost"},
-		OriginHost:        "originHost",
-		OriginRealm:       "originRealm",
-		VendorID:          2,
-		ProductName:       "productName",
-		ConcurrentReqs:    2,
-		SyncedConnReqs:    false,
-		ASRTemplate:       "ASRTemplate",
-		RARTemplate:       "RARTemplate",
-		ForcedDisconnect:  "ForcedDisconnect",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	rcv := dmtCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

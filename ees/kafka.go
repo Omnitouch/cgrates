@@ -18,17 +18,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"net"
-	"os"
+	"context"
 	"sync"
-	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	kafka "github.com/segmentio/kafka-go"
 )
 
@@ -43,25 +37,13 @@ func NewKafkaEE(cfg *config.EventExporterCfg, dc *utils.SafeMapStorage) *KafkaEE
 	if cfg.Opts.KafkaTopic != nil {
 		kfkPstr.topic = *cfg.Opts.KafkaTopic
 	}
-	if cfg.Opts.KafkaTLS != nil && *cfg.Opts.KafkaTLS {
-		kfkPstr.TLS = true
-	}
-	if cfg.Opts.KafkaCAPath != nil {
-		kfkPstr.caPath = *cfg.Opts.KafkaCAPath
-	}
-	if cfg.Opts.KafkaSkipTLSVerify != nil && *cfg.Opts.KafkaSkipTLSVerify {
-		kfkPstr.skipTLSVerify = true
-	}
 	return kfkPstr
 }
 
 // KafkaEE is a kafka poster
 type KafkaEE struct {
-	topic         string // identifier of the CDR queue where we publish
-	TLS           bool   // if true, it will attempt to authenticate the server
-	caPath        string // path to CA pem file
-	skipTLSVerify bool   // if true, it skips certificate validation
-	writer        *kafka.Writer
+	topic  string // identifier of the CDR queue where we publish
+	writer *kafka.Writer
 
 	cfg          *config.EventExporterCfg
 	dc           *utils.SafeMapStorage
@@ -72,7 +54,7 @@ type KafkaEE struct {
 
 func (pstr *KafkaEE) Cfg() *config.EventExporterCfg { return pstr.cfg }
 
-func (pstr *KafkaEE) Connect() (err error) {
+func (pstr *KafkaEE) Connect() (_ error) {
 	pstr.Lock()
 	if pstr.writer == nil {
 		pstr.writer = &kafka.Writer{
@@ -80,40 +62,17 @@ func (pstr *KafkaEE) Connect() (err error) {
 			Topic:       pstr.topic,
 			MaxAttempts: pstr.Cfg().Attempts,
 		}
-	}
-	if pstr.TLS {
-		var rootCAs *x509.CertPool
-		if rootCAs, err = x509.SystemCertPool(); err != nil {
-			return
-		}
-		if rootCAs == nil {
-			rootCAs = x509.NewCertPool()
-		}
-		if pstr.caPath != "" {
-			var ca []byte
-			if ca, err = os.ReadFile(pstr.caPath); err != nil {
-				return
-			}
-			if !rootCAs.AppendCertsFromPEM(ca) {
-				return
-			}
-		}
-		pstr.writer.Transport = &kafka.Transport{
-			Dial: (&net.Dialer{
-				Timeout:   3 * time.Second,
-				DualStack: true,
-			}).DialContext,
-			TLS: &tls.Config{
-				RootCAs:            rootCAs,
-				InsecureSkipVerify: pstr.skipTLSVerify,
-			},
-		}
+		// pstr.writer = kafka.NewWriter(kafka.WriterConfig{
+		// Brokers:     []string{pstr.Cfg().ExportPath},
+		// MaxAttempts: pstr.Cfg().Attempts,
+		// Topic:       pstr.topic,
+		// })
 	}
 	pstr.Unlock()
 	return
 }
 
-func (pstr *KafkaEE) ExportEvent(ctx *context.Context, content interface{}, extraData interface{}) (err error) {
+func (pstr *KafkaEE) ExportEvent(content interface{}, key string) (err error) {
 	pstr.reqs.get()
 	pstr.RLock()
 	if pstr.writer == nil {
@@ -121,9 +80,8 @@ func (pstr *KafkaEE) ExportEvent(ctx *context.Context, content interface{}, extr
 		pstr.reqs.done()
 		return utils.ErrDisconnected
 	}
-	kafkaKey := extraData.(string)
-	err = pstr.writer.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(kafkaKey),
+	err = pstr.writer.WriteMessages(context.Background(), kafka.Message{
+		Key:   []byte(key),
 		Value: content.([]byte),
 	})
 	pstr.RUnlock()
@@ -142,9 +100,3 @@ func (pstr *KafkaEE) Close() (err error) {
 }
 
 func (pstr *KafkaEE) GetMetrics() *utils.SafeMapStorage { return pstr.dc }
-func (pstr *KafkaEE) ExtraData(ev *utils.CGREvent) interface{} {
-	return utils.ConcatenatedKey(
-		utils.FirstNonEmpty(engine.MapEvent(ev.APIOpts).GetStringIgnoreErrors(utils.MetaOriginID), utils.GenUUID()),
-		utils.FirstNonEmpty(engine.MapEvent(ev.APIOpts).GetStringIgnoreErrors(utils.MetaRunID), utils.MetaDefault),
-	)
-}

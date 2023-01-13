@@ -22,9 +22,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewExportRequest returns a new EventRequest
@@ -65,7 +64,11 @@ func (eeR *ExportRequest) FieldAsInterface(fldPath []string) (val interface{}, e
 				return nil, fmt.Errorf("unsupported field prefix: <%s>", fldPath[0])
 			}
 		}
-		val, err = dp.FieldAsInterface(fldPath[1:])
+		if len(fldPath) != 1 {
+			val, err = dp.FieldAsInterface(fldPath[1:])
+		} else {
+			val = dp
+		}
 	case utils.MetaUCH:
 		var ok bool
 		if val, ok = Cache.Get(utils.CacheUCH, strings.Join(fldPath[1:], utils.NestingSep)); !ok {
@@ -96,9 +99,9 @@ func (eeR *ExportRequest) FieldAsString(fldPath []string) (val string, err error
 }
 
 // SetFields will populate fields of AgentRequest out of templates
-func (eeR *ExportRequest) SetFields(ctx *context.Context, tplFlds []*config.FCTemplate) (err error) {
+func (eeR *ExportRequest) SetFields(tplFlds []*config.FCTemplate) (err error) {
 	for _, tplFld := range tplFlds {
-		if pass, err := eeR.filterS.Pass(ctx, eeR.tnt,
+		if pass, err := eeR.filterS.Pass(eeR.tnt,
 			tplFld.Filters, eeR); err != nil {
 			return err
 		} else if !pass {
@@ -150,7 +153,7 @@ func (eeR *ExportRequest) SetFields(ctx *context.Context, tplFlds []*config.FCTe
 func (eeR *ExportRequest) SetAsSlice(fullPath *utils.FullPath, val *utils.DataLeaf) (err error) {
 	switch prfx := fullPath.PathSlice[0]; prfx {
 	case utils.MetaUCH:
-		return Cache.Set(context.TODO(), utils.CacheUCH, fullPath.Path[5:], val.Data, nil, true, utils.NonTransactional)
+		return Cache.Set(utils.CacheUCH, fullPath.Path[5:], val.Data, nil, true, utils.NonTransactional)
 	case utils.MetaOpts:
 		return eeR.inData[utils.MetaOpts].Set(fullPath.PathSlice[1:], val.Data)
 	default:
@@ -170,6 +173,19 @@ func (eeR *ExportRequest) ParseField(
 	cfgFld *config.FCTemplate) (out interface{}, err error) {
 	tmpType := cfgFld.Type
 	switch tmpType {
+	case utils.MetaMaskedDestination:
+		//check if we have destination in the event
+		var dst string
+		if dst, err = eeR.inData[utils.MetaReq].FieldAsString([]string{utils.Destination}); err != nil {
+			err = fmt.Errorf("error <%s> getting destination for %s",
+				err, utils.ToJSON(cfgFld))
+			return
+		}
+		if cfgFld.MaskLen != -1 && len(cfgFld.MaskDestID) != 0 &&
+			CachedDestHasPrefix(cfgFld.MaskDestID, dst) {
+			out = utils.MaskSuffix(dst, cfgFld.MaskLen)
+		}
+		return
 	case utils.MetaFiller:
 		cfgFld.Padding = utils.MetaRight
 		tmpType = utils.MetaConstant
@@ -194,7 +210,7 @@ func (eeR *ExportRequest) ParseField(
 func (eeR *ExportRequest) Append(fullPath *utils.FullPath, val *utils.DataLeaf) (err error) {
 	switch prfx := fullPath.PathSlice[0]; prfx {
 	case utils.MetaUCH:
-		return Cache.Set(context.TODO(), utils.CacheUCH, fullPath.Path[5:], val.Data, nil, true, utils.NonTransactional)
+		return Cache.Set(utils.CacheUCH, fullPath.Path[5:], val.Data, nil, true, utils.NonTransactional)
 	case utils.MetaOpts:
 		return eeR.inData[utils.MetaOpts].Set(fullPath.PathSlice[1:], val.Data)
 	default:
@@ -221,7 +237,7 @@ func (eeR *ExportRequest) Compose(fullPath *utils.FullPath, val *utils.DataLeaf)
 		} else {
 			prv = utils.IfaceAsString(prvI) + utils.IfaceAsString(val.Data)
 		}
-		return Cache.Set(context.TODO(), utils.CacheUCH, path, prv, nil, true, utils.NonTransactional)
+		return Cache.Set(utils.CacheUCH, path, prv, nil, true, utils.NonTransactional)
 	case utils.MetaOpts:
 		var prv interface{}
 		if prv, err = eeR.inData[utils.MetaOpts].FieldAsInterface(fullPath.PathSlice[1:]); err != nil {

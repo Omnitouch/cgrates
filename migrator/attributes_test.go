@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestV1AttributeProfileAsAttributeProfile(t *testing.T) {
@@ -232,13 +233,17 @@ func TestV4AttributeProfileAsAttributeProfile(t *testing.T) {
 		},
 		Weight: 20,
 	}
-	attrPrf := &v6AttributeProfile{
+	attrPrf := &engine.AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "attributeprofile1",
 		Contexts:  []string{utils.MetaSessionS},
 		FilterIDs: []string{"filter1"},
-		Attributes: []*v6Attribute{
-			&v6Attribute{
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			ExpiryTime:     cloneExpTime,
+		},
+		Attributes: []*engine.Attribute{
+			&engine.Attribute{
 				Path:  utils.MetaReq + utils.NestingSep + "FL1",
 				Type:  utils.MetaVariable,
 				Value: config.NewRSRParsersMustCompile("~*req.Category:s/(.*)/${1}_UK_Mobile_Vodafone_GBRVF/", utils.InfieldSep),
@@ -419,13 +424,17 @@ func TestAsAttributeProfileV5(t *testing.T) {
 		Weight: 20,
 	}
 
-	eOut := &v6AttributeProfile{
+	eOut := &engine.AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "attributeprofile1",
 		Contexts:  []string{utils.MetaSessionS},
 		FilterIDs: []string{"filter1"},
-		Attributes: []*v6Attribute{
-			&v6Attribute{
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			ExpiryTime:     time.Date(2020, 4, 18, 14, 25, 0, 0, time.UTC),
+		},
+		Attributes: []*engine.Attribute{
+			&engine.Attribute{
 				FilterIDs: []string{"*string:FL1:In1"},
 				Path:      utils.MetaReq + utils.NestingSep + "FL1",
 				Type:      utils.MetaVariable,

@@ -21,25 +21,31 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestCdrsCoverage for cover testing
 func TestCdrsCoverage(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
+	chS := engine.NewCacheS(cfg, nil, nil)
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	cfg.ChargerSCfg().Enabled = true
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	cdrsRPC := make(chan birpc.ClientConnector, 1)
-	cdrS := NewCDRServer(cfg, db, filterSChan, server,
+	cfg.StorDbCfg().Type = utils.Internal
+	stordb := NewStorDBService(cfg, srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	cdrsRPC := make(chan rpcclient.ClientConnector, 1)
+	cdrS := NewCDRServer(cfg, db, stordb, filterSChan, server,
 		cdrsRPC, nil, anz, srvDep)
 	if cdrS.IsRunning() {
 		t.Errorf("Expected service to be down")
@@ -49,16 +55,17 @@ func TestCdrsCoverage(t *testing.T) {
 		RWMutex:     sync.RWMutex{},
 		cfg:         cfg,
 		dm:          db,
+		storDB:      stordb,
 		filterSChan: filterSChan,
 		server:      server,
-		connChan:    make(chan birpc.ClientConnector, 1),
+		connChan:    make(chan rpcclient.ClientConnector, 1),
 		connMgr:     nil,
 		stopChan:    make(chan struct{}, 1),
 		anz:         anz,
 		srvDep:      srvDep,
 		cdrS:        &engine.CDRServer{},
 	}
-	cdrS2.connChan <- &testMockClients{}
+	cdrS2.connChan <- chS
 	cdrS2.stopChan <- struct{}{}
 	if !cdrS2.IsRunning() {
 		t.Errorf("Expected service to be running")
@@ -66,7 +73,7 @@ func TestCdrsCoverage(t *testing.T) {
 
 	serviceName := cdrS2.ServiceName()
 	if serviceName != utils.CDRServer {
-		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.AdminS, serviceName)
+		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.APIerSv1, serviceName)
 	}
 	shouldRun := cdrS.ShouldRun()
 	if shouldRun != false {

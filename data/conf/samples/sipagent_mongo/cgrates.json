@@ -14,27 +14,40 @@
 
 "data_db": {								// database used to store runtime data (eg: accounts, cdr stats)
 	"db_type": "*mongo",					// stor database type to use: <mysql|postgres>
-	"db_port": 27017, 						// the port to reach the datadb
+	"db_port": 27017, 						// the port to reach the stordb
 	"db_name": "10",
 },
 
-"rates": {
-	"enabled": true,
+"stor_db": {
+	"db_type": "*mongo",					// stor database type to use: <mysql|postgres>
+	"db_port": 27017, 						// the port to reach the stordb
+	"db_name": "cgrates",
 },
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["*internal"],
+},
+
 
 "sessions": {
 	"enabled": true,
 	"attributes_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 	"routes_conns": ["*localhost"],
 },
 
 
+"rals": {
+	"enabled": true,
+},
+
+
 "cdrs": {
 	"enabled": true,
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
@@ -52,7 +65,7 @@
 
 "routes": {
 	"enabled": true,
-	"rates_conns": ["*localhost"],
+	"rals_conns": ["*localhost"],
 },
 
 
@@ -61,8 +74,9 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 "templates": {

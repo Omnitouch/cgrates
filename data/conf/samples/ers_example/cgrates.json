@@ -15,7 +15,18 @@
 	"http": ":2080",
 },
 
-"rates": {
+
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
+	"enabled": true,
+},
+
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -39,14 +50,14 @@
 "cdrs": {
 	"enabled": true,
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
 "sessions": {
 	"enabled": true,
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"resources_conns": ["*internal"],
 	"attributes_conns": ["*internal"],
@@ -60,8 +71,8 @@
 		{
 			"id": "file_reader1",
 			"run_delay": "-1",
-			"type": "*fileCSV",
-			"flags": ["*dryRun"],
+			"type": "*file_csv",
+			"flags": ["*dryrun"],
 			"source_path": "/tmp/ers/in",
 			"processed_path": "/tmp/ers/out",
 			"fields":[							// import content_fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value							
@@ -82,7 +93,8 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 }

@@ -23,16 +23,15 @@ package general_tests
 
 import (
 	"flag"
+	"net/rpc"
 	"os/exec"
 	"path"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 )
 
 var (
@@ -40,7 +39,7 @@ var (
 	redisTLSServer    *exec.Cmd
 	redisTLSEngineCfg = path.Join(*dataDir, "conf", "samples", "redisTLS")
 	redisTLSCfg       *config.CGRConfig
-	redisTLSRPC       *birpc.Client
+	redisTLSRPC       *rpc.Client
 
 	sTestsRedisTLS = []func(t *testing.T){
 		testRedisTLSStartServer,
@@ -78,14 +77,14 @@ func testRedisTLSStartServer(t *testing.T) {
 
 func testRedisTLSInitConfig(t *testing.T) {
 	var err error
-	redisTLSCfg, err = config.NewCGRConfigFromPath(context.Background(), redisTLSEngineCfg)
+	redisTLSCfg, err = config.NewCGRConfigFromPath(redisTLSEngineCfg)
 	if err != nil {
 		t.Error(err)
 	}
 }
 
 func testRedisTLSFlushDb(t *testing.T) {
-	if err := engine.InitDataDB(redisTLSCfg); err != nil {
+	if err := engine.InitDataDb(redisTLSCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -108,7 +107,7 @@ func testRedisTLSRPCCon(t *testing.T) {
 func testRedisTLSSetGetAttribute(t *testing.T) {
 	// status command to check if the engine starts
 	var rply map[string]interface{}
-	if err := redisTLSRPC.Call(context.Background(), utils.CoreSv1Status, &utils.TenantWithAPIOpts{}, &rply); err != nil {
+	if err := redisTLSRPC.Call(utils.CoreSv1Status, &utils.TenantWithAPIOpts{}, &rply); err != nil {
 		t.Error(err)
 	}
 }

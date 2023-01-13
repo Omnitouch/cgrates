@@ -19,20 +19,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ers
 
 import (
-	"crypto/tls"
-	"crypto/x509"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 
 	kafka "github.com/segmentio/kafka-go"
 )
@@ -40,10 +37,9 @@ import (
 // NewKafkaER return a new kafka event reader
 func NewKafkaER(cfg *config.CGRConfig, cfgIdx int,
 	rdrEvents, partialEvents chan *erEvent, rdrErr chan error,
-	fltrS *engine.FilterS, rdrExit chan struct{}, connMgr *engine.ConnManager) (er EventReader, err error) {
+	fltrS *engine.FilterS, rdrExit chan struct{}) (er EventReader, err error) {
 
 	rdr := &KafkaER{
-		connMgr:       connMgr,
 		cgrCfg:        cfg,
 		cfgIdx:        cfgIdx,
 		fltrS:         fltrS,
@@ -69,18 +65,14 @@ func NewKafkaER(cfg *config.CGRConfig, cfgIdx int,
 // KafkaER implements EventReader interface for kafka message
 type KafkaER struct {
 	// sync.RWMutex
-	cgrCfg  *config.CGRConfig
-	cfgIdx  int // index of config instance within ERsCfg.Readers
-	fltrS   *engine.FilterS
-	connMgr *engine.ConnManager
+	cgrCfg *config.CGRConfig
+	cfgIdx int // index of config instance within ERsCfg.Readers
+	fltrS  *engine.FilterS
 
-	dialURL       string
-	topic         string
-	groupID       string
-	maxWait       time.Duration
-	TLS           bool   // if true, it will attempt to authentica the server it connects to
-	caPath        string // path to CA pem file
-	skipTLSVerify bool   // if true, it skips certificate validation
+	dialURL string
+	topic   string
+	groupID string
+	maxWait time.Duration
 
 	rdrEvents     chan *erEvent // channel to dispatch the events created to
 	partialEvents chan *erEvent // channel to dispatch the partial events created to
@@ -98,57 +90,26 @@ func (rdr *KafkaER) Config() *config.EventReaderCfg {
 
 // Serve will start the gorutines needed to watch the kafka topic
 func (rdr *KafkaER) Serve() (err error) {
-	readerCfg := kafka.ReaderConfig{
+	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{rdr.dialURL},
 		GroupID: rdr.groupID,
 		Topic:   rdr.topic,
 		MaxWait: rdr.maxWait,
-	}
-	if rdr.TLS {
-		var rootCAs *x509.CertPool
-		if rootCAs, err = x509.SystemCertPool(); err != nil {
-			return
-		}
-		if rootCAs == nil {
-			rootCAs = x509.NewCertPool()
-		}
-		if rdr.caPath != "" {
-			var ca []byte
-			if ca, err = os.ReadFile(rdr.caPath); err != nil {
-				return
-			}
-			if !rootCAs.AppendCertsFromPEM(ca) {
-				return
-			}
-		}
-		readerCfg.Dialer = &kafka.Dialer{
-			Timeout:   10 * time.Second,
-			DualStack: true,
-			TLS: &tls.Config{
-				RootCAs:            rootCAs,
-				InsecureSkipVerify: rdr.skipTLSVerify,
-			},
-		}
-	}
-
-	r := kafka.NewReader(readerCfg)
+	})
 
 	if rdr.Config().RunDelay == time.Duration(0) { // 0 disables the automatic read, maybe done per API
 		return
 	}
 
 	go func(r *kafka.Reader) { // use a secondary gorutine because the ReadMessage is blocking function
-		select {
-		case <-rdr.rdrExit:
-			utils.Logger.Info(
-				fmt.Sprintf("<%s> stop monitoring kafka path <%s>",
-					utils.ERs, rdr.dialURL))
-			if rdr.poster != nil {
-				rdr.poster.Close()
-			}
-			r.Close() // already locked in library
-			return
+		<-rdr.rdrExit
+		utils.Logger.Info(
+			fmt.Sprintf("<%s> stop monitoring kafka path <%s>",
+				utils.ERs, rdr.dialURL))
+		if rdr.poster != nil {
+			rdr.poster.Close()
 		}
+		r.Close() // already locked in library
 	}(r)
 	go rdr.readLoop(r) // read until the connection is closed
 	return
@@ -177,8 +138,7 @@ func (rdr *KafkaER) readLoop(r *kafka.Reader) {
 						utils.ERs, string(msg.Key), err.Error()))
 			}
 			if rdr.poster != nil { // post it
-				if err := ees.ExportWithAttempts(context.Background(), rdr.poster, msg.Value, string(msg.Key),
-					rdr.connMgr, rdr.cgrCfg.GeneralCfg().DefaultTenant); err != nil {
+				if err := ees.ExportWithAttempts(rdr.poster, msg.Value, string(msg.Key)); err != nil {
 					utils.Logger.Warning(
 						fmt.Sprintf("<%s> writing message %s error: %s",
 							utils.ERs, string(msg.Key), err.Error()))
@@ -205,7 +165,7 @@ func (rdr *KafkaER) processMessage(msg []byte) (err error) {
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
 	var pass bool
-	if pass, err = rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err = rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
 		return
 	}
@@ -237,15 +197,6 @@ func (rdr *KafkaER) setOpts(opts *config.EventReaderOpts) (err error) {
 	if opts.KafkaMaxWait != nil {
 		rdr.maxWait = *opts.KafkaMaxWait
 	}
-	if opts.KafkaTLS != nil && *opts.KafkaTLS {
-		rdr.TLS = true
-	}
-	if opts.KafkaCAPath != nil {
-		rdr.caPath = *opts.KafkaCAPath
-	}
-	if opts.KafkaSkipTLSVerify != nil && *opts.KafkaSkipTLSVerify {
-		rdr.skipTLSVerify = true
-	}
 	return
 }
 
@@ -258,9 +209,10 @@ func (rdr *KafkaER) createPoster() {
 		processedOpt = new(config.EventExporterOpts)
 	}
 	rdr.poster = ees.NewKafkaEE(&config.EventExporterCfg{
-		ID:         rdr.Config().ID,
-		ExportPath: utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
-		Attempts:   rdr.cgrCfg.EEsCfg().GetDefaultExporter().Attempts,
-		Opts:       processedOpt,
+		ID:             rdr.Config().ID,
+		ExportPath:     utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
+		Attempts:       rdr.cgrCfg.GeneralCfg().PosterAttempts,
+		Opts:           processedOpt,
+		FailedPostsDir: rdr.cgrCfg.GeneralCfg().FailedPostsDir,
 	}, nil)
 }

@@ -43,6 +43,14 @@ func TestNewDynamicWeightsFromString(t *testing.T) {
 	} else if !reflect.DeepEqual(eDws, dws) {
 		t.Errorf("expecting: %+v, received: %+v", ToJSON(eDws), ToJSON(dws))
 	}
+
+	///
+	dwsStr = "fltr1&fltr2;20;30;fltr3;30;fltr4&fltr5;50"
+	expected := "invalid DynamicWeight format for string <fltr1&fltr2;20;30;fltr3;30;fltr4&fltr5;50>"
+	if _, err := NewDynamicWeightsFromString(dwsStr, ";", "&"); err == nil || err.Error() != expected {
+		t.Errorf("expecting: %+v, received: %+v", expected, err)
+	}
+
 	eDws = DynamicWeights{
 		{
 			FilterIDs: []string{"fltr1", "fltr2"},
@@ -86,32 +94,9 @@ func TestNewDynamicWeightsFromString(t *testing.T) {
 	}
 
 	dwsStr = "fltr1&fltr2;not_a_float64"
-	expected := "invalid Weight <not_a_float64> in string: <fltr1&fltr2;not_a_float64>"
+	expected = "invalid Weight <not_a_float64> in string: <fltr1&fltr2;not_a_float64>"
 	if _, err := NewDynamicWeightsFromString(dwsStr, ";", "&"); err == nil || err.Error() != expected {
 		t.Errorf("expecting: %+v, received: %+v", expected, err)
-	}
-
-	exp := DynamicWeights{{}}
-	if rcv, err := NewDynamicWeightsFromString("", "", ""); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected %v, Received %v", ToJSON(exp), ToJSON(rcv))
-	}
-
-	exps := DynamicWeights{
-		{
-			FilterIDs: nil,
-			Weight:    5,
-		},
-	}
-
-	expErr := "invalid DynamicWeight format for string <;5;>"
-	if rcv, err := NewDynamicWeightsFromString(";5", ";", "&"); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(exps, rcv) {
-		t.Errorf("expecting: %+v, received: %+v", ToJSON(exps), ToJSON(rcv))
-	} else if _, err := NewDynamicWeightsFromString(";5;", ";", "&"); err == nil || err.Error() != expErr {
-		t.Errorf("Expected <%+v> Received <%+v>", expErr, err)
 	}
 }
 
@@ -147,26 +132,5 @@ func TestCloneDynamicWeights(t *testing.T) {
 	}
 	if rcv := dynWeigh.Clone(); !reflect.DeepEqual(dynWeigh, rcv) {
 		t.Errorf("Expected %+v, received %+v", dynWeigh, rcv)
-	}
-}
-
-func TestDynamicWeightEquals(t *testing.T) {
-	//Test the case where one of the fields is nil
-	dW := &DynamicWeight{
-		FilterIDs: nil,
-		Weight:    10,
-	}
-	dnWg := &DynamicWeight{
-		FilterIDs: []string{"fltr1", "fltr2"},
-		Weight:    10,
-	}
-	if rcv := dW.Equals(dnWg); rcv {
-		t.Error("FilterIDs should not match")
-	}
-
-	//Test the case where filters don't match
-	dW.FilterIDs = []string{"fltr1", "fltr3"}
-	if rcv := dW.Equals(dnWg); rcv {
-		t.Error("FilterIDs should not match")
 	}
 }

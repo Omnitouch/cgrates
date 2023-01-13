@@ -1,6 +1,3 @@
-//go:build integration
-// +build integration
-
 /*
 Real-time Online/Offline Charging System (OCS) for Telecom & ISP environments
 Copyright (C) ITsysCOM GmbH
@@ -32,6 +29,7 @@ import (
 
 var (
 	tests = []func(t *testing.T){
+		testLongExecTimeDetector,
 		testUnzip,
 		testUnzipADirectory,
 		testUnzipOpenFileError,
@@ -41,6 +39,12 @@ var (
 func TestCoreUtilsIT(t *testing.T) {
 	for _, tests := range tests {
 		t.Run("Core_utils", tests)
+	}
+}
+
+func testLongExecTimeDetector(t *testing.T) {
+	if rcv := LongExecTimeDetector("RandomMessage", -1); cap(rcv) != 1 {
+		t.Errorf("Expected %+v, received %+v", 1, cap(rcv))
 	}
 }
 

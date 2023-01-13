@@ -21,7 +21,7 @@ package agents
 import (
 	"bytes"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/radigo"
 )
 

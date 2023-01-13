@@ -20,7 +20,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 package ers
 
-/*
 import (
 	"fmt"
 	"net/rpc"
@@ -30,11 +29,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 )
 
 var (
@@ -79,16 +77,21 @@ func TestXMLReadFile(t *testing.T) {
 func testXMLITInitConfig(t *testing.T) {
 	var err error
 	xmlCfgPath = path.Join(*dataDir, "conf", "samples", xmlCfgDIR)
-	if xmlCfg, err = config.NewCGRConfigFromPath(context.Background(), xmlCfgPath); err != nil {
+	if xmlCfg, err = config.NewCGRConfigFromPath(xmlCfgPath); err != nil {
 		t.Fatal("Got config error: ", err.Error())
 	}
 }
 
-
+// InitDb so we can rely on count
+func testXMLITInitCdrDb(t *testing.T) {
+	if err := engine.InitStorDb(xmlCfg); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Remove data in both rating and accounting db
 func testXMLITResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(xmlCfg); err != nil {
+	if err := engine.InitDataDb(xmlCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -382,6 +385,7 @@ func TestFileXMLProcessEvent(t *testing.T) {
 	select {
 	case data := <-eR.rdrEvents:
 		expEvent.ID = data.cgrEvent.ID
+		expEvent.Time = data.cgrEvent.Time
 		if !reflect.DeepEqual(data.cgrEvent, expEvent) {
 			t.Errorf("Expected %v but received %v", utils.ToJSON(expEvent), utils.ToJSON(data.cgrEvent))
 		}
@@ -418,7 +422,7 @@ func TestFileXMLProcessEventError1(t *testing.T) {
 func TestFileXMLProcessEVentError2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.ERsCfg().Readers[0].Fields = []*config.FCTemplate{}
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	filePath := "/tmp/TestFileXMLProcessEvent/"
@@ -692,4 +696,3 @@ func TestFileXMLExit(t *testing.T) {
 	}
 	eR.rdrExit <- struct{}{}
 }
-*/

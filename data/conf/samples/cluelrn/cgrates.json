@@ -23,6 +23,21 @@
 },
 
 
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
+	"enabled": true,
+},
+
+
+"schedulers": {
+	"enabled": true,
+},
+
+
 "cdrs": {
 	"enabled": true,
 },
@@ -30,11 +45,7 @@
 
 "attributes": {
 	"enabled": true,
-	"opts":{
-		"*processRuns": {
-			"": 5,
-		},                     
-	},
+	"process_runs": 5,						// number of run loops when processing event
 },
 
 
@@ -44,8 +55,9 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 }

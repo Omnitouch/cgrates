@@ -18,12 +18,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import "github.com/Omnitouch/cgrates/utils"
+import "github.com/cgrates/cgrates/utils"
 
 func init() {
 	c := &LoadTpFromFolder{
-		name: "load_tp_from_folder",
-		// rpcMethod: utils.APIerSv1LoadTariffPlanFromFolder,
+		name:      "load_tp_from_folder",
+		rpcMethod: utils.APIerSv1LoadTariffPlanFromFolder,
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}

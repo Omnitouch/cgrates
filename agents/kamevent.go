@@ -20,11 +20,13 @@ package agents
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 )
 
 const (
@@ -153,14 +155,47 @@ func (kev KamEvent) AsMapStringInterface() (mp map[string]interface{}) {
 }
 
 // AsCGREvent converts KamEvent into CGREvent
-func (kev KamEvent) AsCGREvent(timezone string) *utils.CGREvent {
-	return &utils.CGREvent{
+func (kev KamEvent) AsCGREvent(timezone string) (cgrEv *utils.CGREvent, err error) {
+	var sTime time.Time
+	switch kev[EVENT] {
+	case CGR_AUTH_REQUEST:
+		sTimePrv, err := utils.ParseTimeDetectLayout(kev[utils.SetupTime], timezone)
+		if err != nil {
+			return nil, err
+		}
+		sTime = sTimePrv
+	case CGR_CALL_START:
+		sTimePrv, err := utils.ParseTimeDetectLayout(kev[utils.AnswerTime], timezone)
+		if err != nil {
+			return nil, err
+		}
+		sTime = sTimePrv
+	case CGR_CALL_END:
+		sTimePrv, err := utils.ParseTimeDetectLayout(kev[utils.AnswerTime], timezone)
+		if err != nil {
+			return nil, err
+		}
+		sTime = sTimePrv
+	case CGR_PROCESS_MESSAGE:
+		sTimePrv, err := utils.ParseTimeDetectLayout(kev[utils.AnswerTime], timezone)
+		if err != nil {
+			return nil, err
+		}
+		sTime = sTimePrv
+	case CGR_PROCESS_CDR:
+		sTime = time.Now()
+	default: // no/unsupported event
+		return
+	}
+	cgrEv = &utils.CGREvent{
 		Tenant: utils.FirstNonEmpty(kev[utils.Tenant],
 			config.CgrConfig().GeneralCfg().DefaultTenant),
 		ID:      utils.UUIDSha1Prefix(),
+		Time:    &sTime,
 		Event:   kev.AsMapStringInterface(),
 		APIOpts: kev.GetOptions(),
 	}
+	return cgrEv, nil
 }
 
 // String is used for pretty printing event in logs
@@ -168,8 +203,28 @@ func (kev KamEvent) String() string {
 	return utils.ToJSON(kev)
 }
 
+// V1AuthorizeArgs returns the arguments used in SessionSv1.AuthorizeEvent
+func (kev KamEvent) V1AuthorizeArgs() (args *sessions.V1AuthorizeArgs) {
+	cgrEv, err := kev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	args = &sessions.V1AuthorizeArgs{
+		CGREvent: cgrEv,
+	}
+	subsystems, has := kev[utils.CGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags variable is not set, using defaults",
+			utils.KamailioAgent))
+		args.GetMaxUsage = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
+}
+
 // AsKamAuthReply builds up a Kamailio AuthReply based on arguments and reply from SessionS
-func (kev KamEvent) AsKamAuthReply(authArgs *utils.CGREvent,
+func (kev KamEvent) AsKamAuthReply(authArgs *sessions.V1AuthorizeArgs,
 	authReply *sessions.V1AuthorizeReply, rplyErr error) (kar *KamReply, err error) {
 	evName := CGR_AUTH_REPLY
 	if kamRouReply, has := kev[KamReplyRoute]; has {
@@ -183,35 +238,84 @@ func (kev KamEvent) AsKamAuthReply(authArgs *utils.CGREvent,
 		kar.Error = rplyErr.Error()
 		return
 	}
-	if authReply.Attributes != nil {
+	if authArgs.GetAttributes && authReply.Attributes != nil {
 		kar.Attributes = authReply.Attributes.Digest()
 	}
-	if authReply.ResourceAllocation != nil {
+	if authArgs.AuthorizeResources && authReply.ResourceAllocation != nil {
 		kar.ResourceAllocation = *authReply.ResourceAllocation
 	}
-	if utils.OptAsBool(authArgs.APIOpts, utils.MetaAccounts) {
+	if authArgs.GetMaxUsage {
 		if authReply.MaxUsage != nil {
-			maxDur, _ := authReply.MaxUsage.Duration()
-			kar.MaxUsage = maxDur.Seconds()
+			kar.MaxUsage = int(utils.Round(authReply.MaxUsage.Seconds(), 0, utils.MetaRoundingMiddle))
 		} else {
 			kar.MaxUsage = 0
 		}
 	}
-	if authReply.RouteProfiles != nil {
+	if authArgs.GetRoutes && authReply.RouteProfiles != nil {
 		kar.Routes = authReply.RouteProfiles.Digest()
 	}
 
-	if authReply.ThresholdIDs != nil {
+	if authArgs.ProcessThresholds && authReply.ThresholdIDs != nil {
 		kar.Thresholds = strings.Join(*authReply.ThresholdIDs, utils.FieldsSep)
 	}
-	if authReply.StatQueueIDs != nil {
+	if authArgs.ProcessStats && authReply.StatQueueIDs != nil {
 		kar.StatQueues = strings.Join(*authReply.StatQueueIDs, utils.FieldsSep)
 	}
 	return
 }
 
+// V1InitSessionArgs returns the arguments used in SessionSv1.InitSession
+func (kev KamEvent) V1InitSessionArgs() (args *sessions.V1InitSessionArgs) {
+	cgrEv, err := kev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	args = &sessions.V1InitSessionArgs{ // defaults
+
+		CGREvent: cgrEv,
+	}
+	subsystems, has := kev[utils.CGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags is not set, using defaults",
+			utils.FreeSWITCHAgent))
+		args.InitSession = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
+}
+
+// V1ProcessMessageArgs returns the arguments used in SessionSv1.ProcessMessage
+func (kev KamEvent) V1ProcessMessageArgs() (args *sessions.V1ProcessMessageArgs) {
+	cgrEv, err := kev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	args = &sessions.V1ProcessMessageArgs{ // defaults
+
+		CGREvent: cgrEv,
+	}
+	subsystems, has := kev[utils.CGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags is not set, using defaults",
+			utils.FreeSWITCHAgent))
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
+}
+
+// V1ProcessCDRArgs returns the arguments used in SessionSv1.ProcessCDR
+func (kev KamEvent) V1ProcessCDRArgs() (args *utils.CGREvent) {
+	var err error
+	if args, err = kev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone); err != nil {
+		return
+	}
+	return
+}
+
 // AsKamProcessMessageReply builds up a Kamailio ProcessEvent based on arguments and reply from SessionS
-func (kev KamEvent) AsKamProcessMessageReply(procEvArgs *utils.CGREvent,
+func (kev KamEvent) AsKamProcessMessageReply(procEvArgs *sessions.V1ProcessMessageArgs,
 	procEvReply *sessions.V1ProcessMessageReply, rplyErr error) (kar *KamReply, err error) {
 	evName := CGR_PROCESS_MESSAGE
 	if kamRouReply, has := kev[KamReplyRoute]; has {
@@ -225,22 +329,23 @@ func (kev KamEvent) AsKamProcessMessageReply(procEvArgs *utils.CGREvent,
 		kar.Error = rplyErr.Error()
 		return
 	}
-	if utils.OptAsBool(procEvArgs.APIOpts, utils.MetaAttributes) && procEvReply.Attributes != nil {
+	if procEvArgs.GetAttributes && procEvReply.Attributes != nil {
 		kar.Attributes = procEvReply.Attributes.Digest()
 	}
-	if utils.OptAsBool(procEvArgs.APIOpts, utils.OptsSesResourceSAllocate) {
+	if procEvArgs.AllocateResources {
 		kar.ResourceAllocation = *procEvReply.ResourceAllocation
 	}
-	if utils.OptAsBool(procEvArgs.APIOpts, utils.OptsSesMessage) {
-		kar.MaxUsage = procEvReply.MaxUsage.Seconds()
+	if procEvArgs.Debit {
+		kar.MaxUsage = int(utils.Round(procEvReply.MaxUsage.Seconds(), 0, utils.MetaRoundingMiddle))
 	}
-	if utils.OptAsBool(procEvArgs.APIOpts, utils.MetaRoutes) && procEvReply.RouteProfiles != nil {
+	if procEvArgs.GetRoutes && procEvReply.RouteProfiles != nil {
 		kar.Routes = procEvReply.RouteProfiles.Digest()
 	}
-	if utils.OptAsBool(procEvArgs.APIOpts, utils.MetaThresholds) {
+
+	if procEvArgs.ProcessThresholds {
 		kar.Thresholds = strings.Join(*procEvReply.ThresholdIDs, utils.FieldsSep)
 	}
-	if utils.OptAsBool(procEvArgs.APIOpts, utils.MetaStats) {
+	if procEvArgs.ProcessStats {
 		kar.StatQueues = strings.Join(*procEvReply.StatQueueIDs, utils.FieldsSep)
 	}
 	return
@@ -276,6 +381,28 @@ func (kev KamEvent) AsKamProcessMessageEmptyReply() (kar *KamReply) {
 	return
 }
 
+// V1TerminateSessionArgs returns the arguments used in SMGv1.TerminateSession
+func (kev KamEvent) V1TerminateSessionArgs() (args *sessions.V1TerminateSessionArgs) {
+	cgrEv, err := kev.AsCGREvent(utils.FirstNonEmpty(
+		config.CgrConfig().KamAgentCfg().Timezone,
+		config.CgrConfig().GeneralCfg().DefaultTimezone))
+	if err != nil {
+		return
+	}
+	args = &sessions.V1TerminateSessionArgs{ // defaults
+		TerminateSession: true,
+		CGREvent:         cgrEv,
+	}
+	subsystems, has := kev[utils.CGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags is not set, using defaults",
+			utils.FreeSWITCHAgent))
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
+}
+
 // KamReply will be used to send back to kamailio from
 // Authrization,ProcessEvent and ProcessEvent empty (pingPong)
 type KamReply struct {
@@ -284,8 +411,8 @@ type KamReply struct {
 	TransactionLabel   string // Original transaction label
 	Attributes         string
 	ResourceAllocation string
-	MaxUsage           float64 // Maximum session time in case of success, -1 for unlimited
-	Routes             string  // List of routes, comma separated
+	MaxUsage           int    // Maximum session time in case of success, -1 for unlimited
+	Routes             string // List of routes, comma separated
 	Thresholds         string
 	StatQueues         string
 	Error              string // Reply in case of error

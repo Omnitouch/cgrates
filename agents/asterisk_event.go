@@ -19,10 +19,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package agents
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewSMAsteriskEvent(ariEv map[string]interface{}, asteriskIP, asteriskAlias string) *SMAsteriskEvent {
@@ -267,12 +270,67 @@ func (smaEv *SMAsteriskEvent) AsMapStringInterface() (mp map[string]interface{})
 }
 
 // AsCGREvent converts AsteriskEvent into CGREvent
-func (smaEv *SMAsteriskEvent) AsCGREvent() *utils.CGREvent {
-	return &utils.CGREvent{
+func (smaEv *SMAsteriskEvent) AsCGREvent(timezone string) (cgrEv *utils.CGREvent, err error) {
+	var setupTime time.Time
+	if setupTime, err = utils.ParseTimeDetectLayout(
+		smaEv.Timestamp(), timezone); err != nil {
+		return
+	}
+	cgrEv = &utils.CGREvent{
 		Tenant: utils.FirstNonEmpty(smaEv.Tenant(),
 			config.CgrConfig().GeneralCfg().DefaultTenant),
 		ID:      utils.UUIDSha1Prefix(),
+		Time:    &setupTime,
 		Event:   smaEv.AsMapStringInterface(),
 		APIOpts: smaEv.opts,
 	}
+	return
+}
+
+func (smaEv *SMAsteriskEvent) V1AuthorizeArgs() (args *sessions.V1AuthorizeArgs) {
+	cgrEv, err := smaEv.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	args = &sessions.V1AuthorizeArgs{
+		CGREvent: cgrEv,
+	}
+	if smaEv.Subsystems() == utils.EmptyString {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags variable is not set, using defaults",
+			utils.AsteriskAgent))
+		args.GetMaxUsage = true
+		return
+	}
+	args.ParseFlags(smaEv.Subsystems(), utils.PlusChar)
+	return
+}
+
+func (smaEv *SMAsteriskEvent) V1InitSessionArgs(cgrEvDisp utils.CGREvent) (args *sessions.V1InitSessionArgs) {
+	args = &sessions.V1InitSessionArgs{ // defaults
+		CGREvent: &cgrEvDisp,
+	}
+	subsystems, err := cgrEvDisp.FieldAsString(utils.CGRFlags)
+	if err != nil {
+		utils.Logger.Warning(fmt.Sprintf("<%s> event: %s don't have %s variable",
+			utils.AsteriskAgent, utils.ToJSON(cgrEvDisp), utils.CGRFlags))
+		args.InitSession = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.PlusChar)
+	return
+}
+
+func (smaEv *SMAsteriskEvent) V1TerminateSessionArgs(cgrEvDisp utils.CGREvent) (args *sessions.V1TerminateSessionArgs) {
+	args = &sessions.V1TerminateSessionArgs{ // defaults
+		CGREvent: &cgrEvDisp,
+	}
+	subsystems, err := cgrEvDisp.FieldAsString(utils.CGRFlags)
+	if err != nil {
+		utils.Logger.Warning(fmt.Sprintf("<%s> event: %s don't have %s variable",
+			utils.AsteriskAgent, utils.ToJSON(cgrEvDisp), utils.CGRFlags))
+		args.TerminateSession = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.PlusChar)
+	return
 }

@@ -21,11 +21,10 @@ package agents
 import (
 	"fmt"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/radigo"
 )
 
@@ -164,7 +163,7 @@ func (ra *RadiusAgent) handleAcct(req *radigo.Packet) (rpl *radigo.Packet, err e
 // processRequest represents one processor processing the request
 func (ra *RadiusAgent) processRequest(req *radigo.Packet, reqProcessor *config.RequestProcessor,
 	agReq *AgentRequest, rpl *radigo.Packet) (processed bool, err error) {
-	if pass, err := ra.filterS.Pass(context.TODO(), agReq.Tenant,
+	if pass, err := ra.filterS.Pass(agReq.Tenant,
 		reqProcessor.Filters, agReq); err != nil || !pass {
 		return pass, err
 	}
@@ -183,7 +182,16 @@ func (ra *RadiusAgent) processRequest(req *radigo.Packet, reqProcessor *config.R
 			break
 		}
 	}
-
+	var cgrArgs utils.Paginator
+	if reqType == utils.MetaAuthorize ||
+		reqType == utils.MetaMessage ||
+		reqType == utils.MetaEvent {
+		if cgrArgs, err = utils.GetRoutePaginatorFromOpts(cgrEv.APIOpts); err != nil {
+			utils.Logger.Warning(fmt.Sprintf("<%s> args extraction failed because <%s>",
+				utils.RadiusAgent, err.Error()))
+			err = nil // reset the error and continue the processing
+		}
+	}
 	if reqProcessor.Flags.Has(utils.MetaLog) {
 		utils.Logger.Info(
 			fmt.Sprintf("<%s> LOG, processorID: %s, radius message: %s",
@@ -198,50 +206,105 @@ func (ra *RadiusAgent) processRequest(req *radigo.Packet, reqProcessor *config.R
 			fmt.Sprintf("<%s> DRY_RUN, processorID: %s, CGREvent: %s",
 				utils.RadiusAgent, reqProcessor.ID, utils.ToJSON(cgrEv)))
 	case utils.MetaAuthorize:
+		authArgs := sessions.NewV1AuthorizeArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaRoutes),
+			reqProcessor.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			reqProcessor.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs, reqProcessor.Flags.Has(utils.MetaFD),
+			reqProcessor.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1AuthorizeReply)
-		err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1AuthorizeEvent,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.MetaAccounts))
+		err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1AuthorizeEvent,
+			authArgs, rply)
+		rply.SetMaxUsageNeeded(authArgs.GetMaxUsage)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaInitiate:
+		initArgs := sessions.NewV1InitSessionArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			cgrEv, reqProcessor.Flags.Has(utils.MetaFD))
 		rply := new(sessions.V1InitSessionReply)
-		err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1InitiateSession,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesInitiate))
+		err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1InitiateSession,
+			initArgs, rply)
+		rply.SetMaxUsageNeeded(initArgs.InitSession)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaUpdate:
+		updateArgs := sessions.NewV1UpdateSessionArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			cgrEv, reqProcessor.Flags.Has(utils.MetaFD))
 		rply := new(sessions.V1UpdateSessionReply)
-		err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1UpdateSession,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesUpdate))
+		err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1UpdateSession,
+			updateArgs, rply)
+		rply.SetMaxUsageNeeded(updateArgs.UpdateSession)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaTerminate:
+		terminateArgs := sessions.NewV1TerminateSessionArgs(
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			cgrEv, reqProcessor.Flags.Has(utils.MetaFD))
 		var rply string
-		err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1TerminateSession,
-			cgrEv, &rply)
+		err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1TerminateSession,
+			terminateArgs, &rply)
 		agReq.setCGRReply(nil, err)
 	case utils.MetaMessage:
+		evArgs := sessions.NewV1ProcessMessageArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaRoutes),
+			reqProcessor.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			reqProcessor.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs, reqProcessor.Flags.Has(utils.MetaFD),
+			reqProcessor.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1ProcessMessageReply)
-		err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1ProcessMessage, cgrEv, rply)
-		// if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
-		// cgrEv.Event[utils.Usage] = 0 // avoid further debits
-		// } else
-		messageS := utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesMessage)
-		if messageS {
+		err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1ProcessMessage, evArgs, rply)
+		if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
+			cgrEv.Event[utils.Usage] = 0 // avoid further debits
+		} else if evArgs.Debit {
 			cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
 		}
-		rply.SetMaxUsageNeeded(messageS)
+		rply.SetMaxUsageNeeded(evArgs.Debit)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaEvent:
+		evArgs := &sessions.V1ProcessEventArgs{
+			Flags:     reqProcessor.Flags.SliceFlags(),
+			CGREvent:  cgrEv,
+			Paginator: cgrArgs,
+		}
 		rply := new(sessions.V1ProcessEventReply)
-		err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1ProcessEvent,
-			cgrEv, rply)
-		// if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
-		// cgrEv.Event[utils.Usage] = 0 // avoid further debits
-		// } else
-		// if needsMaxUsage(reqProcessor.Flags[utils.MetaRALs]) {
-		// cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
-		// }
+		err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1ProcessEvent,
+			evArgs, rply)
+		if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
+			cgrEv.Event[utils.Usage] = 0 // avoid further debits
+		} else if needsMaxUsage(reqProcessor.Flags[utils.MetaRALs]) {
+			cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
+		}
 		agReq.setCGRReply(rply, err)
 	case utils.MetaCDRs: // allow this method
 	case utils.MetaRadauth:
@@ -254,7 +317,7 @@ func (ra *RadiusAgent) processRequest(req *radigo.Packet, reqProcessor *config.R
 	// separate request so we can capture the Terminate/Event also here
 	if reqProcessor.Flags.GetBool(utils.MetaCDRs) {
 		var rplyCDRs string
-		if err = ra.connMgr.Call(context.TODO(), ra.cgrCfg.RadiusAgentCfg().SessionSConns, utils.SessionSv1ProcessCDR,
+		if err = ra.connMgr.Call(ra.cgrCfg.RadiusAgentCfg().SessionSConns, nil, utils.SessionSv1ProcessCDR,
 			cgrEv, &rplyCDRs); err != nil {
 			agReq.CGRReply.Map[utils.Error] = utils.NewLeafNode(err.Error())
 		}

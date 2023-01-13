@@ -22,11 +22,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestCoreSCoverage for cover testing
@@ -34,20 +34,21 @@ func TestCoreSCoverage(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	caps := engine.NewCaps(1, "test_caps")
 	server := cores.NewServer(nil)
-	internalCoreSChan := make(chan birpc.ClientConnector, 1)
+	internalCoreSChan := make(chan rpcclient.ClientConnector, 1)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	srv := NewCoreService(cfg, caps, server,
-		internalCoreSChan, anz, nil, utils.EmptyString, nil, nil, srvDep)
+		internalCoreSChan, anz, nil, "/tmp", nil, nil, nil, srvDep)
 	if srv == nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", utils.ToJSON(srv))
 	}
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
-	srv.cS = &cores.CoreS{}
+	srv.cS = &cores.CoreService{}
 	if !srv.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
@@ -59,11 +60,14 @@ func TestCoreSCoverage(t *testing.T) {
 	if !reflect.DeepEqual(shouldRun, true) {
 		t.Errorf("\nExpecting <true>,\n Received <%+v>", shouldRun)
 	}
+	getCoreS := srv.GetCoreS()
+	if getCoreS == nil {
+		t.Errorf("\nExpecting not <nil>,\n Received <%+v>", getCoreS)
+	}
 	//populates connChan with something in order to call the shutdown function
-	srv.connChan <- &testMockClients{}
+	chS := engine.NewCacheS(cfg, nil, nil)
+	srv.connChan <- chS
 	srv.stopChan = make(chan struct{})
-	// srv.csCh = make(chan *cores.CoreService, 1)
-	srv.csCh <- nil
 	getShut := srv.Shutdown()
 	if getShut != nil {
 		t.Errorf("\nExpecting not <nil>,\n Received <%+v>", getShut)

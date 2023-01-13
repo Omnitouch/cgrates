@@ -30,9 +30,9 @@ import (
 	"time"
 
 	amqpv1 "github.com/Azure/go-amqp"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -50,7 +50,7 @@ func TestAMQPERv1(t *testing.T) {
 	"readers": [
 		{
 			"id": "amqpv1",										// identifier of the EventReader profile
-			"type": "*amqpv1JSONMap",							// reader type <*fileCSV>
+			"type": "*amqpv1_json_map",							// reader type <*file_csv>
 			"run_delay":  "-1",									// sleep interval in seconds between consecutive runs, -1 to use automation via inotify or 0 to disable running all together
 			"concurrent_requests": 1024,						// maximum simultaneous requests/files to process, 0 for unlimited
 			"source_path": "amqps://RootManageSharedAccessKey:Je8l%2Bt9tyOgZbdA%2B5SmGIJEsEzhZ9VdIO7yRke5EYtM%3D@test0123456y.servicebus.windows.net",// read data from this path
@@ -62,7 +62,7 @@ func TestAMQPERv1(t *testing.T) {
 			"filters": [],										// limit parsing based on the filters
 			"flags": [],										// flags to influence the event processing
 			"fields":[									// import fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
-				{"tag": "OriginID", "type": "*composed", "value": "~*req.OriginID", "path": "*cgreq.OriginID"},
+				{"tag": "CGRID", "type": "*composed", "value": "~*req.CGRID", "path": "*cgreq.CGRID"},
 			],
 		},
 	],
@@ -74,13 +74,15 @@ func TestAMQPERv1(t *testing.T) {
 	if err := cfg.CheckConfigSanity(); err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 
 	rdrEvents = make(chan *erEvent, 1)
 	rdrErr = make(chan error, 1)
 	rdrExit = make(chan struct{}, 1)
 
 	if rdr, err = NewAMQPv1ER(cfg, 1, rdrEvents, make(chan *erEvent, 1),
-		rdrErr, new(engine.FilterS), rdrExit, nil); err != nil {
+		rdrErr, new(engine.FilterS), rdrExit); err != nil {
 		t.Fatal(err)
 	}
 	amqpv1Rdr := rdr.(*AMQPv1ER)
@@ -96,13 +98,13 @@ func TestAMQPERv1(t *testing.T) {
 	}
 	defer channel.Close(context.Background())
 
-	randomOriginID := utils.UUIDSha1Prefix()
+	randomCGRID := utils.UUIDSha1Prefix()
 	sndr, err := channel.NewSender(amqpv1.LinkTargetAddress(amqpv1Rdr.queueID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = sndr.Send(context.Background(),
-		amqpv1.NewMessage([]byte(fmt.Sprintf(`{"OriginID": "%s"}`, randomOriginID)))); err != nil {
+		amqpv1.NewMessage([]byte(fmt.Sprintf(`{"CGRID": "%s"}`, randomCGRID)))); err != nil {
 		t.Fatal(err)
 	}
 	if err = rdr.Serve(); err != nil {
@@ -118,8 +120,9 @@ func TestAMQPERv1(t *testing.T) {
 		expected := &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     ev.cgrEvent.ID,
+			Time:   ev.cgrEvent.Time,
 			Event: map[string]interface{}{
-				"OriginID": randomOriginID,
+				"CGRID": randomCGRID,
 			},
 		}
 		if !reflect.DeepEqual(ev.cgrEvent, expected) {
@@ -153,7 +156,7 @@ func TestAmqpv1NewAMQPv1ER(t *testing.T) {
 		},
 	}
 
-	result, err := NewAMQPv1ER(cfg, cfgIdx, nil, nil, nil, nil, nil, nil)
+	result, err := NewAMQPv1ER(cfg, cfgIdx, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -184,7 +187,7 @@ func TestAmqpv1NewAMQPv1ER2(t *testing.T) {
 		},
 	}
 
-	result, err := NewAMQPv1ER(cfg, cfgIdx, nil, nil, nil, nil, nil, nil)
+	result, err := NewAMQPv1ER(cfg, cfgIdx, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}

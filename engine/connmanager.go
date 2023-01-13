@@ -21,22 +21,24 @@ package engine
 import (
 	"fmt"
 	"strings"
+	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 	"github.com/cgrates/rpcclient"
 )
 
 // NewConnManager returns the Connection Manager
-func NewConnManager(cfg *config.CGRConfig) (cM *ConnManager) {
+func NewConnManager(cfg *config.CGRConfig, rpcInternal map[string]chan rpcclient.ClientConnector) (cM *ConnManager) {
 	cM = &ConnManager{
 		cfg:         cfg,
-		rpcInternal: make(map[string]chan context.ClientConnector),
-		dynIntCh:    make(RPCClientSet),
+		rpcInternal: rpcInternal,
 		connCache:   ltcache.NewCache(-1, 0, true, nil),
+		connLks:     make(map[string]*sync.Mutex),
+	}
+	for connID := range cfg.RPCConns() {
+		cM.connLks[connID] = new(sync.Mutex)
 	}
 	SetConnManager(cM)
 	return
@@ -45,28 +47,40 @@ func NewConnManager(cfg *config.CGRConfig) (cM *ConnManager) {
 // ConnManager handle the RPC connections
 type ConnManager struct {
 	cfg         *config.CGRConfig
-	rpcInternal map[string]chan birpc.ClientConnector
-	disp        map[string]chan birpc.ClientConnector
-	dispIntCh   RPCClientSet
-	dynIntCh    RPCClientSet
+	rpcInternal map[string]chan rpcclient.ClientConnector
 	connCache   *ltcache.Cache
+	connLks     map[string]*sync.Mutex // control connection initialization and caching
+}
+
+// lkConn will lock a connection if preconfigured
+func (cM *ConnManager) lkConn(connID string) {
+	if lk, hasConn := cM.connLks[connID]; hasConn {
+		lk.Lock()
+	}
+}
+
+// unlkConn will unlock a connection if preconfigured
+func (cM *ConnManager) unlkConn(connID string) {
+	if lk, hasConn := cM.connLks[connID]; hasConn {
+		lk.Unlock()
+	}
 }
 
 // getConn is used to retrieve a connection from cache
 // in case this doesn't exist create it and cache it
-func (cM *ConnManager) getConn(ctx *context.Context, connID string) (conn birpc.ClientConnector, err error) {
+func (cM *ConnManager) getConn(connID string, biRPCClient rpcclient.BiRPCConector) (conn rpcclient.ClientConnector, err error) {
 	//try to get the connection from cache
 	if x, ok := Cache.Get(utils.CacheRPCConnections, connID); ok {
 		if x == nil {
 			return nil, utils.ErrNotFound
 		}
-		return x.(birpc.ClientConnector), nil
+		return x.(rpcclient.ClientConnector), nil
 	}
 	// in case we don't find in cache create the connection and add this in cache
-	var intChan chan birpc.ClientConnector
+	var intChan chan rpcclient.ClientConnector
 	var isInternalRPC bool
 	var connCfg *config.RPCConn
-	if intChan, isInternalRPC = cM.getInternalConnChan(connID); isInternalRPC {
+	if intChan, isInternalRPC = cM.rpcInternal[connID]; isInternalRPC {
 		connCfg = cM.cfg.RPCConns()[rpcclient.InternalRPC]
 		if strings.HasPrefix(connID, rpcclient.BiRPCInternal) {
 			connCfg = cM.cfg.RPCConns()[rpcclient.BiRPCInternal]
@@ -75,21 +89,22 @@ func (cM *ConnManager) getConn(ctx *context.Context, connID string) (conn birpc.
 		connCfg = cM.cfg.RPCConns()[connID]
 		for _, rpcConn := range connCfg.Conns {
 			if rpcConn.Address == utils.MetaInternal {
-				intChan = cM.GetInternalChan()
+				intChan = IntRPC.GetInternalChanel()
 				break
 			}
 		}
 	}
-	if conn, err = cM.getConnWithConfig(ctx, connID, connCfg, intChan, isInternalRPC); err != nil {
+	if conn, err = cM.getConnWithConfig(connID, connCfg, biRPCClient, intChan, isInternalRPC); err != nil {
 		return
 	}
-	err = Cache.Set(context.TODO(), utils.CacheRPCConnections, connID, conn, nil,
+	err = Cache.Set(utils.CacheRPCConnections, connID, conn, nil,
 		true, utils.NonTransactional)
 	return
 }
 
-func (cM *ConnManager) getConnWithConfig(ctx *context.Context, connID string, connCfg *config.RPCConn, intChan chan birpc.ClientConnector,
-	isInternalRPC bool) (conn birpc.ClientConnector, err error) {
+func (cM *ConnManager) getConnWithConfig(connID string, connCfg *config.RPCConn,
+	biRPCClient rpcclient.BiRPCConector, intChan chan rpcclient.ClientConnector,
+	isInternalRPC bool) (conn rpcclient.ClientConnector, err error) {
 	if connCfg.Strategy == rpcclient.PoolParallel {
 		rpcConnCfg := connCfg.Conns[0] // for parallel we need only the first connection
 		codec := rpcclient.GOBrpc
@@ -110,31 +125,28 @@ func (cM *ConnManager) getConnWithConfig(ctx *context.Context, connID string, co
 			err = fmt.Errorf("Unsupported transport: <%s>", rpcConnCfg.Transport)
 			return
 		}
-		if conn, err = rpcclient.NewRPCParallelClientPool(ctx, utils.TCP, rpcConnCfg.Address, rpcConnCfg.TLS,
+		if conn, err = rpcclient.NewRPCParallelClientPool(utils.TCP, rpcConnCfg.Address, rpcConnCfg.TLS,
 			utils.FirstNonEmpty(rpcConnCfg.ClientKey, cM.cfg.TLSCfg().ClientKey), utils.FirstNonEmpty(rpcConnCfg.ClientCertificate, cM.cfg.TLSCfg().ClientCerificate),
 			utils.FirstNonEmpty(rpcConnCfg.CaCertificate, cM.cfg.TLSCfg().CaCertificate), utils.FirstIntNonEmpty(rpcConnCfg.ConnectAttempts, cM.cfg.GeneralCfg().ConnectAttempts),
-			utils.FirstIntNonEmpty(rpcConnCfg.Reconnects, cM.cfg.GeneralCfg().Reconnects), utils.FirstDurationNonEmpty(rpcConnCfg.MaxReconnectInterval, cM.cfg.GeneralCfg().MaxReconnectInterval),
-			utils.FibDuration, utils.FirstDurationNonEmpty(rpcConnCfg.ConnectTimeout, cM.cfg.GeneralCfg().ConnectTimeout), utils.FirstDurationNonEmpty(rpcConnCfg.ReplyTimeout, cM.cfg.GeneralCfg().ReplyTimeout),
-			codec, intChan, int64(cM.cfg.GeneralCfg().MaxParallelConns), false, ctx.Client); err != nil {
+			utils.FirstIntNonEmpty(rpcConnCfg.Reconnects, cM.cfg.GeneralCfg().Reconnects), utils.FirstDurationNonEmpty(rpcConnCfg.ConnectTimeout, cM.cfg.GeneralCfg().ConnectTimeout),
+			utils.FirstDurationNonEmpty(rpcConnCfg.ReplyTimeout, cM.cfg.GeneralCfg().ReplyTimeout), codec, intChan, int64(cM.cfg.GeneralCfg().MaxParallelConns), false, biRPCClient); err != nil {
 			return
 		}
 	} else {
-		if conn, err = NewRPCPool(ctx, connCfg.Strategy,
+		if conn, err = NewRPCPool(connCfg.Strategy,
 			cM.cfg.TLSCfg().ClientKey,
 			cM.cfg.TLSCfg().ClientCerificate, cM.cfg.TLSCfg().CaCertificate,
 			cM.cfg.GeneralCfg().ConnectAttempts, cM.cfg.GeneralCfg().Reconnects,
-			cM.cfg.GeneralCfg().MaxReconnectInterval, cM.cfg.GeneralCfg().ConnectTimeout,
-			utils.FirstDurationNonEmpty(connCfg.ReplyTimeout, cM.cfg.GeneralCfg().ReplyTimeout),
-			connCfg.Conns, intChan, false, ctx.Client,
-			connID, cM.connCache); err != nil {
+			cM.cfg.GeneralCfg().ConnectTimeout, cM.cfg.GeneralCfg().ReplyTimeout,
+			connCfg.Conns, intChan, false, biRPCClient, connID, cM.connCache); err != nil {
 			return
 		}
 	}
-	if ctx.Client != nil {
+	if biRPCClient != nil {
 		for _, c := range connCfg.Conns {
 			if c.Address == rpcclient.BiRPCInternal { // register only on internal
 				var rply string
-				if err = conn.Call(ctx, utils.SessionSv1RegisterInternalBiJSONConn,
+				if err = conn.Call(utils.SessionSv1RegisterInternalBiJSONConn,
 					connID, &rply); err != nil {
 					utils.Logger.Crit(fmt.Sprintf("<%s> Could not register biRPCClient, error: <%s>",
 						utils.SessionS, err.Error()))
@@ -148,17 +160,20 @@ func (cM *ConnManager) getConnWithConfig(ctx *context.Context, connID string, co
 }
 
 // Call gets the connection calls the method on it
-func (cM *ConnManager) Call(ctx *context.Context, connIDs []string,
+func (cM *ConnManager) Call(connIDs []string, biRPCClient rpcclient.BiRPCConector,
 	method string, arg, reply interface{}) (err error) {
 	if len(connIDs) == 0 {
 		return utils.NewErrMandatoryIeMissing("connIDs")
 	}
-	var conn birpc.ClientConnector
+	var conn rpcclient.ClientConnector
 	for _, connID := range connIDs {
-		if conn, err = cM.getConn(ctx, connID); err != nil {
+		cM.lkConn(connID)
+		conn, err = cM.getConn(connID, biRPCClient)
+		cM.unlkConn(connID)
+		if err != nil {
 			continue
 		}
-		if err = conn.Call(ctx, method, arg, reply); !rpcclient.IsNetworkError(err) {
+		if err = conn.Call(method, arg, reply); !rpcclient.IsNetworkError(err) {
 			return
 		}
 	}
@@ -166,7 +181,7 @@ func (cM *ConnManager) Call(ctx *context.Context, connIDs []string,
 }
 
 // CallWithConnIDs will call the method only on specified rpcconns
-func (cM *ConnManager) CallWithConnIDs(connIDs []string, ctx *context.Context, subsHostIDs utils.StringSet, method string, arg, reply interface{}) (err error) {
+func (cM *ConnManager) CallWithConnIDs(connIDs []string, subsHostIDs utils.StringSet, method string, arg, reply interface{}) (err error) {
 	if len(connIDs) == 0 {
 		return utils.NewErrMandatoryIeMissing("connIDs")
 	}
@@ -174,14 +189,13 @@ func (cM *ConnManager) CallWithConnIDs(connIDs []string, ctx *context.Context, s
 	if subsHostIDs.Size() == 0 {
 		return
 	}
-	var conn birpc.ClientConnector
+	var conn rpcclient.ClientConnector
 	for _, connID := range connIDs {
 		// recreate the config with only conns that are needed
 		connCfg := cM.cfg.RPCConns()[connID]
 		newCfg := &config.RPCConn{
-			Strategy:     connCfg.Strategy,
-			PoolSize:     connCfg.PoolSize,
-			ReplyTimeout: connCfg.ReplyTimeout,
+			Strategy: connCfg.Strategy,
+			PoolSize: connCfg.PoolSize,
 			// alloc for all connection in order to not increase the size later
 			Conns: make([]*config.RemoteHost, 0, len(connCfg.Conns)),
 		}
@@ -195,10 +209,10 @@ func (cM *ConnManager) CallWithConnIDs(connIDs []string, ctx *context.Context, s
 			// skip this pool if no connection matches
 			continue
 		}
-		if conn, err = cM.getConnWithConfig(ctx, connID, newCfg, nil, false); err != nil {
+		if conn, err = cM.getConnWithConfig(connID, newCfg, nil, nil, false); err != nil {
 			continue
 		}
-		if err = conn.Call(ctx, method, arg, reply); !rpcclient.IsNetworkError(err) {
+		if err = conn.Call(method, arg, reply); !rpcclient.IsNetworkError(err) {
 			return
 		}
 	}
@@ -210,97 +224,4 @@ func (cM *ConnManager) Reload() {
 	Cache.Clear([]string{utils.CacheRPCConnections})
 	Cache.Clear([]string{utils.CacheReplicationHosts})
 	cM.connCache.Clear()
-}
-
-func (cM *ConnManager) GetInternalChan() chan birpc.ClientConnector {
-	if cM.dispIntCh != nil {
-		return cM.dispIntCh.GetInternalChanel()
-	}
-	return cM.dynIntCh.GetInternalChanel()
-}
-
-func (cM *ConnManager) GetDispInternalChan() chan birpc.ClientConnector {
-	return cM.dynIntCh.GetInternalChanel()
-}
-func (cM *ConnManager) AddInternalConn(connName, apiPrefix string,
-	iConnCh chan birpc.ClientConnector) {
-	cM.rpcInternal[connName] = iConnCh
-	cM.dynIntCh[apiPrefix] = iConnCh
-}
-
-func (cM *ConnManager) EnableDispatcher(dsp IntService) {
-	cM.disp = map[string]chan context.ClientConnector{
-		utils.ConcatenatedKey(utils.MetaDispatchers, utils.MetaAttributes): cM.rpcInternal[utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)],
-	}
-	cM.dispIntCh = make(RPCClientSet)
-	for m, srv := range dsp {
-		var key string
-		switch {
-		case strings.HasPrefix(m, utils.AccountS):
-			key = utils.MetaAccounts
-		case strings.HasPrefix(m, utils.ActionS):
-			key = utils.MetaActions
-		case strings.HasPrefix(m, utils.AttributeS):
-			key = utils.MetaAttributes
-		case strings.HasPrefix(m, utils.CacheS):
-			key = utils.MetaCaches
-		case strings.HasPrefix(m, utils.ChargerS):
-			key = utils.MetaChargers
-		case strings.HasPrefix(m, utils.ConfigS):
-			key = utils.MetaConfig
-		case strings.HasPrefix(m, utils.DispatcherS):
-			key = utils.MetaDispatchers
-		case strings.HasPrefix(m, utils.GuardianS):
-			key = utils.MetaGuardian
-		case strings.HasPrefix(m, utils.RateS):
-			key = utils.MetaRates
-		case strings.HasPrefix(m, utils.ResourceS):
-			key = utils.MetaResources
-		case strings.HasPrefix(m, utils.RouteS):
-			key = utils.MetaRoutes
-		case strings.HasPrefix(m, utils.SessionS):
-			key = utils.MetaSessionS
-		case strings.HasPrefix(m, utils.StatS):
-			key = utils.MetaStats
-		case strings.HasPrefix(m, utils.ThresholdS):
-			key = utils.MetaThresholds
-		case strings.HasPrefix(m, utils.CDRs):
-			key = utils.MetaCDRs
-		case strings.HasPrefix(m, utils.ReplicatorS):
-			key = utils.MetaReplicator
-		case strings.HasPrefix(m, utils.EeS):
-			key = utils.MetaEEs
-		case strings.HasPrefix(m, utils.CoreS):
-			key = utils.MetaCore
-		case strings.HasPrefix(m, utils.AnalyzerS):
-			key = utils.MetaAnalyzer
-		case strings.HasPrefix(m, utils.AdminS):
-			key = utils.MetaAdminS
-		case strings.HasPrefix(m, utils.LoaderS):
-			key = utils.MetaLoaders
-		case strings.HasPrefix(m, utils.ServiceManager):
-			key = utils.MetaServiceManager
-		}
-		key = utils.ConcatenatedKey(utils.MetaInternal, key)
-		ch := make(chan birpc.ClientConnector, 1)
-		ch <- srv
-		cM.disp[key] = ch
-		cM.dispIntCh[m] = ch
-	}
-	cM.Reload()
-}
-
-func (cM *ConnManager) DisableDispatcher() {
-	cM.disp = nil
-	cM.dispIntCh = nil
-	cM.Reload()
-}
-
-func (cM *ConnManager) getInternalConnChan(key string) (c chan birpc.ClientConnector, has bool) {
-	if cM.disp != nil {
-		c, has = cM.disp[key]
-	} else {
-		c, has = cM.rpcInternal[key]
-	}
-	return
 }

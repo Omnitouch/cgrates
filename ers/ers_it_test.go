@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,13 +33,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
 	"github.com/cgrates/rpcclient"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestERsNewERService(t *testing.T) {
@@ -195,6 +194,7 @@ func TestERsListenAndServeRdrEvents(t *testing.T) {
 		cgrEvent: &utils.CGREvent{
 			Tenant:  "",
 			ID:      "",
+			Time:    nil,
 			Event:   nil,
 			APIOpts: nil,
 		},
@@ -439,6 +439,7 @@ func TestERsProcessEvent(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant:  "",
 		ID:      "",
+		Time:    nil,
 		Event:   nil,
 		APIOpts: nil,
 	}
@@ -467,6 +468,7 @@ func TestERsProcessEvent2(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant:  "",
 		ID:      "",
+		Time:    nil,
 		Event:   nil,
 		APIOpts: nil,
 	}
@@ -548,6 +550,7 @@ func TestERsProcessEvent5(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant: "",
 		ID:     "",
+		Time:   nil,
 		Event:  nil,
 		APIOpts: map[string]interface{}{
 			utils.OptsRoutesLimit: true,
@@ -630,6 +633,7 @@ func TestERsProcessEvent8(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant: "",
 		ID:     "",
+		Time:   nil,
 		Event:  nil,
 		APIOpts: map[string]interface{}{
 			utils.OptsRoutesLimit: true,
@@ -660,6 +664,7 @@ func TestERsProcessEvent9(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant: "",
 		ID:     "",
+		Time:   nil,
 		Event:  nil,
 		APIOpts: map[string]interface{}{
 			utils.OptsRoutesLimit: true,
@@ -691,6 +696,7 @@ func TestERsProcessEvent10(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant: "",
 		ID:     "",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.Usage: time.Second,
 		},
@@ -705,14 +711,14 @@ func TestERsProcessEvent10(t *testing.T) {
 }
 
 type testMockClients struct {
-	calls map[string]func(ctx *context.Context, args, reply interface{}) error
+	calls map[string]func(args interface{}, reply interface{}) error
 }
 
-func (sT *testMockClients) Call(ctx *context.Context, method string, arg interface{}, rply interface{}) error {
+func (sT *testMockClients) Call(method string, arg interface{}, rply interface{}) error {
 	if call, has := sT.calls[method]; !has {
 		return rpcclient.ErrUnsupporteServiceMethod
 	} else {
-		return call(ctx, arg, rply)
+		return call(arg, rply)
 	}
 }
 
@@ -727,16 +733,17 @@ func TestERsProcessEvent11(t *testing.T) {
 	cfg.ERsCfg().SessionSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS)}
 	fltrS := &engine.FilterS{}
 	testMockClient := &testMockClients{
-		calls: map[string]func(ctx *context.Context, args, reply interface{}) error{
-			utils.SessionSv1ProcessMessage: func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.SessionSv1ProcessMessage: func(args interface{}, reply interface{}) error {
 				return errors.New("RALS_ERROR")
 			},
 		},
 	}
-	clientChan := make(chan birpc.ClientConnector, 1)
+	clientChan := make(chan rpcclient.ClientConnector, 1)
 	clientChan <- testMockClient
-	connMng := engine.NewConnManager(cfg)
-	connMng.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS), utils.SessionSv1, clientChan)
+	connMng := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS): clientChan,
+	})
 	srv := NewERService(cfg, fltrS, connMng)
 	rdrCfg := &config.EventReaderCfg{
 		Flags: map[string]utils.FlagParams{
@@ -746,6 +753,7 @@ func TestERsProcessEvent11(t *testing.T) {
 	cgrEvent := &utils.CGREvent{
 		Tenant: "",
 		ID:     "",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.Usage: 0,
 		},
@@ -767,6 +775,9 @@ func TestErsOnEvictedMetaDumpToFileOK(t *testing.T) {
 	}
 	defer os.RemoveAll(dirPath)
 
+	val1 := config.NewRSRParsersMustCompile("TestTenant", ",")
+	val2 := config.NewRSRParsersMustCompile("1001", ",")
+	val3 := config.NewRSRParsersMustCompile("1002", ",")
 	value := &erEvents{
 		events: []*utils.CGREvent{
 			{
@@ -784,10 +795,33 @@ func TestErsOnEvictedMetaDumpToFileOK(t *testing.T) {
 				PartialCacheAction: utils.StringPointer(utils.MetaDumpToFile),
 				PartialPath:        utils.StringPointer(dirPath),
 			},
+			CacheDumpFields: []*config.FCTemplate{
+				{
+					Tag:   "Tenant",
+					Type:  utils.MetaConstant,
+					Path:  "*exp.Tenant",
+					Value: val1,
+				},
+				{
+					Tag:   "Account",
+					Type:  utils.MetaConstant,
+					Path:  "*exp.Account",
+					Value: val2,
+				},
+				{
+					Tag:   "Destination",
+					Type:  utils.MetaConstant,
+					Path:  "*exp.Destination",
+					Value: val3,
+				},
+			},
 		},
 	}
+	for _, field := range value.rdrCfg.CacheDumpFields {
+		field.ComputePath()
+	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -795,22 +829,30 @@ func TestErsOnEvictedMetaDumpToFileOK(t *testing.T) {
 		rdrEvents: make(chan *erEvent, 1),
 		filterS:   fltrS,
 	}
-	erS.onEvicted("ID", value)
+	expBody := "TestTenant,1001,1002\n"
+	erS.onEvicted("FileID", value)
 
-	// rcv, err := os.ReadFile(filepath.Join(dirPath, "ID.*.*"))
-	// if err != nil {
-	// 	t.Error(err)
-	// }
-	// fmt.Println(rcv)
+	path := filepath.Join(dirPath, "FileID.*.tmp")
+	if match, err := filepath.Glob(path); err != nil {
+		t.Error(err)
+	} else if len(match) != 1 {
+		t.Error("expected exactly one file")
+	} else if body, err := os.ReadFile(match[0]); err != nil {
+		t.Error(err)
+	} else if expBody != string(body) {
+		t.Errorf("expected: %q\nreceived: %q", expBody, string(body))
+	}
 }
 
 func TestErsOnEvictedMetaDumpToFileCSVWriteErr(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(3)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 3)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	dirPath := "/tmp/TestErsOnEvictedMetaDumpToFile"
 	err := os.Mkdir(dirPath, 0755)
@@ -840,7 +882,7 @@ func TestErsOnEvictedMetaDumpToFileCSVWriteErr(t *testing.T) {
 		},
 	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -851,20 +893,23 @@ func TestErsOnEvictedMetaDumpToFileCSVWriteErr(t *testing.T) {
 
 	erS.onEvicted("ID", value)
 
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, "error: csv: invalid field or comment delimiter") {
 		t.Errorf("expected: <%s> to be included in log message: <%s>",
 			"error: csv: invalid field or comment delimiter", rcvLog)
 	}
+	utils.Logger.SetLogLevel(0)
 }
 
 func TestErsOnEvictedMetaDumpToFileCreateErr(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(3)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 3)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	dirPath := "/tmp/TestErsOnEvictedMetaDumpToFile"
 	err := os.Mkdir(dirPath, 0755)
@@ -893,7 +938,7 @@ func TestErsOnEvictedMetaDumpToFileCreateErr(t *testing.T) {
 		},
 	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -904,7 +949,7 @@ func TestErsOnEvictedMetaDumpToFileCreateErr(t *testing.T) {
 
 	erS.onEvicted("ID", value)
 
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, "CGRateS <> [ERROR] <ERs> Failed creating /tmp/TestErsOnEvictedMetaDumpToFile/non-existent/ID.") &&
 		!strings.Contains(rcvLog, "error: open /tmp/TestErsOnEvictedMetaDumpToFile/non-existent/ID.") {
 		t.Errorf("expected: <%s> and <%s> to be included in log message: <%s>",
@@ -912,118 +957,8 @@ func TestErsOnEvictedMetaDumpToFileCreateErr(t *testing.T) {
 			"error: open /tmp/TestErsOnEvictedMetaDumpToFile/non-existent/ID.",
 			rcvLog)
 	}
-}
 
-func TestErsOnEvictedNoCacheDumpFields(t *testing.T) {
-	dirPath := "/tmp/TestErsOnEvictedCacheDumpfields"
-	err := os.MkdirAll(dirPath, 0755)
-	if err != nil {
-		t.Error(err)
-	}
-
-	value := &erEvents{
-		events: []*utils.CGREvent{
-			{
-				Tenant: "cgrates.org",
-				ID:     "EventErsOnEvicted",
-				Event: map[string]interface{}{
-					utils.AccountField: "1001",
-					utils.Usage:        "10s",
-					utils.Category:     "call",
-					utils.Destination:  "1002",
-					utils.OriginHost:   "local",
-					utils.OriginID:     "123456",
-					utils.ToR:          utils.MetaVoice,
-					utils.Password:     "secure_pass",
-					"Additional_Field": "Additional_Value",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
-				},
-			},
-		},
-		rdrCfg: &config.EventReaderCfg{ // CacheDumpFields will be empty
-			ID:   "ER1",
-			Type: utils.MetaNone,
-			Opts: &config.EventReaderOpts{
-				PartialCacheAction: utils.StringPointer(utils.MetaDumpToFile),
-				PartialPath:        utils.StringPointer(dirPath),
-				PartialOrderField:  utils.StringPointer("2"),
-			},
-		},
-	}
-
-	value2 := &erEvents{
-		events: []*utils.CGREvent{
-			{
-				Tenant: "cgrates.org",
-				ID:     "EventErsOnEvicted",
-				Event: map[string]interface{}{
-					utils.AccountField: "1002",
-					utils.Usage:        "12s",
-					utils.Category:     "call",
-					utils.Destination:  "1003",
-					utils.OriginID:     "1234567",
-					utils.ToR:          utils.MetaSMS,
-					utils.Password:     "secure_password",
-					"Additional_Field": "Additional_Value2",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4d",
-				},
-			},
-		},
-		rdrCfg: &config.EventReaderCfg{ // CacheDumpFields will be empty
-			ID:   "ER1",
-			Type: utils.MetaNone,
-			Opts: &config.EventReaderOpts{
-				PartialCacheAction: utils.StringPointer(utils.MetaDumpToFile),
-				PartialPath:        utils.StringPointer(dirPath),
-				PartialOrderField:  utils.StringPointer("2"),
-			},
-		},
-	}
-
-	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrS := engine.NewFilterS(cfg, nil, dm)
-	erS := &ERService{
-		cfg:       cfg,
-		rdrEvents: make(chan *erEvent, 1),
-		filterS:   fltrS,
-	}
-
-	erS.onEvicted("ID", value)
-	erS.onEvicted("ID2", value2)
-
-	var files []string
-	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Error(err)
-	}
-	compare := make(map[int][]string, 2)
-	for idx, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			t.Error(err)
-		}
-		s := strings.Split(string((data)), ",")
-
-		compare[idx] = s
-	}
-	if len(compare[0]) != 10 && len(compare[1]) != 9 {
-		t.Errorf("expected <%d> and <%d>, \nreceived: <%d> and <%d>",
-			10, 9, len(compare[0]), len(compare[1]))
-	}
-	if err := os.RemoveAll(dirPath); err != nil {
-		t.Error(err)
-	}
+	utils.Logger.SetLogLevel(0)
 }
 
 func TestERsOnEvictedDumpToJSON(t *testing.T) {
@@ -1046,12 +981,9 @@ func TestERsOnEvictedDumpToJSON(t *testing.T) {
 					utils.OriginHost:   "local",
 					utils.OriginID:     "123456",
 					utils.ToR:          utils.MetaVoice,
-
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 					utils.Password:     "secure_pass",
 					"Additional_Field": "Additional_Value",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 				},
 			},
 		},
@@ -1067,7 +999,7 @@ func TestERsOnEvictedDumpToJSON(t *testing.T) {
 	}
 
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -1085,9 +1017,6 @@ func TestERsOnEvictedDumpToJSON(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Error(err)
-	}
 
 	var compare map[string]interface{}
 	// compare = make(map[int][]string, 2)
@@ -1108,12 +1037,13 @@ func TestERsOnEvictedDumpToJSON(t *testing.T) {
 		utils.OriginHost:   "local",
 		utils.OriginID:     "123456",
 		utils.ToR:          utils.MetaVoice,
-		utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
+		utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 		utils.Password:     "secure_pass",
 		"Additional_Field": "Additional_Value",
 	}
+	// fmt.Println(utils.ToJSON(compare))
 	if !reflect.DeepEqual(exp, compare) {
-		t.Errorf("expected <%v>,\nreceived <%v>", utils.ToJSON(exp), utils.ToJSON(compare))
+		t.Errorf("Expected %v \n but received \n %v", exp, compare)
 	}
 	if err := os.RemoveAll(dirPath); err != nil {
 		t.Error(err)
@@ -1135,12 +1065,9 @@ func TestErsOnEvictedDumpToJSONNoPath(t *testing.T) {
 					utils.OriginHost:   "local",
 					utils.OriginID:     "123456",
 					utils.ToR:          utils.MetaVoice,
-
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 					utils.Password:     "secure_pass",
 					"Additional_Field": "Additional_Value",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 				},
 			},
 		},
@@ -1156,7 +1083,7 @@ func TestErsOnEvictedDumpToJSONNoPath(t *testing.T) {
 	}
 
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -1171,12 +1098,14 @@ func TestErsOnEvictedDumpToJSONNoPath(t *testing.T) {
 }
 
 func TestErsOnEvictedDumpToJSONMergeError(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	dirPath := "/tmp/TestErsOnEvictedCacheDumpfields"
 	err := os.MkdirAll(dirPath, 0755)
@@ -1197,13 +1126,10 @@ func TestErsOnEvictedDumpToJSONMergeError(t *testing.T) {
 					utils.OriginHost:   "local",
 					utils.OriginID:     "123456",
 					utils.ToR:          utils.MetaVoice,
-
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 					utils.Password:     "secure_pass",
 					"Additional_Field": "Additional_Value",
 					utils.AnswerTime:   time.Date(2021, 6, 1, 12, 0, 0, 0, time.UTC),
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 				},
 			},
 			{
@@ -1216,12 +1142,10 @@ func TestErsOnEvictedDumpToJSONMergeError(t *testing.T) {
 					utils.Destination:  "1003",
 					utils.OriginID:     "1234567",
 					utils.ToR:          utils.MetaSMS,
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4d",
 					utils.Password:     "secure_password",
 					"Additional_Field": "Additional_Value2",
 					utils.AnswerTime:   time.Date(2021, 6, 1, 13, 0, 0, 0, time.UTC),
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4d",
 				},
 			},
 		},
@@ -1236,7 +1160,7 @@ func TestErsOnEvictedDumpToJSONMergeError(t *testing.T) {
 	}
 
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -1244,13 +1168,14 @@ func TestErsOnEvictedDumpToJSONMergeError(t *testing.T) {
 		rdrEvents: make(chan *erEvent, 1),
 		filterS:   fltrS,
 	}
-	expLog := `[WARNING] <ERs> failed posting expired parial events <[{"Tenant":"cgrates.org","ID":"EventErsOnEvicted2","Event":{"Account":"1002","Additional_Field":"Additional_Value2","AnswerTime":"2021-06-01T13:00:00Z","Category":"call","Destination":"1003","OriginID":"1234567","ToR":"*sms","Usage":"12s","password":"secure_password"},"APIOpts":{"*originID":"1133dc80896edf5049b46aa911cb9085eeb27f4d"}},{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Event":{"Account":"1001","Additional_Field":"Additional_Value","AnswerTime":"2021-06-01T12:00:00Z","Category":"call","Destination":"1002","OriginHost":"local","OriginID":"123456","ToR":"*voice","Usage":"10s","password":"secure_pass"},"APIOpts":{"*originID":"1133dc80896edf5049b46aa911cb9085eeb27f4c"}}]>`
+	expLog := `<unsupported comparison type: string, kind: string>`
 	erS.onEvicted("ID", value)
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, expLog) {
 		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
 	}
 
+	utils.Logger.SetLogLevel(0)
 	if err := os.RemoveAll(dirPath); err != nil {
 		t.Error(err)
 	}
@@ -1263,12 +1188,14 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFieldsErrPrefix(t *testing.T) {
 		t.Error(err)
 	}
 
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	value := &erEvents{
 		events: []*utils.CGREvent{
@@ -1283,12 +1210,9 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFieldsErrPrefix(t *testing.T) {
 					utils.OriginHost:   "local",
 					utils.OriginID:     "123456",
 					utils.ToR:          utils.MetaVoice,
-
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 					utils.Password:     "secure_pass",
 					"Additional_Field": "Additional_Value",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 				},
 			},
 		},
@@ -1316,7 +1240,7 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFieldsErrPrefix(t *testing.T) {
 	value.rdrCfg.CacheDumpFields[0].ComputePath()
 
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -1325,13 +1249,14 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFieldsErrPrefix(t *testing.T) {
 		filterS:   fltrS,
 	}
 
-	expLog := `Converting CDR with originID: <ID_JSON> to record , ignoring due to error: <unsupported field prefix: <~*req> when set field>`
+	expLog := `Converting CDR with CGRID: <ID_JSON> to record , ignoring due to error: <unsupported field prefix: <~*req> when set field>`
 	erS.onEvicted("ID_JSON", value)
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, expLog) {
 		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
 	}
 
+	utils.Logger.SetLogLevel(0)
 	if err := os.RemoveAll(dirPath); err != nil {
 		t.Error(err)
 	}
@@ -1357,16 +1282,13 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFields(t *testing.T) {
 					utils.OriginHost:   "local",
 					utils.OriginID:     "123456",
 					utils.ToR:          utils.MetaVoice,
-
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 					utils.Password:     "secure_pass",
 					"Additional_Field": "Additional_Value",
 				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
-				},
 			},
 		},
-		rdrCfg: &config.EventReaderCfg{
+		rdrCfg: &config.EventReaderCfg{ // CacheDumpFields will be empty
 			ID:   "ER1",
 			Type: utils.MetaNone,
 			Opts: &config.EventReaderOpts{
@@ -1393,7 +1315,7 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFields(t *testing.T) {
 	value.rdrCfg.CacheDumpFields[0].ComputePath()
 
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -1433,12 +1355,14 @@ func TestERsOnEvictedDumpToJSONWithCacheDumpFields(t *testing.T) {
 }
 
 func TestErsOnEvictedDumpToJSONInvalidPath(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	dirPath := "/tmp/TestErsOnEvictedDumpToJSON"
 	err := os.MkdirAll(dirPath, 0755)
@@ -1458,82 +1382,9 @@ func TestErsOnEvictedDumpToJSONInvalidPath(t *testing.T) {
 					utils.OriginHost:   "local",
 					utils.OriginID:     "123456",
 					utils.ToR:          utils.MetaVoice,
-
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 					utils.Password:     "secure_pass",
 					"Additional_Field": "Additional_Value",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
-				},
-			},
-		},
-		rdrCfg: &config.EventReaderCfg{ // CacheDumpFields will be empty
-			ID:   "ER1",
-			Type: utils.MetaNone,
-			Opts: &config.EventReaderOpts{
-				PartialCacheAction: utils.StringPointer(utils.MetaDumpToJSON),
-				PartialPath:        utils.StringPointer("invalid_path"),
-				PartialOrderField:  utils.StringPointer("2"),
-			},
-		},
-	}
-
-	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrS := engine.NewFilterS(cfg, nil, dm)
-	erS := &ERService{
-		cfg:       cfg,
-		rdrEvents: make(chan *erEvent, 1),
-		filterS:   fltrS,
-	}
-
-	expLog := ".tmp: no such file or directory"
-	erS.onEvicted("ID_JSON", value)
-	rcvLog := buf.String()[20:]
-	if !strings.Contains(rcvLog, expLog) {
-		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
-	}
-	if err := os.RemoveAll(dirPath); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestErsOnEvictedDumpToJSONEncodeErr(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
-	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
-
-	dirPath := "/tmp/TestErsOnEvictedDumpToJSON"
-	err := os.MkdirAll(dirPath, 0755)
-	if err != nil {
-		t.Error(err)
-	}
-	value := &erEvents{
-		events: []*utils.CGREvent{
-			{
-				Tenant: "cgrates.org",
-				ID:     "EventErsOnEvicted",
-				Event: map[string]interface{}{
-					utils.AccountField: "1001",
-					utils.Usage:        "10s",
-					utils.Category:     "call",
-					utils.Destination:  "1002",
-					utils.OriginHost:   "local",
-					utils.OriginID:     "123456",
-					utils.ToR:          utils.MetaVoice,
-
-					utils.Password:     "secure_pass",
-					"Additional_Field": "Additional_Value",
-					"EncodeErr": func() {
-
-					},
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaOriginID: "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 				},
 			},
 		},
@@ -1549,7 +1400,77 @@ func TestErsOnEvictedDumpToJSONEncodeErr(t *testing.T) {
 	}
 
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
+	fltrS := engine.NewFilterS(cfg, nil, dm)
+	erS := &ERService{
+		cfg:       cfg,
+		rdrEvents: make(chan *erEvent, 1),
+		filterS:   fltrS,
+	}
+
+	expLog := ".tmp: no such file or directory"
+	erS.onEvicted("ID_JSON", value)
+	rcvLog := buf.String()[20:]
+	if !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
+	}
+	utils.Logger.SetLogLevel(0)
+	if err := os.RemoveAll(dirPath); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestErsOnEvictedDumpToJSONEncodeErr(t *testing.T) {
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
+
+	dirPath := "/tmp/TestErsOnEvictedDumpToJSON"
+	err := os.MkdirAll(dirPath, 0755)
+	if err != nil {
+		t.Error(err)
+	}
+	value := &erEvents{
+		events: []*utils.CGREvent{
+			{
+				Tenant: "cgrates.org",
+				ID:     "EventErsOnEvicted",
+				Event: map[string]interface{}{
+					utils.AccountField: "1001",
+					utils.Usage:        "10s",
+					utils.Category:     "call",
+					utils.Destination:  "1002",
+					utils.OriginHost:   "local",
+					utils.OriginID:     "123456",
+					utils.ToR:          utils.MetaVoice,
+					utils.CGRID:        "1133dc80896edf5049b46aa911cb9085eeb27f4c",
+					utils.Password:     "secure_pass",
+					"Additional_Field": "Additional_Value",
+					"EncodeErr": func() {
+
+					},
+				},
+			},
+		},
+		rdrCfg: &config.EventReaderCfg{ // CacheDumpFields will be empty
+			ID:   "ER1",
+			Type: utils.MetaNone,
+			Opts: &config.EventReaderOpts{
+				PartialCacheAction: utils.StringPointer(utils.MetaDumpToJSON),
+				PartialPath:        utils.StringPointer(dirPath),
+				PartialOrderField:  utils.StringPointer("2"),
+			},
+		},
+	}
+
+	cfg := config.NewDefaultCGRConfig()
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -1560,10 +1481,11 @@ func TestErsOnEvictedDumpToJSONEncodeErr(t *testing.T) {
 
 	expLog := "error: json: unsupported type: func()"
 	erS.onEvicted("ID_JSON", value)
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, expLog) {
 		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
 	}
+	utils.Logger.SetLogLevel(0)
 	if err := os.RemoveAll(dirPath); err != nil {
 		t.Error(err)
 	}

@@ -21,14 +21,15 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
 	ErrNoMoreData                    = errors.New("NO_MORE_DATA")
 	ErrNotImplemented                = errors.New("NOT_IMPLEMENTED")
+	ErrNotFound                      = errors.New("NOT_FOUND")
 	ErrDSPHostNotFound               = errors.New("DSP_HOST_NOT_FOUND")
 	ErrDSPProfileNotFound            = errors.New("DSP_PROFILE_NOT_FOUND")
-	ErrNotFound                      = errors.New("NOT_FOUND")
 	ErrTimedOut                      = errors.New("TIMED_OUT")
 	ErrServerError                   = errors.New("SERVER_ERROR")
 	ErrMaxRecursionDepth             = errors.New("MAX_RECURSION_DEPTH")
@@ -63,10 +64,9 @@ var (
 	ErrJsonIncompleteComment         = errors.New("JSON_INCOMPLETE_COMMENT")
 	ErrNotEnoughParameters           = errors.New("NotEnoughParameters")
 	ErrNotConnected                  = errors.New("NOT_CONNECTED")
+	RalsErrorPrfx                    = "RALS_ERROR"
 	DispatcherErrorPrefix            = "DISPATCHER_ERROR"
 	RateSErrPrfx                     = "RATES_ERROR"
-	AccountSErrPrfx                  = "ACCOUNTS_ERROR"
-	ErrLoggerChanged                 = errors.New("LOGGER_CHANGED")
 	ErrUnsupportedFormat             = errors.New("UNSUPPORTED_FORMAT")
 	ErrNoDatabaseConn                = errors.New("NO_DATABASE_CONNECTION")
 	ErrMaxIncrementsExceeded         = errors.New("MAX_INCREMENTS_EXCEEDED")
@@ -77,15 +77,13 @@ var (
 	ErrMaxConcurentRPCExceeded       = errors.New("MAX_CONCURENT_RPC_EXCEEDED") // but the codec will rewrite it with this one to be sure that we corectly dealocate the request
 	ErrMaxIterationsReached          = errors.New("maximum iterations reached")
 	ErrNegative                      = errors.New("NEGATIVE")
-	ErrUnsupportedTPExporterType     = errors.New("UNSUPPORTED_TPEXPORTER_TYPE")
 	ErrCastFailed                    = errors.New("CAST_FAILED")
-	ErrUnsupportedServiceID          = errors.New(UnsupportedServiceIDCaps)
 
 	ErrMap = map[string]error{
 		ErrNoMoreData.Error():              ErrNoMoreData,
 		ErrNotImplemented.Error():          ErrNotImplemented,
-		ErrDSPHostNotFound.Error():         ErrDSPHostNotFound,
 		ErrDSPProfileNotFound.Error():      ErrDSPProfileNotFound,
+		ErrDSPHostNotFound.Error():         ErrDSPHostNotFound,
 		ErrNotFound.Error():                ErrNotFound,
 		ErrTimedOut.Error():                ErrTimedOut,
 		ErrServerError.Error():             ErrServerError,
@@ -120,6 +118,7 @@ var (
 		ErrMaxIncrementsExceeded.Error():   ErrMaxIncrementsExceeded,
 		ErrIndexOutOfBounds.Error():        ErrIndexOutOfBounds,
 		ErrWrongPath.Error():               ErrWrongPath,
+		ErrDSPHostNotFound.Error():         ErrDSPHostNotFound,
 	}
 )
 
@@ -167,9 +166,18 @@ func NewErrServerError(err error) error {
 	return fmt.Errorf("SERVER_ERROR: %s", err)
 }
 
+func NewErrServiceNotOperational(serv string) error {
+	return fmt.Errorf("SERVICE_NOT_OPERATIONAL: %s", serv)
+}
+
 func NewErrNotConnected(serv string) error {
 	return fmt.Errorf("NOT_CONNECTED: %s", serv)
 }
+
+func NewErrRALs(err error) error {
+	return fmt.Errorf("%s:%s", RalsErrorPrfx, err)
+}
+
 func NewErrResourceS(err error) error {
 	return fmt.Errorf("RESOURCES_ERROR:%s", err)
 }
@@ -206,10 +214,6 @@ func NewErrRateS(err error) error {
 	return fmt.Errorf("%s:%s", RateSErrPrfx, err.Error())
 }
 
-func NewErrAccountS(err error) error {
-	return fmt.Errorf("%s:%s", AccountSErrPrfx, err.Error())
-}
-
 // Centralized returns for APIs
 func APIErrorHandler(errIn error) (err error) {
 	cgrErr, ok := errIn.(*CGRError)
@@ -223,6 +227,22 @@ func APIErrorHandler(errIn error) (err error) {
 	cgrErr.ActivateAPIError()
 	return cgrErr
 }
+
+func NewErrStringCast(valIface interface{}) error {
+	return fmt.Errorf("cannot cast value: %v to string", valIface)
+}
+
+func NewErrFldStringCast(fldName string, valIface interface{}) error {
+	return fmt.Errorf("cannot cast field: %s with value: %v to string", fldName, valIface)
+}
+
+func ErrHasPrefix(err error, prfx string) (has bool) {
+	if err == nil {
+		return
+	}
+	return strings.HasPrefix(err.Error(), prfx)
+}
+
 func ErrPrefix(err error, reason string) error {
 	return fmt.Errorf("%s:%s", err.Error(), reason)
 }
@@ -241,6 +261,10 @@ func ErrEnvNotFound(key string) error {
 
 func ErrPathNotReachable(path string) error {
 	return fmt.Errorf("path:%+q is not reachable", path)
+}
+
+func ErrNotConvertibleTF(from, to string) error {
+	return fmt.Errorf("%s : from: %s to:%s", ErrNotConvertibleNoCaps.Error(), from, to)
 }
 
 // NewSTIRError returns a error with a *stir_authorize prefix

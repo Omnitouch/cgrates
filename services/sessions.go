@@ -22,46 +22,47 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
 
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewSessionService returns the Session Service
-func NewSessionService(cfg *config.CGRConfig, dm *DataDBService, filterSChan chan *engine.FilterS,
-	server *cores.Server, internalChan chan birpc.ClientConnector,
-	connMgr *engine.ConnManager, anz *AnalyzerService,
-	srvDep map[string]*sync.WaitGroup) servmanager.Service {
+func NewSessionService(cfg *config.CGRConfig, dm *DataDBService,
+	server *cores.Server, internalChan chan rpcclient.ClientConnector,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
+	anz *AnalyzerService, srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &SessionService{
-		connChan:    internalChan,
-		cfg:         cfg,
-		dm:          dm,
-		filterSChan: filterSChan,
-		server:      server,
-		connMgr:     connMgr,
-		anz:         anz,
-		srvDep:      srvDep,
+		connChan: internalChan,
+		cfg:      cfg,
+		dm:       dm,
+		server:   server,
+		shdChan:  shdChan,
+		connMgr:  connMgr,
+		anz:      anz,
+		srvDep:   srvDep,
 	}
 }
 
 // SessionService implements Service interface
 type SessionService struct {
 	sync.RWMutex
-	cfg         *config.CGRConfig
-	dm          *DataDBService
-	filterSChan chan *engine.FilterS
-	server      *cores.Server
-	stopChan    chan struct{}
+	cfg      *config.CGRConfig
+	dm       *DataDBService
+	server   *cores.Server
+	shdChan  *utils.SyncedChan
+	stopChan chan struct{}
 
 	sm       *sessions.SessionS
-	connChan chan birpc.ClientConnector
+	rpc      *v1.SMGenericV1
+	rpcv1    *v1.SessionSv1
+	connChan chan rpcclient.ClientConnector
 
 	// in order to stop the bircp server if necesary
 	bircpEnabled bool
@@ -70,65 +71,64 @@ type SessionService struct {
 	srvDep       map[string]*sync.WaitGroup
 }
 
-// Start should handle the service start
-func (smg *SessionService) Start(ctx *context.Context, shtDw context.CancelFunc) (err error) {
+// Start should handle the sercive start
+func (smg *SessionService) Start() (err error) {
 	if smg.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, smg.filterSChan); err != nil {
-		return
-	}
-
 	var datadb *engine.DataManager
-	if datadb, err = smg.dm.WaitForDM(ctx); err != nil {
-		return
+	if smg.dm.IsRunning() {
+		dbchan := smg.dm.GetDMChan()
+		datadb = <-dbchan
+		dbchan <- datadb
 	}
 	smg.Lock()
 	defer smg.Unlock()
 
-	smg.sm = sessions.NewSessionS(smg.cfg, datadb, filterS, smg.connMgr)
-	//start sync session in a separate goroutine
+	smg.sm = sessions.NewSessionS(smg.cfg, datadb, smg.connMgr)
+	//start sync session in a separate gorutine
 	smg.stopChan = make(chan struct{})
 	go smg.sm.ListenAndServe(smg.stopChan)
 	// Pass internal connection via BiRPCClient
-
+	smg.connChan <- smg.anz.GetInternalBiRPCCodec(smg.sm, utils.SessionS)
 	// Register RPC handler
-	srv, _ := engine.NewServiceWithName(smg.sm, utils.SessionS, true) // methods with multiple options
-	// srv, _ := birpc.NewService(apis.NewSessionSv1(smg.sm), utils.EmptyString, false) // methods with multiple options
+	smg.rpc = v1.NewSMGenericV1(smg.sm)
+
+	smg.rpcv1 = v1.NewSessionSv1(smg.sm) // methods with multiple options
 	if !smg.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			smg.server.RpcRegister(s)
-		}
+		smg.server.RpcRegister(smg.rpc)
+		smg.server.RpcRegister(smg.rpcv1)
 	}
-	smg.connChan <- smg.anz.GetInternalCodec(srv, utils.SessionS)
 	// Register BiRpc handlers
-	if smg.cfg.SessionSCfg().ListenBijson != utils.EmptyString {
+	if smg.cfg.SessionSCfg().ListenBijson != "" {
 		smg.bircpEnabled = true
-		for n, s := range srv {
-			smg.server.BiRPCRegisterName(n, s)
+		for method, handler := range smg.rpc.Handlers() {
+			smg.server.BiRPCRegisterName(method, handler)
+		}
+		for method, handler := range smg.rpcv1.Handlers() {
+			smg.server.BiRPCRegisterName(method, handler)
 		}
 		// run this in it's own goroutine
-		go smg.start(shtDw)
+		go smg.start()
 	}
 	return
 }
 
-func (smg *SessionService) start(shtDw context.CancelFunc) (err error) {
+func (smg *SessionService) start() (err error) {
 	if err := smg.server.ServeBiRPC(smg.cfg.SessionSCfg().ListenBijson,
 		smg.cfg.SessionSCfg().ListenBigob, smg.sm.OnBiJSONConnect, smg.sm.OnBiJSONDisconnect); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<%s> serve BiRPC error: %s!", utils.SessionS, err))
 		smg.Lock()
 		smg.bircpEnabled = false
 		smg.Unlock()
-		shtDw()
+		smg.shdChan.CloseOnce()
 	}
 	return
 }
 
 // Reload handles the change of config
-func (smg *SessionService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (smg *SessionService) Reload() (err error) {
 	return
 }
 
@@ -145,9 +145,9 @@ func (smg *SessionService) Shutdown() (err error) {
 		smg.bircpEnabled = false
 	}
 	smg.sm = nil
+	smg.rpc = nil
+	smg.rpcv1 = nil
 	<-smg.connChan
-	smg.server.RpcUnregisterName(utils.SessionSv1)
-	// smg.server.BiRPCUnregisterName(utils.SessionSv1)
 	return
 }
 

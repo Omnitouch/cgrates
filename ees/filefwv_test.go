@@ -25,10 +25,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestFileFwvGetMetrics(t *testing.T) {
@@ -45,7 +44,7 @@ func TestFileFwvGetMetrics(t *testing.T) {
 
 func TestFileFwvComposeHeader(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -54,7 +53,7 @@ func TestFileFwvComposeHeader(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloser{byteBuff},
+		file:    nopCloser{byteBuff},
 		dc:      &utils.SafeMapStorage{},
 	}
 	fFwv.Cfg().Fields = []*config.FCTemplate{
@@ -107,7 +106,7 @@ func TestFileFwvComposeHeader(t *testing.T) {
 
 func TestFileFwvComposeTrailer(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -116,7 +115,7 @@ func TestFileFwvComposeTrailer(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloser{byteBuff},
+		file:    nopCloser{byteBuff},
 		dc:      &utils.SafeMapStorage{},
 	}
 	fFwv.Cfg().Fields = []*config.FCTemplate{
@@ -169,7 +168,7 @@ func TestFileFwvComposeTrailer(t *testing.T) {
 
 func TestFileFwvExportEvent(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -182,10 +181,10 @@ func TestFileFwvExportEvent(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloser{byteBuff},
+		file:    nopCloser{byteBuff},
 		dc:      dc,
 	}
-	if err := fFwv.ExportEvent(context.Background(), []string{"value", "3"}, ""); err != nil {
+	if err := fFwv.ExportEvent([]string{"value", "3"}, ""); err != nil {
 		t.Error(err)
 	}
 	csvNW.Flush()
@@ -206,7 +205,7 @@ func (nopCloserWrite) Write(s []byte) (n int, err error) {
 
 func TestFileFwvExportEventWriteError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -218,17 +217,17 @@ func TestFileFwvExportEventWriteError(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloserWrite{byteBuff},
+		file:    nopCloserWrite{byteBuff},
 		dc:      dc,
 	}
-	if err := fFwv.ExportEvent(context.Background(), []string{""}, ""); err == nil || err != utils.ErrNotImplemented {
+	if err := fFwv.ExportEvent([]string{""}, ""); err == nil || err != utils.ErrNotImplemented {
 		t.Errorf("Expected %q but received %q", utils.ErrNotImplemented, err)
 	}
 }
 
 func TestFileFwvComposeHeaderWriteError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -236,7 +235,7 @@ func TestFileFwvComposeHeaderWriteError(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloserWrite{byteBuff},
+		file:    nopCloserWrite{byteBuff},
 		dc:      &utils.SafeMapStorage{},
 	}
 	fFwv.Cfg().Fields = []*config.FCTemplate{
@@ -260,7 +259,7 @@ func TestFileFwvComposeHeaderWriteError(t *testing.T) {
 
 func TestFileFwvComposeTrailerWriteError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -268,7 +267,7 @@ func TestFileFwvComposeTrailerWriteError(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloserWrite{byteBuff},
+		file:    nopCloserWrite{byteBuff},
 		dc:      &utils.SafeMapStorage{},
 	}
 	fFwv.Cfg().Fields = []*config.FCTemplate{
@@ -291,7 +290,7 @@ func TestFileFwvComposeTrailerWriteError(t *testing.T) {
 }
 func TestFileFwvOnEvictedTrailer(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -299,7 +298,7 @@ func TestFileFwvOnEvictedTrailer(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloserWrite{byteBuff},
+		file:    nopCloserWrite{byteBuff},
 		dc:      &utils.SafeMapStorage{},
 	}
 	fFwv.Cfg().Fields = []*config.FCTemplate{
@@ -329,7 +328,7 @@ func (nopCloserError) Write(s []byte) (n int, err error) {
 }
 func TestFileFwvOnEvictedClose(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -337,7 +336,7 @@ func TestFileFwvOnEvictedClose(t *testing.T) {
 		cfg:     cfg.EEsCfg().Exporters[0],
 		cgrCfg:  cfg,
 		filterS: filterS,
-		writer:  nopCloserError{byteBuff},
+		file:    nopCloserError{byteBuff},
 		dc:      &utils.SafeMapStorage{},
 	}
 	fFwv.Cfg().Fields = []*config.FCTemplate{

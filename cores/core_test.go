@@ -21,12 +21,13 @@ package cores
 import (
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewCoreService(t *testing.T) {
@@ -35,27 +36,38 @@ func TestNewCoreService(t *testing.T) {
 	stopchan := make(chan struct{}, 1)
 	caps := engine.NewCaps(1, utils.MetaBusy)
 	sts := engine.NewCapsStats(cfgDflt.CoreSCfg().CapsStatsInterval, caps, stopchan)
-	stopMemChan := make(chan struct{})
-	expected := &CoreS{
-		stopMemPrf: stopchan,
+	shdWg := new(sync.WaitGroup)
+	shdChan := utils.NewSyncedChan()
+	stopMemPrf := make(chan struct{})
+	expected := &CoreService{
+		fileMEM:    "/tmp",
+		shdWg:      shdWg,
+		shdChan:    shdChan,
+		stopMemPrf: stopMemPrf,
 		cfg:        cfgDflt,
 		CapsStats:  sts,
-		fileMEM:    "/tmp",
 	}
-	rcv := NewCoreService(cfgDflt, caps, nil, "/tmp", stopMemChan, stopchan, nil, nil)
+
+	rcv := NewCoreService(cfgDflt, caps, nil, "/tmp", stopchan, shdWg, stopMemPrf, shdChan)
 	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %+v, received %+v", expected, rcv)
+		t.Errorf("Expected %+v, received %+v", utils.ToJSON(expected), utils.ToJSON(rcv))
 	}
+	close(stopchan)
 	//shut down the service
-	rcv.shtDw = func() {}
 	rcv.Shutdown()
-	rcv.ShutdownEngine()
 }
 
 func TestCoreServiceStatus(t *testing.T) {
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CoreSCfg().CapsStatsInterval = 1
-	cores := NewCoreService(cfg, engine.NewCaps(1, utils.MetaBusy), nil, "/tmp", nil, nil, nil, func() {})
+	cfgDflt := config.NewDefaultCGRConfig()
+	cfgDflt.CoreSCfg().CapsStatsInterval = 1
+	caps := engine.NewCaps(1, utils.MetaBusy)
+	stopChan := make(chan struct{}, 1)
+
+	cores := NewCoreService(cfgDflt, caps, nil, "/tmp", stopChan, nil, nil, nil)
+	args := &utils.TenantWithAPIOpts{
+		Tenant:  "cgrates.org",
+		APIOpts: map[string]interface{}{},
+	}
 
 	var reply map[string]interface{}
 	cfgVrs, err := utils.GetCGRVersion()
@@ -69,15 +81,14 @@ func TestCoreServiceStatus(t *testing.T) {
 		utils.VersionName:      cfgVrs,
 		utils.ActiveGoroutines: runtime.NumGoroutine(),
 		utils.MemoryUsage:      "CHANGED_MEMORY_USAGE",
-		utils.NodeID:           cfg.GeneralCfg().NodeID,
+		utils.NodeID:           cfgDflt.GeneralCfg().NodeID,
 	}
-	if err := cores.V1Status(nil, nil, &reply); err != nil {
+	if err := cores.Status(args, &reply); err != nil {
 		t.Error(err)
 	} else {
 		reply[utils.RunningSince] = "TIME_CHANGED"
 		reply[utils.MemoryUsage] = "CHANGED_MEMORY_USAGE"
 	}
-
 	if !reflect.DeepEqual(expected[utils.GoVersion], reply[utils.GoVersion]) {
 		t.Errorf("Expected %+v, received %+v", utils.ToJSON(expected[utils.GoVersion]), utils.ToJSON(reply[utils.GoVersion]))
 	}
@@ -95,7 +106,7 @@ func TestCoreServiceStatus(t *testing.T) {
 	}
 	utils.GitLastLog = `Date: wrong format
 `
-	if err := cores.V1Status(nil, nil, &reply); err != nil {
+	if err := cores.Status(args, &reply); err != nil {
 		t.Error(err)
 	}
 

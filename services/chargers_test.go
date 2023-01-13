@@ -22,33 +22,34 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/rpcclient"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // TestChargerSCoverage for cover testing
 func TestChargerSCoverage(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.AttributeSCfg().Enabled = true
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	server := cores.NewServer(nil)
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	chS := NewCacheService(cfg, db, nil, server, make(chan context.ClientConnector, 1), anz, nil, srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	chrS1 := NewChargerService(cfg, db, chS,
-		filterSChan, server, make(chan birpc.ClientConnector, 1),
+		filterSChan, server, make(chan rpcclient.ClientConnector, 1),
 		nil, anz, srvDep)
 	if chrS1.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 	chrS := &ChargerService{
-		connChan:    make(chan birpc.ClientConnector, 1),
+		connChan:    make(chan rpcclient.ClientConnector, 1),
 		cfg:         cfg,
 		dm:          db,
 		cacheS:      chS,
@@ -62,7 +63,7 @@ func TestChargerSCoverage(t *testing.T) {
 		t.Errorf("Expected service to be down")
 	}
 
-	chrS.chrS = &engine.ChargerS{}
+	chrS.chrS = &engine.ChargerService{}
 	if !chrS.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
@@ -74,8 +75,8 @@ func TestChargerSCoverage(t *testing.T) {
 	if !reflect.DeepEqual(shouldRun, false) {
 		t.Errorf("\nExpecting <false>,\n Received <%+v>", shouldRun)
 	}
-	chrS.connChan = make(chan birpc.ClientConnector, 1)
-	chrS.connChan <- &testMockClients{}
+	chrS.connChan = make(chan rpcclient.ClientConnector, 1)
+	chrS.connChan <- chS
 	shutErr := chrS.Shutdown()
 	if shutErr != nil {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", nil, shutErr)

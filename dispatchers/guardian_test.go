@@ -21,38 +21,11 @@ package dispatchers
 import (
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/guardian"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
-func TestDspRateSv1CostForEventCase(t *testing.T) {
-	cgrCfg := config.NewDefaultCGRConfig()
-	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
-	CGREvent := &utils.CGREvent{
-		Tenant: "tenant",
-	}
-	var reply *string
-	result := dspSrv.GuardianSv1Ping(context.Background(), CGREvent, reply)
-	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
-	if result == nil || result.Error() != expected {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
-	}
-}
-
-func TestDspGuardianSv1PingNil(t *testing.T) {
-	cgrCfg := config.NewDefaultCGRConfig()
-	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
-	var reply *string
-	result := dspSrv.GuardianSv1Ping(context.Background(), nil, reply)
-	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
-	if result == nil || result.Error() != expected {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
-	}
-}
-
-func TestDspGuardianSv1PingErrorNil(t *testing.T) {
+func TestGuardianGuardianSv1PingErr1(t *testing.T) {
 	cgrCfg := config.NewDefaultCGRConfig()
 	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
 	cgrCfg.DispatcherSCfg().AttributeSConns = []string{"test"}
@@ -60,66 +33,106 @@ func TestDspGuardianSv1PingErrorNil(t *testing.T) {
 		Tenant: "tenant",
 	}
 	var reply *string
-	result := dspSrv.GuardianSv1Ping(context.Background(), CGREvent, reply)
+
 	expected := "MANDATORY_IE_MISSING: [ApiKey]"
+	result := dspSrv.GuardianSv1Ping(CGREvent, reply)
+
 	if result == nil || result.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
 	}
 }
 
-func TestDspGuardianSv1RemoteLockCase(t *testing.T) {
+func TestGuardianGuardianSv1PingErr2(t *testing.T) {
 	cgrCfg := config.NewDefaultCGRConfig()
 	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
-	CGREvent := &guardian.AttrRemoteLockWithAPIOpts{
+	CGREvent := &utils.CGREvent{
 		Tenant: "tenant",
 	}
 	var reply *string
-	result := dspSrv.GuardianSv1RemoteLock(context.Background(), CGREvent, reply)
+
 	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
+	result := dspSrv.GuardianSv1Ping(CGREvent, reply)
+
 	if result == nil || result.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
 	}
 }
 
-func TestDspGuardianSv1RemoteLockErrorNil(t *testing.T) {
+func TestGuardianGuardianSv1PingErrNil(t *testing.T) {
+	cgrCfg := config.NewDefaultCGRConfig()
+	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
+	var CGREvent *utils.CGREvent
+	var reply *string
+
+	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
+	result := dspSrv.GuardianSv1Ping(CGREvent, reply)
+
+	if result == nil || result.Error() != expected {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
+	}
+}
+
+func TestGuardianGuardianSv1RemoteLockErr1(t *testing.T) {
 	cgrCfg := config.NewDefaultCGRConfig()
 	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
 	cgrCfg.DispatcherSCfg().AttributeSConns = []string{"test"}
-	CGREvent := &guardian.AttrRemoteLockWithAPIOpts{
+	CGREvent := AttrRemoteLockWithAPIOpts{
 		Tenant: "tenant",
 	}
 	var reply *string
-	result := dspSrv.GuardianSv1RemoteLock(context.Background(), CGREvent, reply)
+
 	expected := "MANDATORY_IE_MISSING: [ApiKey]"
+	result := dspSrv.GuardianSv1RemoteLock(CGREvent, reply)
+
 	if result == nil || result.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
 	}
 }
 
-func TestDspGuardianSv1RemoteUnlockCase(t *testing.T) {
+func TestGuardianGuardianSv1RemoteLockErr2(t *testing.T) {
 	cgrCfg := config.NewDefaultCGRConfig()
 	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
-	CGREvent := &guardian.AttrRemoteUnlockWithAPIOpts{
+	CGREvent := AttrRemoteLockWithAPIOpts{
 		Tenant: "tenant",
 	}
-	var reply *[]string
-	result := dspSrv.GuardianSv1RemoteUnlock(context.Background(), CGREvent, reply)
+	var reply *string
+
 	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
+	result := dspSrv.GuardianSv1RemoteLock(CGREvent, reply)
+
 	if result == nil || result.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
 	}
 }
 
-func TestDspGuardianSv1RemoteUnlockErrorNil(t *testing.T) {
+func TestGuardianGuardianSv1RemoteUnlockErr1(t *testing.T) {
 	cgrCfg := config.NewDefaultCGRConfig()
 	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
 	cgrCfg.DispatcherSCfg().AttributeSConns = []string{"test"}
-	CGREvent := &guardian.AttrRemoteUnlockWithAPIOpts{
+	CGREvent := AttrRemoteUnlockWithAPIOpts{
 		Tenant: "tenant",
 	}
 	var reply *[]string
-	result := dspSrv.GuardianSv1RemoteUnlock(context.Background(), CGREvent, reply)
+
 	expected := "MANDATORY_IE_MISSING: [ApiKey]"
+	result := dspSrv.GuardianSv1RemoteUnlock(CGREvent, reply)
+
+	if result == nil || result.Error() != expected {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
+	}
+}
+
+func TestGuardianGuardianSv1RemoteUnlockErr2(t *testing.T) {
+	cgrCfg := config.NewDefaultCGRConfig()
+	dspSrv := NewDispatcherService(nil, cgrCfg, nil, nil)
+	CGREvent := AttrRemoteUnlockWithAPIOpts{
+		Tenant: "tenant",
+	}
+	var reply *[]string
+
+	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
+	result := dspSrv.GuardianSv1RemoteUnlock(CGREvent, reply)
+
 	if result == nil || result.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
 	}

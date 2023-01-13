@@ -22,19 +22,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewResourceService returns the Resource Service
 func NewResourceService(cfg *config.CGRConfig, dm *DataDBService,
-	cacheS *CacheService, filterSChan chan *engine.FilterS,
-	server *cores.Server, internalResourceSChan chan birpc.ClientConnector,
+	cacheS *engine.CacheS, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalResourceSChan chan rpcclient.ClientConnector,
 	connMgr *engine.ConnManager, anz *AnalyzerService,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &ResourceService{
@@ -55,61 +55,51 @@ type ResourceService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	dm          *DataDBService
-	cacheS      *CacheService
+	cacheS      *engine.CacheS
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
 
-	reS      *engine.ResourceS
-	connChan chan birpc.ClientConnector
+	reS      *engine.ResourceService
+	rpc      *v1.ResourceSv1
+	connChan chan rpcclient.ClientConnector
 	connMgr  *engine.ConnManager
 	anz      *AnalyzerService
 	srvDep   map[string]*sync.WaitGroup
 }
 
 // Start should handle the service start
-func (reS *ResourceService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (reS *ResourceService) Start() (err error) {
 	if reS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 	reS.srvDep[utils.DataDB].Add(1)
+	<-reS.cacheS.GetPrecacheChannel(utils.CacheResourceProfiles)
+	<-reS.cacheS.GetPrecacheChannel(utils.CacheResources)
+	<-reS.cacheS.GetPrecacheChannel(utils.CacheResourceFilterIndexes)
 
-	if err = reS.cacheS.WaitToPrecache(ctx,
-		utils.CacheResourceProfiles,
-		utils.CacheResources,
-		utils.CacheResourceFilterIndexes); err != nil {
-		return
-	}
-
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, reS.filterSChan); err != nil {
-		return
-	}
-
-	var datadb *engine.DataManager
-	if datadb, err = reS.dm.WaitForDM(ctx); err != nil {
-		return
-	}
+	filterS := <-reS.filterSChan
+	reS.filterSChan <- filterS
+	dbchan := reS.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
 	reS.Lock()
 	defer reS.Unlock()
 	reS.reS = engine.NewResourceService(datadb, reS.cfg, filterS, reS.connMgr)
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.ResourceS))
-	reS.reS.StartLoop(ctx)
-	srv, _ := engine.NewService(reS.reS)
-	// srv, _ := birpc.NewService(apis.NewResourceSv1(reS.reS), "", false)
+	reS.reS.StartLoop()
+	reS.rpc = v1.NewResourceSv1(reS.reS)
 	if !reS.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			reS.server.RpcRegister(s)
-		}
+		reS.server.RpcRegister(reS.rpc)
 	}
-	reS.connChan <- reS.anz.GetInternalCodec(srv, utils.ResourceS)
+	reS.connChan <- reS.anz.GetInternalCodec(reS.rpc, utils.ResourceS)
 	return
 }
 
 // Reload handles the change of config
-func (reS *ResourceService) Reload(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (reS *ResourceService) Reload() (err error) {
 	reS.Lock()
-	reS.reS.Reload(ctx)
+	reS.reS.Reload()
 	reS.Unlock()
 	return
 }
@@ -119,10 +109,10 @@ func (reS *ResourceService) Shutdown() (err error) {
 	defer reS.srvDep[utils.DataDB].Done()
 	reS.Lock()
 	defer reS.Unlock()
-	reS.reS.Shutdown(context.TODO()) //we don't verify the error because shutdown never returns an error
+	reS.reS.Shutdown() //we don't verify the error because shutdown never returns an error
 	reS.reS = nil
+	reS.rpc = nil
 	<-reS.connChan
-	reS.server.RpcUnregisterName(utils.ResourceSv1)
 	return
 }
 

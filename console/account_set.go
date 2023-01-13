@@ -19,46 +19,47 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/utils"
+	v2 "github.com/cgrates/cgrates/apier/v2"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
-	c := &CmdSetAccount{
+	c := &CmdAddAccount{
 		name:      "account_set",
-		rpcMethod: utils.AdminSv1SetAccount,
-		rpcParams: &utils.AccountWithAPIOpts{},
+		rpcMethod: utils.APIerSv2SetAccount,
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
 }
 
-type CmdSetAccount struct {
+// Commander implementation
+type CmdAddAccount struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.AccountWithAPIOpts
+	rpcParams *v2.AttrSetAccount
 	*CommandExecuter
 }
 
-func (self *CmdSetAccount) Name() string {
+func (self *CmdAddAccount) Name() string {
 	return self.name
 }
 
-func (self *CmdSetAccount) RpcMethod() string {
+func (self *CmdAddAccount) RpcMethod() string {
 	return self.rpcMethod
 }
 
-func (self *CmdSetAccount) RpcParams(reset bool) interface{} {
+func (self *CmdAddAccount) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = &utils.AccountWithAPIOpts{Account: new(utils.Account)}
+		self.rpcParams = &v2.AttrSetAccount{}
 	}
 	return self.rpcParams
 }
 
-func (self *CmdSetAccount) PostprocessRpcParams() error {
+func (self *CmdAddAccount) PostprocessRpcParams() error {
 	return nil
 }
 
-func (self *CmdSetAccount) RpcResult() interface{} {
+func (self *CmdAddAccount) RpcResult() interface{} {
 	var s string
 	return &s
 }

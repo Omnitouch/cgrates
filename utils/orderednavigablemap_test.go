@@ -863,136 +863,89 @@ func TestOrderedNavigableMapOrderedFields(t *testing.T) {
 	}
 }
 
+func TestOrderedNavigableMapSetAsSliceErr(t *testing.T) {
+	nm := NewOrderedNavigableMap()
+	err := nm.SetAsSlice(&FullPath{}, []*DataNode{NewLeafNode(10), NewLeafNode(101)})
+	if err == nil || err != ErrWrongPath {
+		t.Errorf("Expected %+v, received %+v", ErrWrongPath, err)
+	}
+}
+
+func TestOrderedNavigableMapFieldAsStringErr(t *testing.T) {
+	nm := NewOrderedNavigableMap()
+	path := []string{"0", "path"}
+	_, err := nm.FieldAsString(path)
+	if err == nil || err != ErrNotFound {
+		t.Errorf("Expected %+v, received %+v", ErrNotFound, err)
+	}
+}
+
 func TestOrderedNavigableMapString(t *testing.T) {
-	onm := &OrderedNavigableMap{
-		nm: &DataNode{
-			Type: NMMapType,
-			Map: map[string]*DataNode{
-				"Node1": {
-					Value: &DataLeaf{
-						Data: "value",
-					},
+	onm := NewOrderedNavigableMap()
+	onm.nm = &DataNode{
+		Type: NMMapType,
+		Map: map[string]*DataNode{
+			"test1": &DataNode{
+				Value: &DataLeaf{
+					Data: "data!",
 				},
 			},
 		},
 	}
-	exp := `{"Map":{"Node1":{"Value":{"Data":"value"}}}}`
-	rcv := onm.String()
-	if rcv != exp {
-		t.Errorf("Expected %v but received %v", exp, rcv)
+	onmExpect := `{"Map":{"test1":{"Value":{"Data":"data!"}}}}`
+	if onm.String() != onmExpect {
+		t.Errorf("Expected %s but received %s", onmExpect, onm.String())
 	}
 }
 
 func TestOrderedNavigableMapInterface(t *testing.T) {
-	onm := &OrderedNavigableMap{
-		nm: &DataNode{
-			Type: NMMapType,
-			Map: map[string]*DataNode{
-				"Node1": {
-					Value: &DataLeaf{
-						Data: "value",
-					},
+	onm := NewOrderedNavigableMap()
+	onm.nm = &DataNode{
+		Type: NMMapType,
+		Map: map[string]*DataNode{
+			"test1": &DataNode{
+				Value: &DataLeaf{
+					Data: "data!",
 				},
 			},
 		},
 	}
-	// exp := `{"Map":{"Node1":{"Value":{"Data":"value"}}}}`
-	rcv := onm.Interface()
-	if rcv != onm.nm {
-		t.Errorf("Expected %v but received %v", onm.nm, rcv)
-	}
-}
-
-func TestOrderedNavigableMapSetAsSlice(t *testing.T) {
-	nm := NewOrderedNavigableMap()
-	nm.Set(&FullPath{
-		PathSlice: []string{},
-		Path:      "Field1.Field2[0]",
-	}, NewLeafNode("1003"))
-	if err := nm.SetAsSlice(&FullPath{
-		PathSlice: []string{},
-		Path:      "Field1.Field2[0]",
-	}, nil); err != ErrWrongPath {
-		t.Errorf("Exptected %v but received %v", err, ErrWrongPath)
-	}
-}
-
-func TestOrderedNavigableMapFieldAsStringError(t *testing.T) {
-	onm := &OrderedNavigableMap{
-		nm: &DataNode{
-			Type: NMDataType,
-			Map: map[string]*DataNode{
-				"Node1": {
-					Value: &DataLeaf{
-						Data: "value",
-					},
-				},
-			},
-		},
-	}
-
-	if _, err := onm.FieldAsString([]string{"path1"}); err == nil || err != ErrNotFound {
-		t.Errorf("Expected %v but received %v", ErrNotFound, err)
+	if !reflect.DeepEqual(onm.nm, onm.Interface()) {
+		t.Errorf("Expected %v but received %v", onm.nm, onm.Interface())
 	}
 }
 
 func TestOrderedNavigableMapAppend(t *testing.T) {
-	onm := &OrderedNavigableMap{
-		nm: &DataNode{
-			Type: NMDataType,
-			Map: map[string]*DataNode{
-				"Node1": {
-					Value: &DataLeaf{
-						Data: "value",
-					},
-				},
-			},
-		},
-	}
-
-	if err := onm.Append(&FullPath{
-		PathSlice: []string{"path1"},
+	onm := NewOrderedNavigableMap()
+	onm.nm.Type = NMMapType
+	onm.Set(&FullPath{
+		PathSlice: []string{"Field1", "Field2", "0"},
 		Path:      "Field1.Field2[0]",
-	}, nil); err == nil || err != ErrWrongPath {
+	}, NewLeafNode("1003"))
+	if err := onm.Append(&FullPath{
+		PathSlice: []string{"Field1", "Field2", "0"},
+		Path:      "Field1.Field2[0]",
+	}, &DataLeaf{Data: "dataTest"}); err == nil || err != ErrWrongPath {
 		t.Errorf("Expected %v but received %v", ErrWrongPath, err)
 	}
 }
 
 func TestOrderedNavigableMapCompose(t *testing.T) {
-	onm := &OrderedNavigableMap{
-		nm: &DataNode{
-			Type: NMMapType,
-			Map: map[string]*DataNode{
-				"Node1": {
-					Value: &DataLeaf{
-						Data: "value",
-					},
-				},
-			},
-			Value: &DataLeaf{
-				Data: "Leaf1",
-			},
-		},
-		orderRef: map[string][]*PathItemElement{
-			"Field1.Field2[0]": {
-				{
-					Value: []string{"orderRefString"},
-				},
-			},
-		},
-		orderIdx: &PathItemList{
-			len: 1,
-		},
-	}
-
-	if err := onm.Compose(&FullPath{
-		PathSlice: []string{"Node1"},
+	onm := NewOrderedNavigableMap()
+	onm.nm.Type = NMMapType
+	onm.Set(&FullPath{
+		PathSlice: []string{"Field1", "Field2", "0"},
 		Path:      "Field1.Field2[0]",
-	}, &DataLeaf{Data: "Leaf2"}); err != nil {
-		t.Error(err)
+	}, NewLeafNode("1003"))
+	onm.orderRef = make(map[string][]*PathItemElement)
+	onm.orderRef = map[string][]*PathItemElement{
+		"Field1.Field2[0]": []*PathItemElement{&PathItemElement{Value: []string{"test"}}},
 	}
-	if onm.nm.Map["Node1"].Value.Data != "valueLeaf2" {
-		t.Errorf("Expected %v but received %v", "valueLeaf2", onm.nm.Value.Data)
+	if err := onm.Compose(&FullPath{
+		PathSlice: []string{"Field1", "Field2", "0"},
+		Path:      "Field1.Field2[0]",
+	}, &DataLeaf{Data: "dataTest"}); err != nil {
+		t.Error(err)
 	}
 }
 

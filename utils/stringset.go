@@ -60,9 +60,11 @@ func (s StringSet) AsSlice() []string {
 	if s == nil {
 		return nil
 	}
-	result := make([]string, 0, len(s))
+	result := make([]string, len(s))
+	i := 0
 	for k := range s {
-		result = append(result, k)
+		result[i] = k
+		i++
 	}
 	return result
 }
@@ -122,19 +124,6 @@ func JoinStringSet(s ...StringSet) (conc StringSet) {
 		}
 	}
 	return
-}
-
-// Equals returns true if the set are the same
-func (s StringSet) Equals(s2 StringSet) bool {
-	if s.Size() != s2.Size() {
-		return false
-	}
-	for k := range s2 {
-		if !s.Has(k) {
-			return false
-		}
-	}
-	return true
 }
 
 // added this to implement DataProvieder interface avoid reflect usage in MapStorage

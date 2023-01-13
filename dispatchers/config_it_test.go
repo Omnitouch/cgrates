@@ -25,8 +25,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var sTestsDspConfig = []func(t *testing.T){
@@ -74,11 +74,11 @@ func testDspConfigSv1GetJSONSection(t *testing.T) {
 	}
 	var reply map[string]interface{}
 	if err := dispEngine.RPC.Call(utils.ConfigSv1GetConfig, &config.SectionWithAPIOpts{
-		Tenant:   "cgrates.org",
-		Sections: []string{"listen"},
+		Tenant: "cgrates.org",
 		APIOpts: map[string]interface{}{
 			utils.OptsAPIKey: "cfg12345",
 		},
+		Section: "listen",
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, reply) {

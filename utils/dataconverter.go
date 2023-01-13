@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -47,17 +46,6 @@ func (dcs DataConverters) ConvertString(in string) (out string, err error) {
 		}
 	}
 	return IfaceAsString(outIface), nil
-}
-
-// ConvertString converts from and to string
-func (dcs DataConverters) ConvertInterface(in interface{}) (out interface{}, err error) {
-	out = in
-	for _, cnv := range dcs {
-		if out, err = cnv.Convert(out); err != nil {
-			return
-		}
-	}
-	return
 }
 
 // DataConverter represents functions which should convert input into output
@@ -129,16 +117,6 @@ func NewDataConverter(params string) (conv DataConverter, err error) {
 			return NewRandomConverter(EmptyString)
 		}
 		return NewRandomConverter(params[len(MetaRandom)+1:])
-	case strings.HasPrefix(params, MetaJoin):
-		if len(params) == len(MetaJoin) { // no extra params, defaults implied
-			return joinConverter(InfieldSep), nil
-		}
-		return joinConverter(params[len(MetaJoin)+1:]), nil
-	case strings.HasPrefix(params, MetaSplit):
-		if len(params) == len(MetaSplit) { // no extra params, defaults implied
-			return splitConverter(InfieldSep), nil
-		}
-		return splitConverter(params[len(MetaSplit)+1:]), nil
 	default:
 		return nil, fmt.Errorf("unsupported converter definition: <%s>", params)
 	}
@@ -487,26 +465,6 @@ type LengthConverter struct{}
 func (LengthConverter) Convert(in interface{}) (out interface{}, err error) {
 	switch val := in.(type) {
 	case string:
-		if len(val) >= 2 {
-			var tmp interface{}
-			var l func() (interface{}, error)
-			switch {
-			case val[0] == '[' && val[len(val)-1] == ']':
-				v := []interface{}{}
-				l = func() (interface{}, error) { return len(v), nil }
-				tmp = &v
-
-			case val[0] == '{' && val[len(val)-1] == '}':
-				v := map[string]interface{}{}
-				l = func() (interface{}, error) { return len(v), nil }
-				tmp = &v
-			}
-			if tmp != nil {
-				if err := json.Unmarshal([]byte(val), tmp); err == nil {
-					return l()
-				}
-			}
-		}
 		return len(val), nil
 	case []string:
 		return len(val), nil
@@ -544,50 +502,8 @@ func (LengthConverter) Convert(in interface{}) (out interface{}, err error) {
 		return len(val), nil
 	case []complex128:
 		return len(val), nil
-	case map[string]string:
-		return len(val), nil
-	case map[string]interface{}:
-		return len(val), nil
-	case map[string]bool:
-		return len(val), nil
-	case map[string]int:
-		return len(val), nil
-	case map[string]int8:
-		return len(val), nil
-	case map[string]int16:
-		return len(val), nil
-	case map[string]int32:
-		return len(val), nil
-	case map[string]int64:
-		return len(val), nil
-	case map[string]uint:
-		return len(val), nil
-	case map[string]uint8:
-		return len(val), nil
-	case map[string]uint16:
-		return len(val), nil
-	case map[string]uint32:
-		return len(val), nil
-	case map[string]uint64:
-		return len(val), nil
-	case map[string]uintptr:
-		return len(val), nil
-	case map[string]float32:
-		return len(val), nil
-	case map[string]float64:
-		return len(val), nil
-	case map[string]complex64:
-		return len(val), nil
-	case map[string]complex128:
-		return len(val), nil
 	default:
-		vl := reflect.ValueOf(val)
-		switch vl.Kind() {
-		case reflect.Array, reflect.Map, reflect.Slice:
-			return vl.Len(), nil
-		default:
-			return len(IfaceAsString(val)), nil
-		}
+		return len(IfaceAsString(val)), nil
 	}
 }
 
@@ -658,22 +574,6 @@ func (e164Converter) Convert(in interface{}) (interface{}, error) {
 	}
 	return ReverseString(
 		strings.Replace(name[:i], ".", "", -1)), nil
-}
-
-type joinConverter string
-
-func (j joinConverter) Convert(in interface{}) (interface{}, error) {
-	slice, err := IfaceAsStringSlice(in)
-	if err != nil {
-		return nil, err
-	}
-	return strings.Join(slice, string(j)), nil
-}
-
-type splitConverter string
-
-func (j splitConverter) Convert(in interface{}) (interface{}, error) {
-	return strings.Split(IfaceAsString(in), string(j)), nil
 }
 
 // JSONConverter converts an object to json string

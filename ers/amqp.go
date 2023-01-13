@@ -23,21 +23,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/streadway/amqp"
 )
 
 // NewAMQPER return a new amqp event reader
 func NewAMQPER(cfg *config.CGRConfig, cfgIdx int,
 	rdrEvents, partialEvents chan *erEvent, rdrErr chan error,
-	fltrS *engine.FilterS, rdrExit chan struct{}, connMgr *engine.ConnManager) (er EventReader, err error) {
+	fltrS *engine.FilterS, rdrExit chan struct{}) (er EventReader, err error) {
 	rdr := &AMQPER{
-		connMgr:       connMgr,
 		cgrCfg:        cfg,
 		cfgIdx:        cfgIdx,
 		fltrS:         fltrS,
@@ -61,10 +59,9 @@ func NewAMQPER(cfg *config.CGRConfig, cfgIdx int,
 // AMQPER implements EventReader interface for amqp message
 type AMQPER struct {
 	// sync.RWMutex
-	cgrCfg  *config.CGRConfig
-	cfgIdx  int // index of config instance within ERsCfg.Readers
-	fltrS   *engine.FilterS
-	connMgr *engine.ConnManager
+	cgrCfg *config.CGRConfig
+	cfgIdx int // index of config instance within ERsCfg.Readers
+	fltrS  *engine.FilterS
 
 	dialURL      string
 	queueID      string
@@ -169,8 +166,7 @@ func (rdr *AMQPER) readLoop(msgChan <-chan amqp.Delivery) {
 							utils.ERs, msg.MessageId, err.Error()))
 				}
 				if rdr.poster != nil { // post it
-					if err := ees.ExportWithAttempts(context.Background(), rdr.poster, msg.Body, utils.EmptyString,
-						rdr.connMgr, rdr.cgrCfg.GeneralCfg().DefaultTenant); err != nil {
+					if err := ees.ExportWithAttempts(rdr.poster, msg.Body, utils.EmptyString); err != nil {
 						utils.Logger.Warning(
 							fmt.Sprintf("<%s> writing message %s error: %s",
 								utils.ERs, msg.MessageId, err.Error()))
@@ -198,7 +194,7 @@ func (rdr *AMQPER) processMessage(msg []byte) (err error) {
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
 	var pass bool
-	if pass, err = rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err = rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
 		return
 	}
@@ -262,9 +258,10 @@ func (rdr *AMQPER) createPoster() {
 		processedOpt = new(config.EventExporterOpts)
 	}
 	rdr.poster = ees.NewAMQPee(&config.EventExporterCfg{
-		ID:         rdr.Config().ID,
-		ExportPath: utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
-		Attempts:   rdr.cgrCfg.EEsCfg().GetDefaultExporter().Attempts,
-		Opts:       processedOpt,
+		ID:             rdr.Config().ID,
+		ExportPath:     utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
+		Attempts:       rdr.cgrCfg.GeneralCfg().PosterAttempts,
+		Opts:           processedOpt,
+		FailedPostsDir: rdr.cgrCfg.GeneralCfg().FailedPostsDir,
 	}, nil)
 }

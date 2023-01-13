@@ -27,13 +27,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/rpc2"
 	"github.com/cgrates/aringo"
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // constants used by AsteriskAgent
@@ -64,8 +64,6 @@ func NewAsteriskAgent(cgrCfg *config.CGRConfig, astConnIdx int,
 		connMgr:     connMgr,
 		eventsCache: make(map[string]*utils.CGREvent),
 	}
-	srv, _ := birpc.NewService(sma, "", false)
-	sma.ctx = context.WithClient(context.TODO(), srv)
 	return sma
 }
 
@@ -79,7 +77,6 @@ type AsteriskAgent struct {
 	astErrChan  chan error
 	eventsCache map[string]*utils.CGREvent // used to gather information about events during various phases
 	evCacheMux  sync.RWMutex               // Protect eventsCache
-	ctx         *context.Context
 }
 
 func (sma *AsteriskAgent) connectAsterisk(stopChan <-chan struct{}) (err error) {
@@ -89,8 +86,7 @@ func (sma *AsteriskAgent) connectAsterisk(stopChan <-chan struct{}) (err error) 
 	sma.astConn, err = aringo.NewARInGO(fmt.Sprintf("ws://%s/ari/events?api_key=%s:%s&app=%s",
 		connCfg.Address, connCfg.User, connCfg.Password, CGRAuthAPP), "http://cgrates.org",
 		connCfg.User, connCfg.Password, fmt.Sprintf("%s@%s", utils.CGRateS, utils.Version),
-		sma.astEvChan, sma.astErrChan, stopChan, connCfg.ConnectAttempts, connCfg.Reconnects,
-		connCfg.MaxReconnectInterval, utils.FibDuration)
+		sma.astEvChan, sma.astErrChan, stopChan, connCfg.ConnectAttempts, connCfg.Reconnects, connCfg.MaxReconnectInterval, utils.FibDuration)
 	return
 }
 
@@ -166,7 +162,7 @@ func (sma *AsteriskAgent) handleStasisStart(ev *SMAsteriskEvent) {
 		return
 	}
 	//authorize Session
-	authArgs := ev.AsCGREvent()
+	authArgs := ev.V1AuthorizeArgs()
 	if authArgs == nil {
 		sma.hangupChannel(ev.ChannelID(),
 			fmt.Sprintf("<%s> event: %s cannot generate auth session arguments",
@@ -174,7 +170,7 @@ func (sma *AsteriskAgent) handleStasisStart(ev *SMAsteriskEvent) {
 		return
 	}
 	var authReply sessions.V1AuthorizeReply
-	if err := sma.connMgr.Call(sma.ctx, sma.cgrCfg.AsteriskAgentCfg().SessionSConns,
+	if err := sma.connMgr.Call(sma.cgrCfg.AsteriskAgentCfg().SessionSConns, sma,
 		utils.SessionSv1AuthorizeEvent, authArgs, &authReply); err != nil {
 		sma.hangupChannel(ev.ChannelID(),
 			fmt.Sprintf("<%s> error: %s authorizing session for channelID: %s",
@@ -182,7 +178,7 @@ func (sma *AsteriskAgent) handleStasisStart(ev *SMAsteriskEvent) {
 		return
 	}
 	if authReply.Attributes != nil {
-		for fldName := range authReply.Attributes.UniqueAlteredFields() {
+		for _, fldName := range authReply.Attributes.AlteredFields {
 			fldName = strings.TrimPrefix(fldName, utils.MetaReq+utils.NestingSep)
 			if _, has := authReply.Attributes.CGREvent.Event[fldName]; !has {
 				continue //maybe removed
@@ -199,16 +195,14 @@ func (sma *AsteriskAgent) handleStasisStart(ev *SMAsteriskEvent) {
 			}
 		}
 	}
-	if utils.OptAsBool(authArgs.APIOpts, utils.MetaAccounts) {
-		if authReply.MaxUsage == nil ||
-			authReply.MaxUsage.Compare(utils.NewDecimal(0, 0)) == 0 {
+	if authArgs.GetMaxUsage {
+		if authReply.MaxUsage == nil || *authReply.MaxUsage == time.Duration(0) {
 			sma.hangupChannel(ev.ChannelID(), "")
 			return
 		}
-		maxDur, _ := authReply.MaxUsage.Duration()
 		//  Set absolute timeout for non-postpaid calls
 		if !sma.setChannelVar(ev.ChannelID(), CGRMaxSessionTime,
-			strconv.Itoa(int(maxDur.Milliseconds()))) {
+			strconv.Itoa(int(authReply.MaxUsage.Milliseconds()))) {
 			return
 		}
 	}
@@ -235,7 +229,7 @@ func (sma *AsteriskAgent) handleStasisStart(ev *SMAsteriskEvent) {
 	}
 	// Done with processing event, cache it for later use
 	sma.evCacheMux.Lock()
-	sma.eventsCache[ev.ChannelID()] = authArgs
+	sma.eventsCache[ev.ChannelID()] = authArgs.CGREvent
 	sma.evCacheMux.Unlock()
 }
 
@@ -259,24 +253,25 @@ func (sma *AsteriskAgent) handleChannelStateChange(ev *SMAsteriskEvent) {
 				utils.AsteriskAgent, err.Error(), ev.ChannelID()))
 		return
 	}
-	var initS bool
-	if cgrEvDisp.APIOpts == nil {
-		initS = true
-		cgrEvDisp.APIOpts = map[string]interface{}{utils.OptsSesInitiate: true}
-	} else {
-		initS = utils.OptAsBool(cgrEvDisp.APIOpts, utils.OptsSesInitiate)
+	// populate init session args
+	initSessionArgs := ev.V1InitSessionArgs(*cgrEvDisp)
+	if initSessionArgs == nil {
+		utils.Logger.Err(fmt.Sprintf("<%s> event: %s cannot generate init session arguments",
+			utils.AsteriskAgent, ev.ChannelID()))
+		return
 	}
+
 	//initit Session
 	var initReply sessions.V1InitSessionReply
-	if err := sma.connMgr.Call(sma.ctx, sma.cgrCfg.AsteriskAgentCfg().SessionSConns,
+	if err := sma.connMgr.Call(sma.cgrCfg.AsteriskAgentCfg().SessionSConns, sma,
 		utils.SessionSv1InitiateSession,
-		cgrEvDisp, &initReply); err != nil {
+		initSessionArgs, &initReply); err != nil {
 		sma.hangupChannel(ev.ChannelID(),
 			fmt.Sprintf("<%s> error: %s when attempting to initiate session for channelID: %s",
 				utils.AsteriskAgent, err.Error(), ev.ChannelID()))
 		return
 	}
-	if initS && (initReply.MaxUsage == nil || *initReply.MaxUsage == time.Duration(0)) {
+	if initSessionArgs.InitSession && (initReply.MaxUsage == nil || *initReply.MaxUsage == time.Duration(0)) {
 		sma.hangupChannel(ev.ChannelID(), "")
 		return
 	}
@@ -302,19 +297,22 @@ func (sma *AsteriskAgent) handleChannelDestroyed(ev *SMAsteriskEvent) {
 		return
 	}
 	// populate terminate session args
-	if cgrEvDisp.APIOpts == nil {
-		cgrEvDisp.APIOpts = map[string]interface{}{utils.OptsSesTerminate: true}
+	tsArgs := ev.V1TerminateSessionArgs(*cgrEvDisp)
+	if tsArgs == nil {
+		utils.Logger.Err(fmt.Sprintf("<%s> event: %s cannot generate terminate session arguments",
+			utils.AsteriskAgent, chID))
+		return
 	}
 
 	var reply string
-	if err := sma.connMgr.Call(sma.ctx, sma.cgrCfg.AsteriskAgentCfg().SessionSConns,
+	if err := sma.connMgr.Call(sma.cgrCfg.AsteriskAgentCfg().SessionSConns, sma,
 		utils.SessionSv1TerminateSession,
-		cgrEvDisp, &reply); err != nil {
+		tsArgs, &reply); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<%s> Error: %s when attempting to terminate session for channelID: %s",
 			utils.AsteriskAgent, err.Error(), chID))
 	}
 	if sma.cgrCfg.AsteriskAgentCfg().CreateCDR {
-		if err := sma.connMgr.Call(sma.ctx, sma.cgrCfg.AsteriskAgentCfg().SessionSConns,
+		if err := sma.connMgr.Call(sma.cgrCfg.AsteriskAgentCfg().SessionSConns, sma,
 			utils.SessionSv1ProcessCDR,
 			cgrEvDisp, &reply); err != nil {
 			utils.Logger.Err(fmt.Sprintf("<%s> Error: %s when attempting to process CDR for channelID: %s",
@@ -324,8 +322,13 @@ func (sma *AsteriskAgent) handleChannelDestroyed(ev *SMAsteriskEvent) {
 
 }
 
+// Call implements rpcclient.ClientConnector interface
+func (sma *AsteriskAgent) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	return utils.RPCCall(sma, serviceMethod, args, reply)
+}
+
 // V1DisconnectSession is internal method to disconnect session in asterisk
-func (sma *AsteriskAgent) V1DisconnectSession(_ *context.Context, args utils.AttrDisconnectSession, reply *string) error {
+func (sma *AsteriskAgent) V1DisconnectSession(args utils.AttrDisconnectSession, reply *string) error {
 	channelID := engine.NewMapEvent(args.EventStart).GetStringIgnoreErrors(utils.OriginID)
 	sma.hangupChannel(channelID, "")
 	*reply = utils.OK
@@ -333,7 +336,7 @@ func (sma *AsteriskAgent) V1DisconnectSession(_ *context.Context, args utils.Att
 }
 
 // V1GetActiveSessionIDs is internal method to  get all active sessions in asterisk
-func (sma *AsteriskAgent) V1GetActiveSessionIDs(_ *context.Context, _ string,
+func (sma *AsteriskAgent) V1GetActiveSessionIDs(ignParam string,
 	sessionIDs *[]*sessions.SessionID) error {
 	var slMpIface []map[string]interface{} // decode the result from ari into a slice of map[string]interface{}
 	if byts, err := sma.astConn.Call(
@@ -361,16 +364,68 @@ func (sma *AsteriskAgent) V1GetActiveSessionIDs(_ *context.Context, _ string,
 }
 
 // V1ReAuthorize is used to implement the sessions.BiRPClient interface
-func (*AsteriskAgent) V1ReAuthorize(_ *context.Context, originID string, reply *string) (err error) {
+func (*AsteriskAgent) V1ReAuthorize(originID string, reply *string) (err error) {
 	return utils.ErrNotImplemented
 }
 
 // V1DisconnectPeer is used to implement the sessions.BiRPClient interface
-func (*AsteriskAgent) V1DisconnectPeer(_ *context.Context, args *utils.DPRArgs, reply *string) (err error) {
+func (*AsteriskAgent) V1DisconnectPeer(args *utils.DPRArgs, reply *string) (err error) {
 	return utils.ErrNotImplemented
 }
 
 // V1WarnDisconnect is used to implement the sessions.BiRPClient interface
-func (sma *AsteriskAgent) V1WarnDisconnect(_ *context.Context, args map[string]interface{}, reply *string) (err error) {
+func (sma *AsteriskAgent) V1WarnDisconnect(args map[string]interface{}, reply *string) (err error) {
 	return utils.ErrNotImplemented
+}
+
+// CallBiRPC is part of utils.BiRPCServer interface to help internal connections do calls over rpcclient.ClientConnector interface
+func (sma *AsteriskAgent) CallBiRPC(clnt rpcclient.ClientConnector, serviceMethod string, args interface{}, reply interface{}) error {
+	return utils.BiRPCCall(sma, clnt, serviceMethod, args, reply)
+}
+
+// BiRPCv1DisconnectSession is internal method to disconnect session in asterisk
+func (sma *AsteriskAgent) BiRPCv1DisconnectSession(clnt rpcclient.ClientConnector, args utils.AttrDisconnectSession, reply *string) error {
+	return sma.V1DisconnectSession(args, reply)
+}
+
+// BiRPCv1GetActiveSessionIDs is internal method to  get all active sessions in asterisk
+func (sma *AsteriskAgent) BiRPCv1GetActiveSessionIDs(clnt rpcclient.ClientConnector, ignParam string, sessionIDs *[]*sessions.SessionID) error {
+	return sma.V1GetActiveSessionIDs(ignParam, sessionIDs)
+
+}
+
+// BiRPCv1ReAuthorize is used to implement the sessions.BiRPClient interface
+func (sma *AsteriskAgent) BiRPCv1ReAuthorize(clnt rpcclient.ClientConnector, originID string, reply *string) (err error) {
+	return sma.V1ReAuthorize(originID, reply)
+}
+
+// BiRPCv1DisconnectPeer is used to implement the sessions.BiRPClient interface
+func (sma *AsteriskAgent) BiRPCv1DisconnectPeer(clnt rpcclient.ClientConnector, args *utils.DPRArgs, reply *string) (err error) {
+	return sma.V1DisconnectPeer(args, reply)
+}
+
+// BiRPCv1WarnDisconnect is used to implement the sessions.BiRPClient interface
+func (sma *AsteriskAgent) BiRPCv1WarnDisconnect(clnt rpcclient.ClientConnector, args map[string]interface{}, reply *string) (err error) {
+	return sma.V1WarnDisconnect(args, reply)
+}
+
+// Handlers is used to implement the rpcclient.BiRPCConector interface
+func (sma *AsteriskAgent) Handlers() map[string]interface{} {
+	return map[string]interface{}{
+		utils.SessionSv1DisconnectSession: func(clnt *rpc2.Client, args utils.AttrDisconnectSession, rply *string) error {
+			return sma.BiRPCv1DisconnectSession(clnt, args, rply)
+		},
+		utils.SessionSv1GetActiveSessionIDs: func(clnt *rpc2.Client, args string, rply *[]*sessions.SessionID) error {
+			return sma.BiRPCv1GetActiveSessionIDs(clnt, args, rply)
+		},
+		utils.SessionSv1ReAuthorize: func(clnt *rpc2.Client, args string, rply *string) (err error) {
+			return sma.BiRPCv1ReAuthorize(clnt, args, rply)
+		},
+		utils.SessionSv1DisconnectPeer: func(clnt *rpc2.Client, args *utils.DPRArgs, rply *string) (err error) {
+			return sma.BiRPCv1DisconnectPeer(clnt, args, rply)
+		},
+		utils.SessionSv1WarnDisconnect: func(clnt *rpc2.Client, args map[string]interface{}, rply *string) (err error) {
+			return sma.BiRPCv1WarnDisconnect(clnt, args, rply)
+		},
+	}
 }

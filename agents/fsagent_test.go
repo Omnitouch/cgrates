@@ -20,7 +20,7 @@ package agents
 import (
 	"testing"
 
-	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/cgrates/cgrates/sessions"
 )
 
 func TestFAsSessionSClientIface(t *testing.T) {

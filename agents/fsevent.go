@@ -24,8 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/fsock"
 )
 
@@ -193,7 +194,7 @@ func (fsev FSEvent) MissingParameter(timezone string) string {
 func (fsev FSEvent) GetSetupTime(fieldName, timezone string) (t time.Time, err error) {
 	fsSTimeStr, hasKey := fsev[SETUP_TIME]
 	if hasKey && fsSTimeStr != "0" {
-		// Discard the nanoseconds information since MySQL cannot store them in early versions and csv uses default seconds so originID will not corelate
+		// Discard the nanoseconds information since MySQL cannot store them in early versions and csv uses default seconds so CGRID will not corelate
 		fsSTimeStr = fsSTimeStr[:len(fsSTimeStr)-6]
 	}
 	sTimeStr := utils.FirstNonEmpty(fsev[fieldName], fsSTimeStr)
@@ -206,7 +207,7 @@ func (fsev FSEvent) GetSetupTime(fieldName, timezone string) (t time.Time, err e
 func (fsev FSEvent) GetAnswerTime(fieldName, timezone string) (t time.Time, err error) {
 	fsATimeStr, hasKey := fsev[ANSWER_TIME]
 	if hasKey && fsATimeStr != "0" {
-		// Discard the nanoseconds information since MySQL cannot store them in early versions and csv uses default seconds so originID will not corelate
+		// Discard the nanoseconds information since MySQL cannot store them in early versions and csv uses default seconds so CGRID will not corelate
 		fsATimeStr = fsATimeStr[:len(fsATimeStr)-6]
 	}
 	aTimeStr := utils.FirstNonEmpty(fsev[fieldName], fsATimeStr)
@@ -354,13 +355,19 @@ func (fsev FSEvent) ParseEventValue(attrName string, rsrFld *config.RSRParser, t
 }
 
 // AsCGREvent converts FSEvent into CGREvent
-func (fsev FSEvent) AsCGREvent(timezone string) *utils.CGREvent {
-	return &utils.CGREvent{
+func (fsev FSEvent) AsCGREvent(timezone string) (cgrEv *utils.CGREvent, err error) {
+	sTime, err := fsev.GetSetupTime(utils.MetaDefault, timezone)
+	if err != nil {
+		return nil, err
+	}
+	cgrEv = &utils.CGREvent{
 		Tenant:  fsev.GetTenant(utils.MetaDefault),
 		ID:      utils.UUIDSha1Prefix(),
+		Time:    &sTime,
 		Event:   fsev.AsMapStringInterface(timezone),
 		APIOpts: fsev.GetOptions(),
 	}
+	return cgrEv, nil
 }
 
 // Used with RLs
@@ -388,6 +395,67 @@ func (fsev FSEvent) AsMapStringInterface(timezone string) map[string]interface{}
 	mp[utils.Route] = fsev.GetRoute(utils.MetaDefault)
 	mp[utils.DisconnectCause] = fsev.GetDisconnectCause(utils.MetaDefault)
 	return mp
+}
+
+// V1AuthorizeArgs returns the arguments used in SMGv1.Authorize
+func (fsev FSEvent) V1AuthorizeArgs() (args *sessions.V1AuthorizeArgs) {
+	cgrEv, err := fsev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	cgrEv.Event[utils.Usage] = config.CgrConfig().SessionSCfg().GetDefaultUsage(utils.IfaceAsString(cgrEv.Event[utils.ToR])) // no billsec available in auth
+	args = &sessions.V1AuthorizeArgs{                                                                                        // defaults
+		CGREvent: cgrEv,
+	}
+	subsystems, has := fsev[VarCGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags variable is not set, using defaults",
+			utils.FreeSWITCHAgent))
+		args.GetMaxUsage = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
+}
+
+// V1InitSessionArgs returns the arguments used in SessionSv1.InitSession
+func (fsev FSEvent) V1InitSessionArgs() (args *sessions.V1InitSessionArgs) {
+	cgrEv, err := fsev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	args = &sessions.V1InitSessionArgs{ // defaults
+		CGREvent: cgrEv,
+	}
+	subsystems, has := fsev[VarCGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags variable is not set, using defaults",
+			utils.FreeSWITCHAgent))
+		args.InitSession = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
+}
+
+// V1TerminateSessionArgs returns the arguments used in SMGv1.TerminateSession
+func (fsev FSEvent) V1TerminateSessionArgs() (args *sessions.V1TerminateSessionArgs) {
+	cgrEv, err := fsev.AsCGREvent(config.CgrConfig().GeneralCfg().DefaultTimezone)
+	if err != nil {
+		return
+	}
+	args = &sessions.V1TerminateSessionArgs{ // defaults
+		CGREvent: cgrEv,
+	}
+	subsystems, has := fsev[VarCGRFlags]
+	if !has {
+		utils.Logger.Warning(fmt.Sprintf("<%s> cgr_flags variable is not set, using defaults",
+			utils.FreeSWITCHAgent))
+		args.TerminateSession = true
+		return
+	}
+	args.ParseFlags(subsystems, utils.InfieldSep)
+	return
 }
 
 // SliceAsFsArray Converts a slice of strings into a FS array string, contains len(array) at first index since FS does not support len(ARRAY::) for now

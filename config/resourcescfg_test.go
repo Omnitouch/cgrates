@@ -22,37 +22,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestResourceSConfigloadFromJsonCfgCase1(t *testing.T) {
 	cfgJSON := &ResourceSJsonCfg{
-		Enabled:                  utils.BoolPointer(true),
-		Indexed_selects:          utils.BoolPointer(true),
-		Thresholds_conns:         &[]string{utils.MetaInternal, "*conn1"},
-		Store_interval:           utils.StringPointer("2s"),
-		String_indexed_fields:    &[]string{"*req.index1"},
-		Prefix_indexed_fields:    &[]string{"*req.index1"},
-		Suffix_indexed_fields:    &[]string{"*req.index1"},
-		Exists_indexed_fields:    &[]string{"*req.index1"},
-		Notexists_indexed_fields: &[]string{"*req.index1"},
-		Nested_fields:            utils.BoolPointer(true),
+		Enabled:               utils.BoolPointer(true),
+		Indexed_selects:       utils.BoolPointer(true),
+		Thresholds_conns:      &[]string{utils.MetaInternal, "*conn1"},
+		Store_interval:        utils.StringPointer("2s"),
+		String_indexed_fields: &[]string{"*req.index1"},
+		Prefix_indexed_fields: &[]string{"*req.index1"},
+		Suffix_indexed_fields: &[]string{"*req.index1"},
+		Nested_fields:         utils.BoolPointer(true),
 	}
 	expected := &ResourceSConfig{
-		Enabled:                true,
-		IndexedSelects:         true,
-		StoreInterval:          2 * time.Second,
-		ThresholdSConns:        []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds), "*conn1"},
-		StringIndexedFields:    &[]string{"*req.index1"},
-		PrefixIndexedFields:    &[]string{"*req.index1"},
-		SuffixIndexedFields:    &[]string{"*req.index1"},
-		ExistsIndexedFields:    &[]string{"*req.index1"},
-		NotExistsIndexedFields: &[]string{"*req.index1"},
-		NestedFields:           true,
+		Enabled:             true,
+		IndexedSelects:      true,
+		StoreInterval:       2 * time.Second,
+		ThresholdSConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds), "*conn1"},
+		StringIndexedFields: &[]string{"*req.index1"},
+		PrefixIndexedFields: &[]string{"*req.index1"},
+		SuffixIndexedFields: &[]string{"*req.index1"},
+		NestedFields:        true,
 		Opts: &ResourcesOpts{
-			UsageID:  []*utils.DynamicStringOpt{},
-			UsageTTL: []*utils.DynamicDurationOpt{},
-			Units:    []*utils.DynamicFloat64Opt{},
+			Units: 1,
 		},
 	}
 	cfg := NewDefaultCGRConfig()
@@ -61,59 +55,23 @@ func TestResourceSConfigloadFromJsonCfgCase1(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, cfg.resourceSCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(cfg.resourceSCfg))
 	}
-	cfgJSON = nil
-	if err = cfg.resourceSCfg.loadFromJSONCfg(cfgJSON); err != nil {
+	cfg.resourceSCfg.Opts.loadFromJSONCfg(nil)
+	if reflect.DeepEqual(nil, cfg.resourceSCfg.Opts) {
+		t.Error("expected nil")
+	}
+	cfgJson := &ResourcesOptsJson{
+		UsageTTL: utils.StringPointer("1000"),
+	}
+	if err := cfg.resourceSCfg.Opts.loadFromJSONCfg(cfgJson); err != nil {
 		t.Error(err)
 	}
-}
-
-func TestResourceSLoadFromJSONOpts(t *testing.T) {
-	resOpts := &ResourcesOpts{
-		UsageID: []*utils.DynamicStringOpt{
-			{
-				Value: utils.EmptyString,
-			},
-		},
-		UsageTTL: []*utils.DynamicDurationOpt{
-			{
-				Value: 72 * time.Hour,
-			},
-		},
-		Units: []*utils.DynamicFloat64Opt{
-			{
-				Value: 1,
-			},
-		},
+	cfgJsonFail := &ResourcesOptsJson{
+		UsageTTL: utils.StringPointer("test"),
 	}
-
-	resOptsJson := &ResourcesOptsJson{
-		UsageID: []*utils.DynamicStringOpt{
-			{
-				Tenant: "cgrates.org",
-				Value:  "usg2",
-			},
-		},
-		UsageTTL: []*utils.DynamicStringOpt{
-			{
-				Tenant: "cgrates.org",
-				Value:  "error",
-			},
-		},
-		Units: []*utils.DynamicFloat64Opt{
-			{
-				Tenant: "cgrates.org",
-				Value:  2.5,
-			},
-		},
-	}
-	errExp := `time: invalid duration "error"`
-	if err := resOpts.loadFromJSONCfg(resOptsJson); err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err.Error())
-	}
-
-	if err := resOpts.loadFromJSONCfg(nil); err != nil {
+	if err := cfg.resourceSCfg.Opts.loadFromJSONCfg(cfgJsonFail); err == nil {
 		t.Error(err)
 	}
+
 }
 
 func TestResourceSConfigloadFromJsonCfgCase2(t *testing.T) {
@@ -132,24 +90,21 @@ func TestResourceSConfigAsMapInterface(t *testing.T) {
 	"resources": {},	
 }`
 	eMap := map[string]interface{}{
-		utils.EnabledCfg:                false,
-		utils.StoreIntervalCfg:          utils.EmptyString,
-		utils.ThresholdSConnsCfg:        []string{},
-		utils.IndexedSelectsCfg:         true,
-		utils.PrefixIndexedFieldsCfg:    []string{},
-		utils.SuffixIndexedFieldsCfg:    []string{},
-		utils.ExistsIndexedFieldsCfg:    []string{},
-		utils.NotExistsIndexedFieldsCfg: []string{},
-		utils.NestedFieldsCfg:           false,
+		utils.EnabledCfg:             false,
+		utils.StoreIntervalCfg:       utils.EmptyString,
+		utils.ThresholdSConnsCfg:     []string{},
+		utils.IndexedSelectsCfg:      true,
+		utils.PrefixIndexedFieldsCfg: []string{},
+		utils.SuffixIndexedFieldsCfg: []string{},
+		utils.NestedFieldsCfg:        false,
 		utils.OptsCfg: map[string]interface{}{
-			utils.MetaUsageIDCfg:  []*utils.DynamicStringOpt{},
-			utils.MetaUsageTTLCfg: []*utils.DynamicDurationOpt{},
-			utils.MetaUnitsCfg:    []*utils.DynamicFloat64Opt{},
+			utils.MetaUnitsCfg:   1.,
+			utils.MetaUsageIDCfg: "",
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.resourceSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.resourceSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -164,31 +119,31 @@ func TestResourceSConfigAsMapInterface1(t *testing.T) {
             "string_indexed_fields": ["*req.index1"],
 			"prefix_indexed_fields": ["*req.prefix_indexed_fields1","*req.prefix_indexed_fields2"],
             "suffix_indexed_fields": ["*req.prefix_indexed_fields1"],
-			"exists_indexed_fields": ["*req.prefix_indexed_fields1","*req.prefix_indexed_fields2"],
-            "notexists_indexed_fields": ["*req.prefix_indexed_fields1"],
-			"nested_fields": true,					
+			"nested_fields": true,	
+			"opts":{
+				"*usageTTL":"1"
+
+			}		
 		},	
 	}`
 	eMap := map[string]interface{}{
-		utils.EnabledCfg:                true,
-		utils.StoreIntervalCfg:          "7m0s",
-		utils.ThresholdSConnsCfg:        []string{utils.MetaInternal, "*conn1"},
-		utils.IndexedSelectsCfg:         true,
-		utils.StringIndexedFieldsCfg:    []string{"*req.index1"},
-		utils.PrefixIndexedFieldsCfg:    []string{"*req.prefix_indexed_fields1", "*req.prefix_indexed_fields2"},
-		utils.SuffixIndexedFieldsCfg:    []string{"*req.prefix_indexed_fields1"},
-		utils.ExistsIndexedFieldsCfg:    []string{"*req.prefix_indexed_fields1", "*req.prefix_indexed_fields2"},
-		utils.NotExistsIndexedFieldsCfg: []string{"*req.prefix_indexed_fields1"},
-		utils.NestedFieldsCfg:           true,
+		utils.EnabledCfg:             true,
+		utils.StoreIntervalCfg:       "7m0s",
+		utils.ThresholdSConnsCfg:     []string{utils.MetaInternal, "*conn1"},
+		utils.IndexedSelectsCfg:      true,
+		utils.StringIndexedFieldsCfg: []string{"*req.index1"},
+		utils.PrefixIndexedFieldsCfg: []string{"*req.prefix_indexed_fields1", "*req.prefix_indexed_fields2"},
+		utils.SuffixIndexedFieldsCfg: []string{"*req.prefix_indexed_fields1"},
+		utils.NestedFieldsCfg:        true,
 		utils.OptsCfg: map[string]interface{}{
-			utils.MetaUsageIDCfg:  []*utils.DynamicStringOpt{},
-			utils.MetaUsageTTLCfg: []*utils.DynamicDurationOpt{},
-			utils.MetaUnitsCfg:    []*utils.DynamicFloat64Opt{},
+			utils.MetaUnitsCfg:    1.,
+			utils.MetaUsageIDCfg:  "",
+			utils.MetaUsageTTLCfg: 1 * time.Nanosecond,
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.resourceSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.resourceSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -203,7 +158,9 @@ func TestResourceSConfigClone(t *testing.T) {
 		PrefixIndexedFields: &[]string{"*req.index1"},
 		SuffixIndexedFields: &[]string{"*req.index1"},
 		NestedFields:        true,
-		Opts:                &ResourcesOpts{},
+		Opts: &ResourcesOpts{
+			UsageTTL: utils.DurationPointer(1 * time.Second),
+		},
 	}
 	rcv := ban.Clone()
 	if !reflect.DeepEqual(ban, rcv) {
@@ -220,170 +177,5 @@ func TestResourceSConfigClone(t *testing.T) {
 	}
 	if (*rcv.SuffixIndexedFields)[0] = ""; (*ban.SuffixIndexedFields)[0] != "*req.index1" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffResourceSJsonCfg(t *testing.T) {
-	var d *ResourceSJsonCfg
-
-	v1 := &ResourceSConfig{
-		Enabled:             false,
-		IndexedSelects:      false,
-		ThresholdSConns:     []string{"*localhost"},
-		StoreInterval:       1 * time.Second,
-		StringIndexedFields: &[]string{"*req.index1"},
-		PrefixIndexedFields: &[]string{"*req.index2"},
-		SuffixIndexedFields: &[]string{"*req.index3"},
-		NestedFields:        false,
-		Opts: &ResourcesOpts{
-			UsageID: []*utils.DynamicStringOpt{
-				{
-					Value: "usg1",
-				},
-			},
-			UsageTTL: []*utils.DynamicDurationOpt{
-				{
-					Value: time.Second,
-				},
-			},
-			Units: []*utils.DynamicFloat64Opt{
-				{
-					Value: 1,
-				},
-			},
-		},
-	}
-
-	v2 := &ResourceSConfig{
-		Enabled:             true,
-		IndexedSelects:      true,
-		ThresholdSConns:     []string{"*birpc"},
-		StoreInterval:       2 * time.Second,
-		StringIndexedFields: &[]string{"*req.index11"},
-		PrefixIndexedFields: &[]string{"*req.index22"},
-		SuffixIndexedFields: &[]string{"*req.index33"},
-		NestedFields:        true,
-		Opts: &ResourcesOpts{
-			UsageID: []*utils.DynamicStringOpt{
-				{
-					Value: "usg2",
-				},
-			},
-			UsageTTL: []*utils.DynamicDurationOpt{
-				{
-					Value: time.Minute,
-				},
-			},
-			Units: []*utils.DynamicFloat64Opt{
-				{
-					Value: 2,
-				},
-			},
-		},
-	}
-
-	expected := &ResourceSJsonCfg{
-		Enabled:               utils.BoolPointer(true),
-		Indexed_selects:       utils.BoolPointer(true),
-		Thresholds_conns:      &[]string{"*birpc"},
-		Store_interval:        utils.StringPointer("2s"),
-		String_indexed_fields: &[]string{"*req.index11"},
-		Prefix_indexed_fields: &[]string{"*req.index22"},
-		Suffix_indexed_fields: &[]string{"*req.index33"},
-		Nested_fields:         utils.BoolPointer(true),
-		Opts: &ResourcesOptsJson{
-			UsageID: []*utils.DynamicStringOpt{
-				{
-					Value: "usg2",
-				},
-			},
-			UsageTTL: []*utils.DynamicStringOpt{
-				{
-					Value: "1m0s",
-				},
-			},
-			Units: []*utils.DynamicFloat64Opt{
-				{
-					Value: 2,
-				},
-			},
-		},
-	}
-
-	rcv := diffResourceSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &ResourceSJsonCfg{
-		Opts: &ResourcesOptsJson{},
-	}
-	rcv = diffResourceSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestResourcesCloneSection(t *testing.T) {
-	rsrCfg := &ResourceSConfig{
-		Enabled:             false,
-		IndexedSelects:      false,
-		ThresholdSConns:     []string{"*localhost"},
-		StoreInterval:       1 * time.Second,
-		StringIndexedFields: &[]string{"*req.index1"},
-		PrefixIndexedFields: &[]string{"*req.index2"},
-		SuffixIndexedFields: &[]string{"*req.index3"},
-		NestedFields:        false,
-		Opts: &ResourcesOpts{
-			UsageID: []*utils.DynamicStringOpt{
-				{
-					Value: "usg1",
-				},
-			},
-			UsageTTL: []*utils.DynamicDurationOpt{
-				{
-					Value: time.Second,
-				},
-			},
-			Units: []*utils.DynamicFloat64Opt{
-				{
-					Value: 1,
-				},
-			},
-		},
-	}
-
-	exp := &ResourceSConfig{
-		Enabled:             false,
-		IndexedSelects:      false,
-		ThresholdSConns:     []string{"*localhost"},
-		StoreInterval:       1 * time.Second,
-		StringIndexedFields: &[]string{"*req.index1"},
-		PrefixIndexedFields: &[]string{"*req.index2"},
-		SuffixIndexedFields: &[]string{"*req.index3"},
-		NestedFields:        false,
-		Opts: &ResourcesOpts{
-			UsageID: []*utils.DynamicStringOpt{
-				{
-					Value: "usg1",
-				},
-			},
-			UsageTTL: []*utils.DynamicDurationOpt{
-				{
-					Value: time.Second,
-				},
-			},
-			Units: []*utils.DynamicFloat64Opt{
-				{
-					Value: 1,
-				},
-			},
-		},
-	}
-
-	rcv := rsrCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

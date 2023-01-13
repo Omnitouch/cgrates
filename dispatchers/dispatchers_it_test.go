@@ -21,24 +21,26 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package dispatchers
 
-// for the moment we dispable Apier through dispatcher
-// until we figured out a better sollution in case of gob server
-/*
 import (
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
+// for the moment we dispable Apier through dispatcher
+// until we figured out a better sollution in case of gob server
+
+/*
 var sTestsDspApier = []func(t *testing.T){
 	testDspApierSetAttributes,
 	testDspApierGetAttributes,
 	testDspApierUnkownAPiKey,
 }
+
 
 //Test start here
 func TestDspApierITMySQL(t *testing.T) {
@@ -51,35 +53,37 @@ func TestDspApierITMongo(t *testing.T) {
 
 //because we import dispatchers in APIerSv1 we will send information as map[string]interface{}
 func testDspApierSetAttributes(t *testing.T) {
-	ev := &map[string]interface{}{
-		utils.Tenant: "cgrates.org",
-		"ID":         "ATTR_Dispatcher",
-		"Contexts":   []string{utils.MetaSessionS},
-		"FilterIDs":  []string{"*string:~Account:1234"},
-		"ActivationInterval": &utils.ActivationInterval{
-			ActivationTimes: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
-			ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
-		},
-		"Attributes": []*engine.Attribute{
-			{
-				Path: utils.MetaReq + utils.NestingSep + utils.Subject,
-				Value: config.RSRParsers{
-					&config.RSRParser{
-						Rules:           "roam",
+	attrPrf := &engine.AttributeProfileWithAPIOpts{
+		AttributeProfile: &engine.AttributeProfile{
+			Tenant: "cgrates.org",
+			ID: "ATTR_Dispatcher",
+			Contexts: []string{utils.MetaSessionS},
+			ActivationInterval: &utils.ActivationInterval{
+				ActivationTime: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+				ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+			},
+			Attributes: []*engine.Attribute{
+				{
+					Path: utils.MetaReq + utils.NestingSep + utils.Subject,
+					Value: config.RSRParsers{
+						&config.RSRParser{
+							Rules:   "roam",
+						},
 					},
 				},
 			},
 		},
-		"Weight":     10,
-		utils.APIKey: utils.StringPointer("apier12345"),
+		APIOpts: map[string]interface{}{
+			utils.OptsAPIKey: "apier12345",
+		},
 	}
+
 	var result string
-	if err := dispEngine.RPC.Call(utils.APIerSv1SetAttributeProfile, ev, &result); err != nil {
+	if err := dispEngine.RPC.Call(utils.APIerSv1SetAttributeProfile, attrPrf, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
 	}
-
 }
 
 func testDspApierGetAttributes(t *testing.T) {
@@ -90,7 +94,7 @@ func testDspApierGetAttributes(t *testing.T) {
 		Contexts:  []string{utils.MetaSessionS},
 		FilterIDs: []string{"*string:~*req.Account:1234"},
 		ActivationInterval: &utils.ActivationInterval{
-			ActivationTimes: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+			ActivationTime: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
 			ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
 		},
 		Attributes: []*engine.Attribute{
@@ -109,7 +113,9 @@ func testDspApierGetAttributes(t *testing.T) {
 	if err := dispEngine.RPC.Call(utils.APIerSv1GetAttributeProfile,
 		utils.TenantIDWithAPIOpts{
 			TenantID:      &utils.TenantID{Tenant: "cgrates.org", ID: "ATTR_Dispatcher"},
-			ArgDispatcher: &utils.ArgDispatcher{APIKey: utils.StringPointer("apier12345")},
+			APIOpts: map[string]interface{}{
+				utils.OptsAPIKey:"apier12345",
+			},
 		}, &reply); err != nil {
 		t.Fatal(err)
 	}
@@ -125,11 +131,16 @@ func testDspApierUnkownAPiKey(t *testing.T) {
 	if err := dispEngine.RPC.Call(utils.APIerSv1GetAttributeProfile,
 		utils.TenantIDWithAPIOpts{
 			TenantID:      &utils.TenantID{Tenant: "cgrates.org", ID: "ATTR_Dispatcher"},
-			ArgDispatcher: &utils.ArgDispatcher{APIKey: utils.StringPointer("RandomApiKey")},
+			APIOpts: map[string]interface{}{
+				utils.OptsAPIKey:"RandomApiKey",
+			},
 		}, &reply); err == nil || err.Error() != utils.ErrUnknownApiKey.Error() {
 		t.Fatal(err)
 	}
 }
+
+*/
+
 func TestDispatcherServiceDispatcherProfileForEventGetDispatchertWithoutAuthentification(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
@@ -186,4 +197,3 @@ func TestDispatcherServiceDispatcherProfileForEventGetDispatchertWithoutAuthenti
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
 	}
 }
-*/

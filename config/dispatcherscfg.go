@@ -19,53 +19,25 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package config
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
-
-const (
-	DispatchersDispatchersDftOpt = true
-)
-
-type DispatchersOpts struct {
-	Dispatchers []*utils.DynamicBoolOpt
-}
 
 // DispatcherSCfg is the configuration of dispatcher service
 type DispatcherSCfg struct {
-	Enabled                bool
-	IndexedSelects         bool
-	StringIndexedFields    *[]string
-	PrefixIndexedFields    *[]string
-	SuffixIndexedFields    *[]string
-	ExistsIndexedFields    *[]string
-	NotExistsIndexedFields *[]string
-	NestedFields           bool
-	AttributeSConns        []string
-	Opts                   *DispatchersOpts
-}
-
-// loadDispatcherSCfg loads the DispatcherS section of the configuration
-func (dps *DispatcherSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnDispatcherSCfg := new(DispatcherSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, DispatcherSJSON, jsnDispatcherSCfg); err != nil {
-		return
-	}
-	return dps.loadFromJSONCfg(jsnDispatcherSCfg)
-}
-
-func (dspOpts *DispatchersOpts) loadFromJSONCfg(jsnCfg *DispatchersOptsJson) {
-	if jsnCfg == nil {
-		return
-	}
-	if jsnCfg.Dispatchers != nil {
-		dspOpts.Dispatchers = append(dspOpts.Dispatchers, jsnCfg.Dispatchers...)
-	}
+	Enabled             bool
+	IndexedSelects      bool
+	StringIndexedFields *[]string
+	PrefixIndexedFields *[]string
+	SuffixIndexedFields *[]string
+	AttributeSConns     []string
+	NestedFields        bool
+	AnySubsystem        bool
+	PreventLoop         bool
 }
 
 func (dps *DispatcherSCfg) loadFromJSONCfg(jsnCfg *DispatcherSJsonCfg) (err error) {
 	if jsnCfg == nil {
-		return
+		return nil
 	}
 	if jsnCfg.Enabled != nil {
 		dps.Enabled = *jsnCfg.Enabled
@@ -74,75 +46,89 @@ func (dps *DispatcherSCfg) loadFromJSONCfg(jsnCfg *DispatcherSJsonCfg) (err erro
 		dps.IndexedSelects = *jsnCfg.Indexed_selects
 	}
 	if jsnCfg.String_indexed_fields != nil {
-		dps.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.String_indexed_fields))
+		sif := make([]string, len(*jsnCfg.String_indexed_fields))
+		for i, fID := range *jsnCfg.String_indexed_fields {
+			sif[i] = fID
+		}
+		dps.StringIndexedFields = &sif
 	}
 	if jsnCfg.Prefix_indexed_fields != nil {
-		dps.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Prefix_indexed_fields))
+		pif := make([]string, len(*jsnCfg.Prefix_indexed_fields))
+		for i, fID := range *jsnCfg.Prefix_indexed_fields {
+			pif[i] = fID
+		}
+		dps.PrefixIndexedFields = &pif
 	}
 	if jsnCfg.Suffix_indexed_fields != nil {
-		dps.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Suffix_indexed_fields))
-	}
-	if jsnCfg.Exists_indexed_fields != nil {
-		dps.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Exists_indexed_fields))
-	}
-	if jsnCfg.Notexists_indexed_fields != nil {
-		dps.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Notexists_indexed_fields))
+		sif := make([]string, len(*jsnCfg.Suffix_indexed_fields))
+		for i, fID := range *jsnCfg.Suffix_indexed_fields {
+			sif[i] = fID
+		}
+		dps.SuffixIndexedFields = &sif
 	}
 	if jsnCfg.Attributes_conns != nil {
-		dps.AttributeSConns = updateInternalConnsWithPrfx(*jsnCfg.Attributes_conns, utils.MetaAttributes, utils.MetaDispatchers)
+		dps.AttributeSConns = make([]string, len(*jsnCfg.Attributes_conns))
+		for idx, connID := range *jsnCfg.Attributes_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			dps.AttributeSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				dps.AttributeSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)
+			}
+		}
 	}
 	if jsnCfg.Nested_fields != nil {
 		dps.NestedFields = *jsnCfg.Nested_fields
 	}
-	if jsnCfg.Opts != nil {
-		dps.Opts.loadFromJSONCfg(jsnCfg.Opts)
+	if jsnCfg.Any_subsystem != nil {
+		dps.AnySubsystem = *jsnCfg.Any_subsystem
 	}
-	return
+	if jsnCfg.Prevent_loop != nil {
+		dps.PreventLoop = *jsnCfg.Prevent_loop
+	}
+	return nil
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (dps DispatcherSCfg) AsMapInterface(string) interface{} {
-	opts := map[string]interface{}{
-		utils.MetaDispatcherSCfg: dps.Opts.Dispatchers,
-	}
-	mp := map[string]interface{}{
+func (dps *DispatcherSCfg) AsMapInterface() (mp map[string]interface{}) {
+	mp = map[string]interface{}{
 		utils.EnabledCfg:        dps.Enabled,
 		utils.IndexedSelectsCfg: dps.IndexedSelects,
 		utils.NestedFieldsCfg:   dps.NestedFields,
-		utils.OptsCfg:           opts,
+		utils.AnySubsystemCfg:   dps.AnySubsystem,
+		utils.PreventLoopCfg:    dps.PreventLoop,
 	}
 	if dps.StringIndexedFields != nil {
-		mp[utils.StringIndexedFieldsCfg] = utils.CloneStringSlice(*dps.StringIndexedFields)
+		stringIndexedFields := make([]string, len(*dps.StringIndexedFields))
+		for i, item := range *dps.StringIndexedFields {
+			stringIndexedFields[i] = item
+		}
+		mp[utils.StringIndexedFieldsCfg] = stringIndexedFields
 	}
 	if dps.PrefixIndexedFields != nil {
-		mp[utils.PrefixIndexedFieldsCfg] = utils.CloneStringSlice(*dps.PrefixIndexedFields)
+		prefixIndexedFields := make([]string, len(*dps.PrefixIndexedFields))
+		for i, item := range *dps.PrefixIndexedFields {
+			prefixIndexedFields[i] = item
+		}
+		mp[utils.PrefixIndexedFieldsCfg] = prefixIndexedFields
 	}
 	if dps.SuffixIndexedFields != nil {
-		mp[utils.SuffixIndexedFieldsCfg] = utils.CloneStringSlice(*dps.SuffixIndexedFields)
+		suffixIndexedFields := make([]string, len(*dps.SuffixIndexedFields))
+		for i, item := range *dps.SuffixIndexedFields {
+			suffixIndexedFields[i] = item
+		}
+		mp[utils.SuffixIndexedFieldsCfg] = suffixIndexedFields
 	}
 	if dps.AttributeSConns != nil {
-		mp[utils.AttributeSConnsCfg] = getInternalJSONConnsWithPrfx(dps.AttributeSConns, utils.MetaDispatchers)
+		attributeSConns := make([]string, len(dps.AttributeSConns))
+		for i, item := range dps.AttributeSConns {
+			attributeSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes) {
+				attributeSConns[i] = utils.MetaInternal
+			}
+		}
+		mp[utils.AttributeSConnsCfg] = attributeSConns
 	}
-	if dps.ExistsIndexedFields != nil {
-		mp[utils.ExistsIndexedFieldsCfg] = utils.CloneStringSlice(*dps.ExistsIndexedFields)
-	}
-	if dps.NotExistsIndexedFields != nil {
-		mp[utils.NotExistsIndexedFieldsCfg] = utils.CloneStringSlice(*dps.NotExistsIndexedFields)
-	}
-	return mp
-}
-
-func (DispatcherSCfg) SName() string             { return DispatcherSJSON }
-func (dps DispatcherSCfg) CloneSection() Section { return dps.Clone() }
-
-func (dspOpts *DispatchersOpts) Clone() *DispatchersOpts {
-	var dpS []*utils.DynamicBoolOpt
-	if dspOpts.Dispatchers != nil {
-		dpS = utils.CloneDynamicBoolOpt(dspOpts.Dispatchers)
-	}
-	return &DispatchersOpts{
-		Dispatchers: dpS,
-	}
+	return
 }
 
 // Clone returns a deep copy of DispatcherSCfg
@@ -151,78 +137,36 @@ func (dps DispatcherSCfg) Clone() (cln *DispatcherSCfg) {
 		Enabled:        dps.Enabled,
 		IndexedSelects: dps.IndexedSelects,
 		NestedFields:   dps.NestedFields,
-		Opts:           dps.Opts.Clone(),
+		AnySubsystem:   dps.AnySubsystem,
+		PreventLoop:    dps.PreventLoop,
 	}
 
 	if dps.AttributeSConns != nil {
-		cln.AttributeSConns = utils.CloneStringSlice(dps.AttributeSConns)
+		cln.AttributeSConns = make([]string, len(dps.AttributeSConns))
+		for i, conn := range dps.AttributeSConns {
+			cln.AttributeSConns[i] = conn
+		}
 	}
 	if dps.StringIndexedFields != nil {
-		cln.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*dps.StringIndexedFields))
+		idx := make([]string, len(*dps.StringIndexedFields))
+		for i, dx := range *dps.StringIndexedFields {
+			idx[i] = dx
+		}
+		cln.StringIndexedFields = &idx
 	}
 	if dps.PrefixIndexedFields != nil {
-		cln.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*dps.PrefixIndexedFields))
+		idx := make([]string, len(*dps.PrefixIndexedFields))
+		for i, dx := range *dps.PrefixIndexedFields {
+			idx[i] = dx
+		}
+		cln.PrefixIndexedFields = &idx
 	}
 	if dps.SuffixIndexedFields != nil {
-		cln.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*dps.SuffixIndexedFields))
-	}
-	if dps.ExistsIndexedFields != nil {
-		cln.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*dps.ExistsIndexedFields))
-	}
-	if dps.NotExistsIndexedFields != nil {
-		cln.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*dps.NotExistsIndexedFields))
+		idx := make([]string, len(*dps.SuffixIndexedFields))
+		for i, dx := range *dps.SuffixIndexedFields {
+			idx[i] = dx
+		}
+		cln.SuffixIndexedFields = &idx
 	}
 	return
-}
-
-type DispatchersOptsJson struct {
-	Dispatchers []*utils.DynamicBoolOpt `json:"*dispatchers"`
-}
-
-type DispatcherSJsonCfg struct {
-	Enabled                  *bool
-	Indexed_selects          *bool
-	String_indexed_fields    *[]string
-	Prefix_indexed_fields    *[]string
-	Suffix_indexed_fields    *[]string
-	Exists_indexed_fields    *[]string
-	Notexists_indexed_fields *[]string
-	Nested_fields            *bool // applies when indexed fields is not defined
-	Attributes_conns         *[]string
-	Opts                     *DispatchersOptsJson
-}
-
-func diffDispatchersOptsJsonCfg(d *DispatchersOptsJson, v1, v2 *DispatchersOpts) *DispatchersOptsJson {
-	if d == nil {
-		d = new(DispatchersOptsJson)
-	}
-	if !utils.DynamicBoolOptEqual(v1.Dispatchers, v2.Dispatchers) {
-		d.Dispatchers = v2.Dispatchers
-	}
-	return d
-}
-
-func diffDispatcherSJsonCfg(d *DispatcherSJsonCfg, v1, v2 *DispatcherSCfg) *DispatcherSJsonCfg {
-	if d == nil {
-		d = new(DispatcherSJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if v1.IndexedSelects != v2.IndexedSelects {
-		d.Indexed_selects = utils.BoolPointer(v2.IndexedSelects)
-	}
-	d.String_indexed_fields = diffIndexSlice(d.String_indexed_fields, v1.StringIndexedFields, v2.StringIndexedFields)
-	d.Prefix_indexed_fields = diffIndexSlice(d.Prefix_indexed_fields, v1.PrefixIndexedFields, v2.PrefixIndexedFields)
-	d.Suffix_indexed_fields = diffIndexSlice(d.Suffix_indexed_fields, v1.SuffixIndexedFields, v2.SuffixIndexedFields)
-	d.Exists_indexed_fields = diffIndexSlice(d.Exists_indexed_fields, v1.ExistsIndexedFields, v2.ExistsIndexedFields)
-	d.Notexists_indexed_fields = diffIndexSlice(d.Notexists_indexed_fields, v1.NotExistsIndexedFields, v2.NotExistsIndexedFields)
-	if v1.NestedFields != v2.NestedFields {
-		d.Nested_fields = utils.BoolPointer(v2.NestedFields)
-	}
-	if !utils.SliceStringEqual(v1.AttributeSConns, v2.AttributeSConns) {
-		d.Attributes_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AttributeSConns))
-	}
-	d.Opts = diffDispatchersOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

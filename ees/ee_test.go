@@ -18,15 +18,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
+	"encoding/json"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewEventExporter(t *testing.T) {
@@ -46,14 +46,11 @@ func TestNewEventExporter(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	eeExpect, err := NewFileCSVee(cgrCfg.EEsCfg().Exporters[0], cgrCfg, filterS, dc, nil)
+	eeExpect, err := NewFileCSVee(cgrCfg.EEsCfg().Exporters[0], cgrCfg, filterS, dc)
 	if strings.Contains(errExpect, err.Error()) {
 		t.Errorf("Expected %+v but got %+v", errExpect, err)
 	}
-	err = eeExpect.init(nil)
-	if err == nil {
-		t.Error("\nExpected an error")
-	}
+	err = eeExpect.init()
 	newEE := ee.(*FileCSVee)
 	newEE.dc.MapStorage[utils.TimeNow] = nil
 	newEE.dc.MapStorage[utils.ExportPath] = nil
@@ -80,17 +77,11 @@ func TestNewEventExporterCase2(t *testing.T) {
 		"Local",
 		utils.EmptyString,
 	))
-	if err != nil {
-		t.Error(err)
-	}
-	eeExpect, err := NewFileFWVee(cgrCfg.EEsCfg().Exporters[0], cgrCfg, filterS, dc, io.Discard)
+	eeExpect, err := NewFileFWVee(cgrCfg.EEsCfg().Exporters[0], cgrCfg, filterS, dc)
 	if strings.Contains(errExpect, err.Error()) {
 		t.Errorf("Expected %+v but got %+v", errExpect, err)
 	}
-	err = eeExpect.init(io.Discard)
-	if err == nil {
-		t.Error("\nExpected an error")
-	}
+	err = eeExpect.init()
 	newEE := ee.(*FileFWVee)
 	newEE.dc.MapStorage[utils.TimeNow] = nil
 	newEE.dc.MapStorage[utils.ExportPath] = nil
@@ -114,9 +105,6 @@ func TestNewEventExporterCase3(t *testing.T) {
 		"Local",
 		utils.EmptyString,
 	))
-	if err != nil {
-		t.Error(err)
-	}
 	eeExpect, err := NewHTTPPostEE(cgrCfg.EEsCfg().Exporters[0], cgrCfg, filterS, dc)
 	if err != nil {
 		t.Error(err)
@@ -142,9 +130,6 @@ func TestNewEventExporterCase4(t *testing.T) {
 		"Local",
 		utils.EmptyString,
 	))
-	if err != nil {
-		t.Error(err)
-	}
 	eeExpect, err := NewHTTPjsonMapEE(cgrCfg.EEsCfg().Exporters[0], cgrCfg, filterS, dc)
 	if err != nil {
 		t.Error(err)
@@ -278,5 +263,30 @@ func TestDone(t *testing.T) {
 	c.done()
 	if len(c.reqs) != 3 {
 		t.Error("Expected length of 3")
+	}
+}
+
+func TestEEPrepareOrderMap(t *testing.T) {
+	bP := new(bytePreparing)
+	onm := utils.NewOrderedNavigableMap()
+	fullPath := &utils.FullPath{
+		PathSlice: []string{utils.MetaReq, utils.MetaTenant},
+		Path:      utils.MetaTenant,
+	}
+	val := &utils.DataLeaf{
+		Data: "value1",
+	}
+	onm.Append(fullPath, val)
+	rcv, err := bP.PrepareOrderMap(onm)
+	if err != nil {
+		t.Error(err)
+	}
+
+	valMp := map[string]interface{}{
+		"*req.*tenant": "value1",
+	}
+	body, err := json.Marshal(valMp)
+	if !reflect.DeepEqual(rcv, body) {
+		t.Errorf("Expected %v \n but received \n %v", utils.IfaceAsString(body), utils.IfaceAsString(rcv))
 	}
 }

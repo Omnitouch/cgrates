@@ -1,5 +1,0 @@
-#Tenant,ID,FilterIDs,Weights,Blockers,AttributeFilterIDs,AttributeBlockers,Path,Type,Value
-
-cgrates.org,ATTR_ACCOUNTS,*string:~*req.Account:ACCOUNT1,,;false,,,*opts.*accounts,*constant,true
-
-cgrates.org,ATTR_RATES,,;10,,,,*opts.*rates,*constant,true

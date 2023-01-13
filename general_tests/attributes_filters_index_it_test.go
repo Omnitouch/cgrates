@@ -22,28 +22,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
+	"net/rpc"
 	"path"
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/apis"
-	"github.com/Omnitouch/cgrates/engine"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/engine"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	attrFltrCfgPath     string
 	attrFltrCfg         *config.CGRConfig
-	attrFltrRPC         *birpc.Client
+	attrFltrRPC         *rpc.Client
 	alsPrfFltrConfigDIR string
 	sTestsAlsFltrPrf    = []func(t *testing.T){
 		testAttributeFltrSInitCfg,
 		testAttributeFltrSInitDataDb,
-
+		testAttributeFltrSResetStorDb,
 		testAttributeFltrSStartEngine,
 		testAttributeFltrSRPCConn,
 
@@ -59,9 +58,9 @@ var (
 func TestAttributeFilterSIT(t *testing.T) {
 	switch *dbType {
 	case utils.MetaMySQL:
-		alsPrfFltrConfigDIR = "attributesindexes_mysql"
+		alsPrfFltrConfigDIR = "attributes_mysql"
 	case utils.MetaMongo:
-		alsPrfFltrConfigDIR = "attributesindexes_mongo"
+		alsPrfFltrConfigDIR = "attributes_mongo"
 	case utils.MetaPostgres, utils.MetaInternal:
 		t.SkipNow()
 	default:
@@ -75,14 +74,22 @@ func TestAttributeFilterSIT(t *testing.T) {
 func testAttributeFltrSInitCfg(t *testing.T) {
 	var err error
 	attrFltrCfgPath = path.Join(*dataDir, "conf", "samples", alsPrfFltrConfigDIR)
-	attrFltrCfg, err = config.NewCGRConfigFromPath(context.Background(), attrFltrCfgPath)
+	attrFltrCfg, err = config.NewCGRConfigFromPath(attrFltrCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
+	attrFltrCfg.DataFolderPath = *dataDir // Share DataFolderPath through config towards StoreDb for Flush()
 }
 
 func testAttributeFltrSInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(attrFltrCfg); err != nil {
+	if err := engine.InitDataDb(attrFltrCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testAttributeFltrSResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(attrFltrCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -116,15 +123,16 @@ func testAttributeSetFltr1(t *testing.T) {
 		},
 	}
 	var result string
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1SetFilter, filter, &result); err != nil {
+	if err := attrFltrRPC.Call(utils.APIerSv1SetFilter, filter, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
 	}
 
 	var indexes []string
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1GetFilterIndexes, &apis.AttrGetFilterIndexes{
-		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix},
+	if err := attrFltrRPC.Call(utils.APIerSv1GetFilterIndexes, &v1.AttrGetFilterIndexes{
+		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix,
+		Context: utils.MetaSessionS},
 		&indexes); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
@@ -132,23 +140,22 @@ func testAttributeSetFltr1(t *testing.T) {
 
 func testAttributeSetProfile(t *testing.T) {
 	var result string
-	alsPrf := &engine.APIAttributeProfileWithAPIOpts{
-		APIAttributeProfile: &engine.APIAttributeProfile{
+	alsPrf := &engine.AttributeProfileWithAPIOpts{
+		AttributeProfile: &engine.AttributeProfile{
 			Tenant:    "cgrates.org",
 			ID:        "ApierTest",
+			Contexts:  []string{utils.MetaSessionS},
 			FilterIDs: []string{"FLTR_1"},
-			Attributes: []*engine.ExternalAttribute{{
-				Path:  "*req.FL1",
-				Value: "Al1",
-			}},
-			Weights: utils.DynamicWeights{
+			Attributes: []*engine.Attribute{
 				{
-					Weight: 20,
+					Path:  "*req.FL1",
+					Value: config.NewRSRParsersMustCompile("Al1", utils.InfieldSep),
 				},
 			},
+			Weight: 20,
 		},
 	}
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1SetAttributeProfile, alsPrf, &result); err != nil {
+	if err := attrFltrRPC.Call(utils.APIerSv1SetAttributeProfile, alsPrf, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -159,10 +166,12 @@ func testAttributeSetProfile(t *testing.T) {
 		Event: map[string]interface{}{
 			"Subject": "44",
 		},
-		APIOpts: map[string]interface{}{},
+		APIOpts: map[string]interface{}{
+			utils.OptsContext: utils.MetaSessionS,
+		},
 	}
 	var rplyEv engine.AttrSProcessEventReply
-	if err := attrFltrRPC.Call(context.Background(), utils.AttributeSv1ProcessEvent,
+	if err := attrFltrRPC.Call(utils.AttributeSv1ProcessEvent,
 		ev, &rplyEv); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Errorf("Expected %+v, received %+v", utils.ErrNotFound, err)
 	}
@@ -171,8 +180,9 @@ func testAttributeSetProfile(t *testing.T) {
 	expIdx := []string{
 		"*prefix:*req.Subject:48:ApierTest",
 	}
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1GetFilterIndexes, &apis.AttrGetFilterIndexes{
-		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix},
+	if err := attrFltrRPC.Call(utils.APIerSv1GetFilterIndexes, &v1.AttrGetFilterIndexes{
+		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix,
+		Context: utils.MetaSessionS},
 		&indexes); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(indexes, expIdx) {
@@ -194,7 +204,7 @@ func testAttributeSetFltr2(t *testing.T) {
 			}},
 		},
 	}
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1SetFilter, filter, &result); err != nil {
+	if err := attrFltrRPC.Call(utils.APIerSv1SetFilter, filter, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -206,26 +216,26 @@ func testAttributeSetFltr2(t *testing.T) {
 		Event: map[string]interface{}{
 			"Subject": "4444",
 		},
-		APIOpts: map[string]interface{}{},
+		APIOpts: map[string]interface{}{
+			utils.OptsContext: utils.MetaSessionS,
+		},
 	}
 	exp := engine.AttrSProcessEventReply{
-		AlteredFields: []*engine.FieldsAltered{
-			{
-				MatchedProfileID: "cgrates.org:ApierTest",
-				Fields:           []string{"*req.FL1"},
-			},
-		},
+		MatchedProfiles: []string{"cgrates.org:ApierTest"},
+		AlteredFields:   []string{"*req.FL1"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			Event: map[string]interface{}{
 				"Subject": "4444",
 				"FL1":     "Al1",
 			},
-			APIOpts: map[string]interface{}{},
+			APIOpts: map[string]interface{}{
+				utils.OptsContext: utils.MetaSessionS,
+			},
 		},
 	}
 	var rplyEv engine.AttrSProcessEventReply
-	if err := attrFltrRPC.Call(context.Background(), utils.AttributeSv1ProcessEvent,
+	if err := attrFltrRPC.Call(utils.AttributeSv1ProcessEvent,
 		ev, &rplyEv); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(exp, rplyEv) {
@@ -236,8 +246,9 @@ func testAttributeSetFltr2(t *testing.T) {
 	expIdx := []string{
 		"*prefix:*req.Subject:44:ApierTest",
 	}
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1GetFilterIndexes, &apis.AttrGetFilterIndexes{
-		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix},
+	if err := attrFltrRPC.Call(utils.APIerSv1GetFilterIndexes, &v1.AttrGetFilterIndexes{
+		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix,
+		Context: utils.MetaSessionS},
 		&indexes); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(indexes, expIdx) {
@@ -248,14 +259,14 @@ func testAttributeSetFltr2(t *testing.T) {
 
 func testAttributeRemoveFltr(t *testing.T) {
 	var result string
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1RemoveAttributeProfile, &utils.TenantIDWithAPIOpts{
+	if err := attrFltrRPC.Call(utils.APIerSv1RemoveAttributeProfile, &utils.TenantIDWithAPIOpts{
 		TenantID: &utils.TenantID{Tenant: "cgrates.org", ID: "ApierTest"}}, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
 	}
 
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1RemoveFilter, &utils.TenantIDWithAPIOpts{
+	if err := attrFltrRPC.Call(utils.APIerSv1RemoveFilter, &utils.TenantIDWithAPIOpts{
 		TenantID: &utils.TenantID{Tenant: "cgrates.org", ID: "FLTR_1"}}, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
@@ -263,15 +274,16 @@ func testAttributeRemoveFltr(t *testing.T) {
 	}
 
 	var indexes []string
-	if err := attrFltrRPC.Call(context.Background(), utils.AdminSv1GetFilterIndexes, &apis.AttrGetFilterIndexes{
-		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix},
+	if err := attrFltrRPC.Call(utils.APIerSv1GetFilterIndexes, &v1.AttrGetFilterIndexes{
+		ItemType: utils.MetaAttributes, Tenant: "cgrates.org", FilterType: utils.MetaPrefix,
+		Context: utils.MetaSessionS},
 		&indexes); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 }
 
 func testAttributeFltrSStopEngine(t *testing.T) {
-	if err := engine.KillEngine(*waitRater); err != nil {
+	if err := engine.KillEngine(accDelay); err != nil {
 		t.Error(err)
 	}
 }

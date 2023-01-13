@@ -984,7 +984,6 @@ func TestDCrCConvert(t *testing.T) {
 		t.Errorf("\nExpected 0 or 1, \nReceived: <%+v>", received)
 	}
 }
-
 func TestLenTimeConverter(t *testing.T) {
 	exp := new(LengthConverter)
 	cnv, err := NewDataConverter(MetaLen)
@@ -1037,7 +1036,7 @@ func TestLenTimeConverter3(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, rcv) {
 		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
 	}
-	if rcv, err := cnv.Convert("[}"); err != nil {
+	if rcv, err := cnv.Convert("[]"); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, rcv) {
 		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
@@ -1133,112 +1132,7 @@ func TestLenTimeConverter3(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, rcv) {
 		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
 	}
-
-	if rcv, err := cnv.Convert(map[string]string{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]interface{}{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]bool{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]int{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]int8{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]int16{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]int32{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]int64{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]uint{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]uint8{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]uint16{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]uint32{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]uint64{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]uintptr{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]float32{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]float64{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]complex64{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert(map[string]complex128{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-
-	if rcv, err := cnv.Convert(map[string]Account{}); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-
-	if rcv, err := cnv.Convert("[]"); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
-	}
-	if rcv, err := cnv.Convert("{}"); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(expected, rcv) {
+	if rcv, err := cnv.Convert(nil); err != nil {
 		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
 	}
 }
@@ -1289,6 +1183,10 @@ func TestSliceConverter(t *testing.T) {
 	} else if !reflect.DeepEqual(expected2, rcv) {
 		t.Errorf("Expecting: %+v, received: %+v", expected, rcv)
 	}
+
+	if _, err := cnv.Convert(`test`); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestE164FromNAPTRConverter(t *testing.T) {
@@ -1299,6 +1197,9 @@ func TestE164FromNAPTRConverter(t *testing.T) {
 	}
 	if !reflect.DeepEqual(exp, cnv) {
 		t.Errorf("Expecting: %+v, received: %+v", exp, cnv)
+	}
+	if _, err := cnv.Convert("8.7.6.5.4.3.2.1"); err == nil {
+		t.Error("Error")
 	}
 	if e164, err := cnv.Convert("8.7.6.5.4.3.2.1.0.1.6.e164.arpa."); err != nil {
 		t.Error(err)
@@ -1316,6 +1217,7 @@ func TestDomainNameFromNAPTRConverter(t *testing.T) {
 	if !reflect.DeepEqual(exp, cnv) {
 		t.Errorf("Expecting: %+v, received: %+v", exp, cnv)
 	}
+
 	if dName, err := cnv.Convert("8.7.6.5.4.3.2.1.0.1.6.e164.arpa."); err != nil {
 		t.Fatal(err)
 	} else if dName != "e164.arpa" {
@@ -1330,103 +1232,6 @@ func TestDomainNameFromNAPTRConverter(t *testing.T) {
 		t.Fatal(err)
 	} else if dName != "8.7.6.5.4.3.2.1.0.1.6.itsyscom.com" {
 		t.Errorf("received: <%s>", dName)
-	}
-}
-
-func TestDataConverterLengthConvert(t *testing.T) {
-	var lC LengthConverter
-	input := NewDecimal(2, 0)
-	rcv, _ := lC.Convert(input)
-	if rcv != 1 {
-		t.Error("Expected 1")
-	}
-}
-
-func TestDataConverterSliceConvert(t *testing.T) {
-	var lC SliceConverter
-	input := NewDecimal(2, 0)
-	rcv, _ := lC.Convert(input)
-	if rcv != "2" {
-		t.Error("Expected 2")
-	}
-}
-
-func TestDataConverterE164Convert(t *testing.T) {
-	var lC e164Converter
-	input := NewDecimal(2, 0)
-	_, err := lC.Convert(input)
-	if err == nil || err.Error() != "unknown format" {
-		t.Errorf("Expected 'unknown format' error")
-	}
-}
-
-func TestJoinConverter(t *testing.T) {
-	d, err := NewDataConverter(MetaJoin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expVal := "1;2;3;5"
-	if i, err := d.Convert("1;2;3;5"); err != nil {
-		t.Error(err.Error())
-	} else if expVal != i {
-		t.Errorf("expecting: %q, received: %q", expVal, i)
-	}
-
-	d, err = NewDataConverter(MetaJoin + ":|")
-	if err != nil {
-		t.Fatal(err)
-	}
-	expVal = "1|2|3|5"
-	if i, err := d.Convert("1;2;3;5"); err != nil {
-		t.Error(err.Error())
-	} else if expVal != i {
-		t.Errorf("expecting: %q, received: %q", expVal, i)
-	}
-	expErr := `cannot convert field: 5 to []string`
-	if _, err := d.Convert(5); err == nil || err.Error() != expErr {
-		t.Error(err)
-	}
-}
-
-func TestSplitConverter(t *testing.T) {
-	d, err := NewDataConverter(MetaSplit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expVal := []string{"1", "2", "3", "5"}
-	if i, err := d.Convert("1;2;3;5"); err != nil {
-		t.Error(err.Error())
-	} else if !reflect.DeepEqual(expVal, i) {
-		t.Errorf("expecting: %q, received: %q", expVal, i)
-	}
-
-	d, err = NewDataConverter(MetaSplit + ":|")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if i, err := d.Convert("1|2|3|5"); err != nil {
-		t.Error(err.Error())
-	} else if !reflect.DeepEqual(expVal, i) {
-		t.Errorf("expecting: %q, received: %q", expVal, i)
-	}
-}
-
-func TestDataConvertersConvertInterface(t *testing.T) {
-	dcs := &DataConverters{}
-	if rcv, err := dcs.ConvertInterface(EmptyString); err != nil {
-		t.Error(err)
-	} else if rcv != EmptyString {
-		t.Errorf("Expecting: <%+q>, received: <%+q>", EmptyString, rcv)
-	}
-	if rcv, err := dcs.ConvertInterface("test"); err != nil {
-		t.Error(err)
-	} else if rcv != "test" {
-		t.Errorf("Expecting: <test>, received: <%+q>", rcv)
-	}
-	dcs = &DataConverters{joinConverter(";")}
-	expErrMsg := `cannot convert field: {} to []string`
-	if _, err := dcs.ConvertInterface(struct{}{}); err == nil || err.Error() != expErrMsg {
-		t.Errorf("Expeceted: %v, received: %v", expErrMsg, err)
 	}
 }
 

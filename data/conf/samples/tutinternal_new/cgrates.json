@@ -22,6 +22,10 @@
 },
 
 
+"stor_db": {
+	"db_type": "*internal",	
+},
+
 
 "rals": {
 	"enabled": true,
@@ -91,18 +95,14 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },
 
 
 "filters": {								
-	"accounts_conns": ["*internal"],
-},
-
-"accounts": {
-    "enabled": true
+	"apiers_conns": ["*internal"],
 },
 
 }

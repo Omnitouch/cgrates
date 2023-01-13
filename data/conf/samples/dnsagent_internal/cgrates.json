@@ -1,67 +1,77 @@
 {
-	"general": {
-		"log_level": 7									
-	},
 
-	"data_db": {
-		"db_type": "*internal"
-	},
-
-	"schedulers": {
-		"enabled": true,
-		"cdrs_conns": ["*internal"]
-	},
-
-	"sessions": {
-		"enabled": true,
-		"attributes_conns": ["*localhost"],
-		"rals_conns": ["*internal"],
-		"cdrs_conns": ["*internal"],
-		"chargers_conns": ["*internal"],
-		"routes_conns": ["*localhost"]
-	},
-
-	"rates": {
-		"enabled": true
-	},
-
-	"cdrs": {
-		"enabled": true,
-		"rates_conns": ["*internal"]
-	},
-
-	"chargers": {
-		"enabled": true
-	},
+// Real-time Online/Offline Charging System (OCS) for Telecom & ISP environments
+// Copyright (C) ITsysCOM GmbH
+//
+// This file contains the default configuration hardcoded into CGRateS.
+// This is what you get when you load CGRateS with an empty configuration file.
 
 
-	"attributes": {
-		"enabled": true
-	},
+"general": {
+	"log_level": 7,											// control the level of messages logged (0-emerg to 7-debug)
+},
 
-	"routes": {
-		"enabled": true
-	},
+"data_db": {
+	"db_type": "*internal",	
+},
 
-	"dns_agent": {
-		"enabled": true,
-		"listen": ":2053",
-		"sessions_conns": ["*localhost"]
-	},
 
-	"admins": {
-		"enabled": true,
-		"scheduler_conns": ["*internal"]
-	},
+"stor_db": {
+	"db_type": "*internal",	
+},
 
-	"loaders": [
-		{
-			"id": "*default",
-			"enabled": true,
-			"tenant": "cgrates.org",
-			"lockfile_path": ".cgr.lck",
-			"tp_in_dir": "/usr/share/cgrates/tariffplans/dnsagent",
-			"tp_out_dir": ""
-		}
-	]
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["*internal"],
+},
+
+
+"sessions": {
+	"enabled": true,
+	"attributes_conns": ["*localhost"],
+	"rals_conns": ["*internal"],
+	"cdrs_conns": ["*internal"],
+	"chargers_conns": ["*internal"],
+	"routes_conns": ["*localhost"],
+},
+
+
+"rals": {
+	"enabled": true,
+},
+
+
+"cdrs": {
+	"enabled": true,
+	"rals_conns": ["*internal"],
+},
+
+
+"chargers": {
+	"enabled": true,
+},
+
+
+"attributes": {
+	"enabled": true,
+},
+
+
+"routes": {
+	"enabled": true,
+},
+
+
+"dns_agent": {
+	"enabled": true,
+	"listen": ":2053",
+	"sessions_conns": ["*localhost"],
+},
+
+
+"apiers": {
+	"enabled": true,
+	"scheduler_conns": ["*internal"],
+},
 }

@@ -21,7 +21,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package ers
 
-/*
 import (
 	"fmt"
 	"net/rpc"
@@ -31,11 +30,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/apis"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -81,16 +79,21 @@ func TestFWVReadFile(t *testing.T) {
 func testFWVITInitConfig(t *testing.T) {
 	var err error
 	fwvCfgPath = path.Join(*dataDir, "conf", "samples", fwvCfgDIR)
-	if fwvCfg, err = config.NewCGRConfigFromPath(context.Background(), fwvCfgPath); err != nil {
+	if fwvCfg, err = config.NewCGRConfigFromPath(fwvCfgPath); err != nil {
 		t.Fatal("Got config error: ", err.Error())
 	}
 }
 
-
+// InitDb so we can rely on count
+func testFWVITInitCdrDb(t *testing.T) {
+	if err := engine.InitStorDb(fwvCfg); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Remove data in both rating and accounting db
 func testFWVITResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(fwvCfg); err != nil {
+	if err := engine.InitDataDb(fwvCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -112,7 +115,7 @@ func testFWVITRpcConn(t *testing.T) {
 
 func testFWVITLoadTPFromFolder(t *testing.T) {
 	//add a default charger
-	chargerProfile := &apis.ChargerWithAPIOpts{
+	chargerProfile := &v1.ChargerWithAPIOpts{
 		ChargerProfile: &engine.ChargerProfile{
 			Tenant:       "cgrates.org",
 			ID:           "Default",
@@ -122,7 +125,7 @@ func testFWVITLoadTPFromFolder(t *testing.T) {
 		},
 	}
 	var result string
-	if err := fwvRPC.Call(utils.AdminSv1SetChargerProfile, chargerProfile, &result); err != nil {
+	if err := fwvRPC.Call(utils.APIerSv1SetChargerProfile, chargerProfile, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -183,7 +186,7 @@ func testFWVITAnalyseCDRs(t *testing.T) {
 	var reply []*engine.ExternalCDR
 	if err := fwvRPC.Call(utils.APIerSv2GetCDRs, &utils.RPCCDRsFilter{}, &reply); err != nil {
 		t.Error("Unexpected error: ", err.Error())
-	} else if len(reply) != 34 {
+	} else if len(reply) != 29 {
 		t.Error("Unexpected number of CDRs returned: ", len(reply))
 	}
 	if err := fwvRPC.Call(utils.APIerSv2GetCDRs, &utils.RPCCDRsFilter{OriginIDs: []string{"CDR0000010"}}, &reply); err != nil {
@@ -233,7 +236,7 @@ func TestFWVFileConfig(t *testing.T) {
 			Timezone:       utils.EmptyString,
 			Filters:        []string{},
 			Flags:          utils.FlagsWithParams{},
-			Opts:           make(map[string]interface{}),
+			Opts:           &config.EventReaderOpts{},
 		},
 		{
 			ID:             "file_reader2",
@@ -246,7 +249,7 @@ func TestFWVFileConfig(t *testing.T) {
 			Timezone:       utils.EmptyString,
 			Filters:        []string{},
 			Flags:          utils.FlagsWithParams{},
-			Opts:           make(map[string]interface{}),
+			Opts:           &config.EventReaderOpts{},
 		},
 	}
 	expected := cfg.ERsCfg().Readers[0]
@@ -430,7 +433,7 @@ func TestFileFWVExit(t *testing.T) {
 
 func TestFileFWVProcessTrailer(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	cfg.ERsCfg().Readers[0].ProcessedPath = ""
 	fltrs := engine.NewFilterS(cfg, nil, dm)
@@ -476,6 +479,7 @@ func TestFileFWVProcessTrailer(t *testing.T) {
 	select {
 	case data := <-eR.rdrEvents:
 		expEvent.ID = data.cgrEvent.ID
+		expEvent.Time = data.cgrEvent.Time
 		if !reflect.DeepEqual(data.cgrEvent, expEvent) {
 			t.Errorf("Expected %v but received %v", utils.ToJSON(expEvent), utils.ToJSON(data.cgrEvent))
 		}
@@ -489,7 +493,7 @@ func TestFileFWVProcessTrailer(t *testing.T) {
 
 func TestFileFWVProcessTrailerError1(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	cfg.ERsCfg().Readers[0].ProcessedPath = ""
 	fltrs := engine.NewFilterS(cfg, nil, dm)
@@ -526,7 +530,7 @@ func TestFileFWVProcessTrailerError1(t *testing.T) {
 
 func TestFileFWVProcessTrailerError2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	eR := &FWVFileER{
@@ -573,7 +577,7 @@ func TestFileFWVProcessTrailerError2(t *testing.T) {
 
 func TestFileFWVProcessTrailerError3(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	eR := &FWVFileER{
@@ -604,7 +608,7 @@ func TestFileFWVProcessTrailerError3(t *testing.T) {
 
 func TestFileFWVCreateHeaderMap(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	eR := &FWVFileER{
@@ -642,6 +646,7 @@ func TestFileFWVCreateHeaderMap(t *testing.T) {
 	select {
 	case data := <-eR.rdrEvents:
 		expEvent.ID = data.cgrEvent.ID
+		expEvent.Time = data.cgrEvent.Time
 		if !reflect.DeepEqual(data.cgrEvent, expEvent) {
 			t.Errorf("Expected %v but received %v", utils.ToJSON(expEvent), utils.ToJSON(data.cgrEvent))
 		}
@@ -652,7 +657,7 @@ func TestFileFWVCreateHeaderMap(t *testing.T) {
 
 func TestFileFWVCreateHeaderMapError1(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	eR := &FWVFileER{
@@ -678,7 +683,7 @@ func TestFileFWVCreateHeaderMapError1(t *testing.T) {
 
 func TestFileFWVCreateHeaderMapError2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	eR := &FWVFileER{
@@ -709,4 +714,3 @@ func TestFileFWVCreateHeaderMapError2(t *testing.T) {
 		t.Errorf("Expected %v but received %v", errExpect, err)
 	}
 }
-*/

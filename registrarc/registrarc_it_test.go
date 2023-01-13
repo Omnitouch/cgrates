@@ -23,16 +23,15 @@ package registrarc
 
 import (
 	"bytes"
+	"net/rpc"
 	"os/exec"
 	"path"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -40,7 +39,7 @@ var (
 	dspCfgPath string
 	dspCfg     *config.CGRConfig
 	dspCmd     *exec.Cmd
-	dspRPC     *birpc.Client
+	dspRPC     *rpc.Client
 
 	allDir     string
 	allCfgPath string
@@ -88,16 +87,18 @@ func testDsphInitCfg(t *testing.T) {
 	allCfgPath = path.Join(*dataDir, "conf", "samples", "registrarc", allDir)
 	all2CfgPath = path.Join(*dataDir, "conf", "samples", "registrarc", all2Dir)
 	var err error
-	if dspCfg, err = config.NewCGRConfigFromPath(context.Background(), dspCfgPath); err != nil {
+	if dspCfg, err = config.NewCGRConfigFromPath(dspCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testDsphInitDB(t *testing.T) {
-	if err := engine.InitDataDB(dspCfg); err != nil {
+	if err := engine.InitDataDb(dspCfg); err != nil {
 		t.Fatal(err)
 	}
-
+	if err := engine.InitStorDb(dspCfg); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testDsphStartEngine(t *testing.T) {
@@ -127,7 +128,7 @@ func testDsphLoadData(t *testing.T) {
 
 func testDsphGetNodeID() (id string, err error) {
 	var status map[string]interface{}
-	if err = dspRPC.Call(context.Background(), utils.CoreSv1Status, utils.TenantWithAPIOpts{
+	if err = dspRPC.Call(utils.DispatcherSv1RemoteStatus, utils.TenantWithAPIOpts{
 		Tenant:  "cgrates.org",
 		APIOpts: map[string]interface{}{},
 	}, &status); err != nil {
@@ -173,7 +174,7 @@ func testDsphStopEngines(t *testing.T) {
 	if err := all2Cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	if _, err := testDsphGetNodeID(); err == nil || err.Error() != utils.ErrDSPHostNotFound.Error() {
 		t.Errorf("Expected error: %s received: %v", utils.ErrDSPHostNotFound, err)
 	}

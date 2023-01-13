@@ -21,9 +21,8 @@ package config
 import (
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestDispatcherHCfgloadFromJsonCfg(t *testing.T) {
@@ -33,7 +32,6 @@ func TestDispatcherHCfgloadFromJsonCfg(t *testing.T) {
 			Hosts: []*RemoteHostJsonWithTenant{
 				{
 
-					Tenant: utils.StringPointer(utils.MetaDefault),
 					RemoteHostJson: &RemoteHostJson{
 						Id:        utils.StringPointer("Host1"),
 						Transport: utils.StringPointer(utils.MetaJSON),
@@ -47,6 +45,7 @@ func TestDispatcherHCfgloadFromJsonCfg(t *testing.T) {
 					},
 				},
 				{
+
 					Tenant: utils.StringPointer("cgrates.net"),
 					RemoteHostJson: &RemoteHostJson{
 						Id:        utils.StringPointer("Host1"),
@@ -169,21 +168,6 @@ func TestDispatcherHCfgloadFromJsonCfg(t *testing.T) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsnCfg.registrarCCfg))
 	}
 
-	jsonCfg.RPC.Hosts = append(jsonCfg.RPC.Hosts, &RemoteHostJsonWithTenant{
-		Tenant: utils.StringPointer(""),
-		RemoteHostJson: &RemoteHostJson{
-			Id:        utils.StringPointer("Host1"),
-			Transport: utils.StringPointer(utils.MetaJSON),
-		},
-	})
-	if err = jsnCfg.registrarCCfg.loadFromJSONCfg(jsonCfg); err != nil {
-		t.Error(err)
-	}
-
-	jsonCfg = nil
-	if err = jsnCfg.registrarCCfg.loadFromJSONCfg(jsonCfg); err != nil {
-		t.Error(err)
-	}
 }
 
 func TestDispatcherHCfgAsMapInterface(t *testing.T) {
@@ -202,24 +186,24 @@ func TestDispatcherHCfgAsMapInterface(t *testing.T) {
 							"ID": "Host2",
 							"transport": "*gob",
 							"tls": false
-						},
+},
 					],
 				"refresh_interval": "0",
 			},
 			"dispatchers":{
 				"registrars_conns": ["*conn1","*conn2"],
-				"hosts": [
+"hosts": [
 						{	"Tenant":"*default",
 							"ID": "Host1",
 							"transport": "*json",
 							"tls": false
 						},
-						{	
+{	
 							"Tenant":"*default",	
 							"ID": "Host2",
 							"transport": "*gob",
 							"tls": false
-						},
+},
 					],
 				"refresh_interval": "0",
 			},
@@ -261,7 +245,7 @@ func TestDispatcherHCfgAsMapInterface(t *testing.T) {
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.registrarCCfg.AsMapInterface(""); !reflect.DeepEqual(eMap, rcv) {
+	} else if rcv := cgrCfg.registrarCCfg.AsMapInterface(); !reflect.DeepEqual(eMap, rcv) {
 		t.Errorf("Expected %+v, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -310,7 +294,7 @@ func TestDispatcherHCfgAsMapInterface2(t *testing.T) {
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.registrarCCfg.AsMapInterface(""); !reflect.DeepEqual(eMap, rcv) {
+	} else if rcv := cgrCfg.registrarCCfg.AsMapInterface(); !reflect.DeepEqual(eMap, rcv) {
 		t.Errorf("Expected %+v, received %+v", eMap, rcv)
 	}
 }
@@ -353,287 +337,5 @@ func TestDispatcherHCfgClone(t *testing.T) {
 	}
 	if rcv.Hosts[utils.MetaDefault][0].ID = ""; ban.Hosts[utils.MetaDefault][0].ID != "Host1" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffRegistrarCJsonCfg(t *testing.T) {
-	var d *RegistrarCJsonCfg
-
-	v1 := &RegistrarCCfg{
-		RegistrarSConns: []string{"*localhost"},
-		Hosts: map[string][]*RemoteHost{
-			"HOST_1": {
-				{
-					ID:        "host1_ID",
-					Address:   "127.0.0.1:8080",
-					Transport: "tcp",
-					TLS:       false,
-				},
-			},
-		},
-		RefreshInterval: 2 * time.Second,
-	}
-
-	v2 := &RegistrarCCfg{
-		RegistrarSConns: []string{"*birpc"},
-		Hosts: map[string][]*RemoteHost{
-			"HOST_1": {
-				{
-					ID:        "host2_ID",
-					Address:   "0.0.0.0:8080",
-					Transport: "udp",
-					TLS:       true,
-				},
-			},
-		},
-		RefreshInterval: 4 * time.Second,
-	}
-
-	expected := &RegistrarCJsonCfg{
-		Registrars_conns: &[]string{"*birpc"},
-		Hosts: []*RemoteHostJsonWithTenant{
-			{
-				Tenant: utils.StringPointer("HOST_1"),
-				RemoteHostJson: &RemoteHostJson{
-					Id:        utils.StringPointer("host2_ID"),
-					Address:   utils.StringPointer("0.0.0.0:8080"),
-					Transport: utils.StringPointer("udp"),
-					Tls:       utils.BoolPointer(true),
-				},
-			},
-		},
-		Refresh_interval: utils.StringPointer("4s"),
-	}
-
-	rcv := diffRegistrarCJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &RegistrarCJsonCfg{
-		Hosts: []*RemoteHostJsonWithTenant{
-			{
-				Tenant: utils.StringPointer("HOST_1"),
-				RemoteHostJson: &RemoteHostJson{
-					Id:        utils.StringPointer("host2_ID"),
-					Address:   utils.StringPointer("0.0.0.0:8080"),
-					Transport: utils.StringPointer("udp"),
-					Tls:       utils.BoolPointer(true),
-				},
-			},
-		},
-	}
-	rcv = diffRegistrarCJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffRegistrarCJsonCfgs(t *testing.T) {
-	var d *RegistrarCJsonCfgs
-
-	v1 := &RegistrarCCfgs{
-		RPC: &RegistrarCCfg{
-			RegistrarSConns: []string{"*localhost"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host1_ID",
-						Address:   "127.0.0.1:8080",
-						Transport: "tcp",
-						TLS:       false,
-					},
-				},
-			},
-			RefreshInterval: 2 * time.Second,
-		},
-		Dispatchers: &RegistrarCCfg{
-			RegistrarSConns: []string{"*localhost"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host1_ID",
-						Address:   "127.0.0.1:8080",
-						Transport: "tcp",
-						TLS:       false,
-					},
-				},
-			},
-			RefreshInterval: 2 * time.Second,
-		},
-	}
-
-	v2 := &RegistrarCCfgs{
-		RPC: &RegistrarCCfg{
-			RegistrarSConns: []string{"*birpc"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host2_ID",
-						Address:   "0.0.0.0:8080",
-						Transport: "udp",
-						TLS:       true,
-					},
-				},
-			},
-			RefreshInterval: 4 * time.Second,
-		},
-		Dispatchers: &RegistrarCCfg{
-			RegistrarSConns: []string{"*birpc"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host2_ID",
-						Address:   "0.0.0.0:8080",
-						Transport: "udp",
-						TLS:       true,
-					},
-				},
-			},
-			RefreshInterval: 4 * time.Second,
-		},
-	}
-
-	expected := &RegistrarCJsonCfgs{
-		RPC: &RegistrarCJsonCfg{
-			Registrars_conns: &[]string{"*birpc"},
-			Hosts: []*RemoteHostJsonWithTenant{
-				{
-					Tenant: utils.StringPointer("HOST_1"),
-					RemoteHostJson: &RemoteHostJson{
-						Id:        utils.StringPointer("host2_ID"),
-						Address:   utils.StringPointer("0.0.0.0:8080"),
-						Transport: utils.StringPointer("udp"),
-						Tls:       utils.BoolPointer(true),
-					},
-				},
-			},
-			Refresh_interval: utils.StringPointer("4s"),
-		},
-		Dispatchers: &RegistrarCJsonCfg{
-			Registrars_conns: &[]string{"*birpc"},
-			Hosts: []*RemoteHostJsonWithTenant{
-				{
-					Tenant: utils.StringPointer("HOST_1"),
-					RemoteHostJson: &RemoteHostJson{
-						Id:        utils.StringPointer("host2_ID"),
-						Address:   utils.StringPointer("0.0.0.0:8080"),
-						Transport: utils.StringPointer("udp"),
-						Tls:       utils.BoolPointer(true),
-					},
-				},
-			},
-			Refresh_interval: utils.StringPointer("4s"),
-		},
-	}
-
-	rcv := diffRegistrarCJsonCfgs(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = new(RegistrarCJsonCfgs)
-	v1 = v2
-	expected = &RegistrarCJsonCfgs{
-		RPC: &RegistrarCJsonCfg{
-			Hosts: []*RemoteHostJsonWithTenant{
-				{
-					Tenant: utils.StringPointer("HOST_1"),
-					RemoteHostJson: &RemoteHostJson{
-						Id:        utils.StringPointer("host2_ID"),
-						Address:   utils.StringPointer("0.0.0.0:8080"),
-						Transport: utils.StringPointer("udp"),
-						Tls:       utils.BoolPointer(true),
-					},
-				},
-			},
-		},
-		Dispatchers: &RegistrarCJsonCfg{
-			Hosts: []*RemoteHostJsonWithTenant{
-				{
-					Tenant: utils.StringPointer("HOST_1"),
-					RemoteHostJson: &RemoteHostJson{
-						Id:        utils.StringPointer("host2_ID"),
-						Address:   utils.StringPointer("0.0.0.0:8080"),
-						Transport: utils.StringPointer("udp"),
-						Tls:       utils.BoolPointer(true),
-					},
-				},
-			},
-		},
-	}
-	rcv = diffRegistrarCJsonCfgs(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestRegristrarcCloneSection(t *testing.T) {
-	rgstCfg := &RegistrarCCfgs{
-		RPC: &RegistrarCCfg{
-			RegistrarSConns: []string{"*localhost"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host1_ID",
-						Address:   "127.0.0.1:8080",
-						Transport: "tcp",
-						TLS:       false,
-					},
-				},
-			},
-			RefreshInterval: 2 * time.Second,
-		},
-		Dispatchers: &RegistrarCCfg{
-			RegistrarSConns: []string{"*localhost"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host1_ID",
-						Address:   "127.0.0.1:8080",
-						Transport: "tcp",
-						TLS:       false,
-					},
-				},
-			},
-			RefreshInterval: 2 * time.Second,
-		},
-	}
-
-	exp := &RegistrarCCfgs{
-		RPC: &RegistrarCCfg{
-			RegistrarSConns: []string{"*localhost"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host1_ID",
-						Address:   "127.0.0.1:8080",
-						Transport: "tcp",
-						TLS:       false,
-					},
-				},
-			},
-			RefreshInterval: 2 * time.Second,
-		},
-		Dispatchers: &RegistrarCCfg{
-			RegistrarSConns: []string{"*localhost"},
-			Hosts: map[string][]*RemoteHost{
-				"HOST_1": {
-					{
-						ID:        "host1_ID",
-						Address:   "127.0.0.1:8080",
-						Transport: "tcp",
-						TLS:       false,
-					},
-				},
-			},
-			RefreshInterval: 2 * time.Second,
-		},
-	}
-
-	rcv := rgstCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

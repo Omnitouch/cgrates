@@ -15,6 +15,10 @@
 	"db_name": "10", 						// data_db database name to connect to
 },
 
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
 "attributes": {								
 	"enabled": true,
 },
@@ -30,12 +34,12 @@
 	"exporters": [
 		{
 			"id": "amqp_test_file",
-			"type": "*amqpJSONMap",
+			"type": "*amqp_json_map",
 			"export_path": "amqps://guest:guest@localhost:256733/",
 			"attempts": 1,
 			"synchronous": true,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 			],
 		}
 	]
@@ -52,9 +56,19 @@
 	"store_interval": "-1",
 },
 
+"rals": {
+	"enabled": true
+},
+
+
+"schedulers": {
+	"enabled": true
+},
+
+
 "cdrs": {
 	"enabled": true,
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"attributes_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 	"stats_conns": ["*internal"],
@@ -64,7 +78,7 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },

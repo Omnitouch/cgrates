@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var sTestsDspCpp = []func(t *testing.T){
@@ -121,11 +121,7 @@ func testDspCppGetChtgFailover(t *testing.T) {
 			FilterIDs:    []string{},
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{"*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 0,
-				},
-			},
+			Weight:       0,
 		},
 	}
 	if *encoding == utils.MetaGOB {
@@ -147,11 +143,7 @@ func testDspCppGetChtgFailover(t *testing.T) {
 			FilterIDs:    []string{},
 			RunID:        utils.MetaRaw,
 			AttributeIDs: []string{"*constant:*req.RequestType:*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 0,
-				},
-			},
+			Weight:       0,
 		},
 	)
 	if *encoding == utils.MetaGOB {
@@ -227,11 +219,7 @@ func testDspCppTestAuthKey2(t *testing.T) {
 			FilterIDs:    []string{},
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{"*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 0,
-				},
-			},
+			Weight:       0,
 		},
 		&engine.ChargerProfile{
 			Tenant:       "cgrates.org",
@@ -239,11 +227,7 @@ func testDspCppTestAuthKey2(t *testing.T) {
 			FilterIDs:    []string{},
 			RunID:        utils.MetaRaw,
 			AttributeIDs: []string{"*constant:*req.RequestType:*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 0,
-				},
-			},
+			Weight:       0,
 		},
 	}
 	if *encoding == utils.MetaGOB {
@@ -282,11 +266,7 @@ func testDspCppGetChtgRoundRobin(t *testing.T) {
 			FilterIDs:    []string{},
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{"*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 0,
-				},
-			},
+			Weight:       0,
 		},
 	}
 	if *encoding == utils.MetaGOB {
@@ -308,11 +288,7 @@ func testDspCppGetChtgRoundRobin(t *testing.T) {
 			FilterIDs:    []string{},
 			RunID:        utils.MetaRaw,
 			AttributeIDs: []string{"*constant:*req.RequestType:*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 0,
-				},
-			},
+			Weight:       0,
 		},
 	)
 	if *encoding == utils.MetaGOB {

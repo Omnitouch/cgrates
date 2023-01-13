@@ -22,21 +22,21 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewDiameterAgent returns the Diameter Agent
 func NewDiameterAgent(cfg *config.CGRConfig, filterSChan chan *engine.FilterS,
-	connMgr *engine.ConnManager,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &DiameterAgent{
 		cfg:         cfg,
 		filterSChan: filterSChan,
+		shdChan:     shdChan,
 		connMgr:     connMgr,
 		srvDep:      srvDep,
 	}
@@ -47,6 +47,7 @@ type DiameterAgent struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	filterSChan chan *engine.FilterS
+	shdChan     *utils.SyncedChan
 	stopChan    chan struct{}
 
 	da      *agents.DiameterAgent
@@ -59,21 +60,20 @@ type DiameterAgent struct {
 }
 
 // Start should handle the sercive start
-func (da *DiameterAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (da *DiameterAgent) Start() (err error) {
 	if da.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, da.filterSChan); err != nil {
-		return
-	}
+	filterS := <-da.filterSChan
+	da.filterSChan <- filterS
+
 	da.Lock()
 	defer da.Unlock()
-	return da.start(filterS, shtDwn)
+	return da.start(filterS)
 }
 
-func (da *DiameterAgent) start(filterS *engine.FilterS, shtDwn context.CancelFunc) (err error) {
+func (da *DiameterAgent) start(filterS *engine.FilterS) (err error) {
 	da.da, err = agents.NewDiameterAgent(da.cfg, filterS, da.connMgr)
 	if err != nil {
 		utils.Logger.Err(fmt.Sprintf("<%s> error: %s!",
@@ -87,14 +87,14 @@ func (da *DiameterAgent) start(filterS *engine.FilterS, shtDwn context.CancelFun
 		if err = d.ListenAndServe(da.stopChan); err != nil {
 			utils.Logger.Err(fmt.Sprintf("<%s> error: %s!",
 				utils.DiameterAgent, err))
-			shtDwn()
+			da.shdChan.CloseOnce()
 		}
 	}(da.da)
 	return
 }
 
 // Reload handles the change of config
-func (da *DiameterAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (da *DiameterAgent) Reload() (err error) {
 	da.Lock()
 	defer da.Unlock()
 	if da.lnet == da.cfg.DiameterAgentCfg().ListenNet &&
@@ -102,11 +102,9 @@ func (da *DiameterAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc)
 		return
 	}
 	close(da.stopChan)
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, da.filterSChan); err != nil {
-		return
-	}
-	return da.start(filterS, shtDwn)
+	filterS := <-da.filterSChan
+	da.filterSChan <- filterS
+	return da.start(filterS)
 }
 
 // Shutdown stops the service

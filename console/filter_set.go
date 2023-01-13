@@ -19,14 +19,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
 	c := &CmdSetFilter{
 		name:      "filter_set",
-		rpcMethod: utils.AdminSv1SetFilter,
+		rpcMethod: utils.APIerSv1SetFilter,
 		rpcParams: &engine.FilterWithAPIOpts{},
 	}
 	commands[c.Name()] = c

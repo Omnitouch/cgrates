@@ -29,7 +29,18 @@
 	"db_name": "10",
 },
 
-"admins": {
+
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
+	"enabled": true,
+},
+
+
+"apiers": {
 	"enabled": true,
 	"caches_conns":["cacheConn"]
 },

@@ -21,23 +21,36 @@ package engine
 import (
 	"net/http"
 
-	"github.com/Omnitouch/cgrates/config"
+	"github.com/cgrates/cgrates/config"
 )
 
 // this file will contain all the global variable that are used by other subsystems
 
 var (
 	httpPstrTransport *http.Transport
+	dm                *DataManager
+	cdrStorage        CdrStorage
 	connMgr           *ConnManager
 )
 
 func init() {
+	dm = NewDataManager(NewInternalDB(nil, nil, true, config.CgrConfig().DataDbCfg().Items), config.CgrConfig().CacheCfg(), connMgr)
 	httpPstrTransport = config.CgrConfig().HTTPCfg().ClientOpts
+}
+
+// SetDataStorage is the exported method to set the storage getter.
+func SetDataStorage(dm2 *DataManager) {
+	dm = dm2
 }
 
 // SetConnManager is the exported method to set the connectionManager used when operate on an account.
 func SetConnManager(conMgr *ConnManager) {
 	connMgr = conMgr
+}
+
+// SetCdrStorage sets the database for CDR storing, used by *cdrlog in first place
+func SetCdrStorage(cStorage CdrStorage) {
+	cdrStorage = cStorage
 }
 
 // SetHTTPPstrTransport sets the http transport to be used by the HTTP Poster

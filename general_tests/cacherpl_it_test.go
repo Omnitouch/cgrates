@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
+	"net/rpc"
 	"os/exec"
 	"path"
 	"reflect"
@@ -29,29 +30,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/apis"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	dspEngine1Cfg     *config.CGRConfig
 	dspEngine1CfgPath string
-	dspEngine1RPC     *birpc.Client
+	dspEngine1RPC     *rpc.Client
 	dspEngine2Cfg     *config.CGRConfig
 	dspEngine2CfgPath string
-	dspEngine2RPC     *birpc.Client
+	dspEngine2RPC     *rpc.Client
 	engine1Cfg        *config.CGRConfig
 	engine1CfgPath    string
-	engine1RPC        *birpc.Client
+	engine1RPC        *rpc.Client
 
 	sTestsCacheRpl = []func(t *testing.T){
 		testCacheRplInitCfg,
 		testCacheRplInitDataDb,
-		//testCacheRplStartEngine,
+		testCacheRplStartEngine,
 		testCacheRplRpcConn,
 		testCacheRplAddData,
 		testCacheRplPing,
@@ -92,40 +92,39 @@ func TestCacheReplications(t *testing.T) {
 
 }
 
-//to be fixed
-// func TestCacheReplicationActiveActive(t *testing.T) {
-// 	switch *dbType {
-// 	case utils.MetaInternal:
-// 		t.SkipNow()
-// 	case utils.MetaMySQL:
-// 		for _, stest := range sTestsCacheRplAA {
-// 			t.Run("TestCacheReplicationActiveActive", stest)
-// 		}
-// 	case utils.MetaMongo:
-// 		t.SkipNow()
-// 	case utils.MetaPostgres:
-// 		t.SkipNow()
-// 	default:
-// 		t.Fatal("Unknown Database type")
-// 	}
-// }
+func TestCacheReplicationActiveActive(t *testing.T) {
+	switch *dbType {
+	case utils.MetaInternal:
+		t.SkipNow()
+	case utils.MetaMySQL:
+		for _, stest := range sTestsCacheRplAA {
+			t.Run("TestCacheReplicationActiveActive", stest)
+		}
+	case utils.MetaMongo:
+		t.SkipNow()
+	case utils.MetaPostgres:
+		t.SkipNow()
+	default:
+		t.Fatal("Unknown Database type")
+	}
+}
 
 func testCacheRplInitCfg(t *testing.T) {
 	var err error
 	dspEngine1CfgPath = path.Join(*dataDir, "conf", "samples", "cache_replicate", "dispatcher_engine")
-	dspEngine1Cfg, err = config.NewCGRConfigFromPath(context.Background(), dspEngine1CfgPath)
+	dspEngine1Cfg, err = config.NewCGRConfigFromPath(dspEngine1CfgPath)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dspEngine2CfgPath = path.Join(*dataDir, "conf", "samples", "cache_replicate", "dispatcher_engine2")
-	dspEngine2Cfg, err = config.NewCGRConfigFromPath(context.Background(), dspEngine2CfgPath)
+	dspEngine2Cfg, err = config.NewCGRConfigFromPath(dspEngine2CfgPath)
 	if err != nil {
 		t.Error(err)
 	}
 
 	engine1CfgPath = path.Join(*dataDir, "conf", "samples", "cache_replicate", "engine1")
-	engine1Cfg, err = config.NewCGRConfigFromPath(context.Background(), engine1CfgPath)
+	engine1Cfg, err = config.NewCGRConfigFromPath(engine1CfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -134,29 +133,29 @@ func testCacheRplInitCfg(t *testing.T) {
 func testCacheRplAAInitCfg(t *testing.T) {
 	var err error
 	dspEngine1CfgPath = path.Join(*dataDir, "conf", "samples", "cache_rpl_active_active", "dispatcher_engine")
-	dspEngine1Cfg, err = config.NewCGRConfigFromPath(context.Background(), dspEngine1CfgPath)
+	dspEngine1Cfg, err = config.NewCGRConfigFromPath(dspEngine1CfgPath)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dspEngine2CfgPath = path.Join(*dataDir, "conf", "samples", "cache_rpl_active_active", "dispatcher_engine2")
-	dspEngine2Cfg, err = config.NewCGRConfigFromPath(context.Background(), dspEngine2CfgPath)
+	dspEngine2Cfg, err = config.NewCGRConfigFromPath(dspEngine2CfgPath)
 	if err != nil {
 		t.Error(err)
 	}
 
 	engine1CfgPath = path.Join(*dataDir, "conf", "samples", "cache_rpl_active_active", "engine1")
-	engine1Cfg, err = config.NewCGRConfigFromPath(context.Background(), engine1CfgPath)
+	engine1Cfg, err = config.NewCGRConfigFromPath(engine1CfgPath)
 	if err != nil {
 		t.Error(err)
 	}
 }
 
 func testCacheRplInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(dspEngine1Cfg); err != nil {
+	if err := engine.InitDataDb(dspEngine1Cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.InitDataDB(dspEngine2Cfg); err != nil {
+	if err := engine.InitDataDb(dspEngine2Cfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -231,20 +230,17 @@ func testCacheRplAddData(t *testing.T) {
 		t.Errorf("cgr-loader failed: ")
 	}
 
-	chargerProfile := &apis.ChargerWithAPIOpts{
+	chargerProfile := &v1.ChargerWithAPIOpts{
 		ChargerProfile: &engine.ChargerProfile{
 			Tenant:       "cgrates.org",
 			ID:           "DefaultCharger",
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{utils.MetaNone},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 20,
-				}},
+			Weight:       20,
 		},
 	}
 	var result string
-	if err := engine1RPC.Call(context.Background(), utils.AdminSv1SetChargerProfile, chargerProfile, &result); err != nil {
+	if err := engine1RPC.Call(utils.APIerSv1SetChargerProfile, chargerProfile, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -293,20 +289,17 @@ func testCacheRplAAAddData(t *testing.T) {
 		t.Errorf("cgr-loader failed: ")
 	}
 
-	chargerProfile := &apis.ChargerWithAPIOpts{
+	chargerProfile := &v1.ChargerWithAPIOpts{
 		ChargerProfile: &engine.ChargerProfile{
 			Tenant:       "cgrates.org",
 			ID:           "DefaultCharger",
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{utils.MetaNone},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 20,
-				}},
+			Weight:       20,
 		},
 	}
 	var result string
-	if err := engine1RPC.Call(context.Background(), utils.AdminSv1SetChargerProfile, chargerProfile, &result); err != nil {
+	if err := engine1RPC.Call(utils.APIerSv1SetChargerProfile, chargerProfile, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -321,14 +314,14 @@ func testCacheRplPing(t *testing.T) {
 			utils.OptsRouteID: "testRoute123",
 		},
 	}
-	if err := dspEngine1RPC.Call(context.Background(), utils.CoreSv1Status, &ev, &reply); err != nil {
+	if err := dspEngine1RPC.Call(utils.DispatcherSv1RemoteStatus, &ev, &reply); err != nil {
 		t.Error(err)
 	} else if reply[utils.NodeID] != "Engine1" {
 		t.Errorf("Received: %s", utils.ToJSON(reply))
 	}
 
 	var rpl string
-	if err := dspEngine1RPC.Call(context.Background(), utils.AttributeSv1Ping, &utils.CGREvent{
+	if err := dspEngine1RPC.Call(utils.AttributeSv1Ping, &utils.CGREvent{
 		Tenant: "cgrates.org",
 
 		APIOpts: map[string]interface{}{
@@ -346,7 +339,7 @@ func testCacheRplCheckReplication(t *testing.T) {
 	ev := utils.TenantWithAPIOpts{
 		Tenant: "cgrates.org",
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CoreSv1Status, &ev, &reply); err != nil {
+	if err := dspEngine2RPC.Call(utils.DispatcherSv1RemoteStatus, &ev, &reply); err != nil {
 		t.Error(err)
 	} else if reply[utils.NodeID] != "DispatcherEngine2" {
 		t.Errorf("Received: %s", utils.ToJSON(reply))
@@ -359,7 +352,7 @@ func testCacheRplCheckReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherRoutes,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -369,8 +362,9 @@ func testCacheRplCheckReplication(t *testing.T) {
 	}
 
 	var rpl string
-	if err := dspEngine2RPC.Call(context.Background(), utils.AttributeSv1Ping, &utils.CGREvent{
+	if err := dspEngine2RPC.Call(utils.AttributeSv1Ping, &utils.CGREvent{
 		Tenant: "cgrates.org",
+
 		APIOpts: map[string]interface{}{
 			utils.OptsRouteID: "testRoute123",
 		},
@@ -389,17 +383,17 @@ func testCacheRplAACheckReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherRoutes,
 		},
 	}
-	if err := dspEngine1RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
+	if err := dspEngine1RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 
 	var rpl string
-	if err := dspEngine2RPC.Call(context.Background(), utils.AttributeSv1Ping, &utils.CGREvent{
+	if err := dspEngine2RPC.Call(utils.AttributeSv1Ping, &utils.CGREvent{
 		Tenant: "cgrates.org",
 
 		APIOpts: map[string]interface{}{
@@ -411,7 +405,7 @@ func testCacheRplAACheckReplication(t *testing.T) {
 		t.Errorf("Received: %s", rpl)
 	}
 
-	if err := dspEngine1RPC.Call(context.Background(), utils.AttributeSv1Ping, &utils.CGREvent{
+	if err := dspEngine1RPC.Call(utils.AttributeSv1Ping, &utils.CGREvent{
 		Tenant: "cgrates.org",
 		APIOpts: map[string]interface{}{
 			utils.OptsRouteID: "testRouteFromDispatcher1",
@@ -424,7 +418,7 @@ func testCacheRplAACheckReplication(t *testing.T) {
 
 	expKeys := []string{"testRouteFromDispatcher2:*attributes", "testRouteFromDispatcher1:*attributes"}
 
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -433,7 +427,7 @@ func testCacheRplAACheckReplication(t *testing.T) {
 		t.Errorf("Expected: %+v, received: %+v", expKeys, rcvKeys)
 	}
 
-	if err := dspEngine1RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine1RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -452,11 +446,11 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherLoads,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
-	if err := dspEngine1RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
+	if err := dspEngine1RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
@@ -468,7 +462,7 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 		wgDisp2.Add(1)
 		go func() {
 			var rpl []*engine.ChrgSProcessEventReply
-			if err := dspEngine1RPC.Call(context.Background(), utils.ChargerSv1ProcessEvent, &utils.CGREvent{
+			if err := dspEngine1RPC.Call(utils.ChargerSv1ProcessEvent, &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     "testCacheRplAACheckLoadReplication",
 				Event: map[string]interface{}{
@@ -489,7 +483,7 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 		}()
 		go func() {
 			var rpl []*engine.ChrgSProcessEventReply
-			if err := dspEngine2RPC.Call(context.Background(), utils.ChargerSv1ProcessEvent, &utils.CGREvent{
+			if err := dspEngine2RPC.Call(utils.ChargerSv1ProcessEvent, &utils.CGREvent{
 
 				Tenant: "cgrates.org",
 				ID:     "testCacheRplAACheckLoadReplication",
@@ -521,7 +515,7 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherRoutes,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -529,7 +523,7 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 	if !reflect.DeepEqual(expKeys, rcvKeys) {
 		t.Errorf("Expected: %+v, received: %+v", expKeys, rcvKeys)
 	}
-	if err := dspEngine1RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine1RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -545,7 +539,7 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherLoads,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -553,7 +547,7 @@ func testCacheRplAACheckLoadReplication(t *testing.T) {
 	if !reflect.DeepEqual(expKeys, rcvKeys) {
 		t.Errorf("Expected: %+v, received: %+v", expKeys, rcvKeys)
 	}
-	if err := dspEngine1RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine1RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -571,7 +565,7 @@ func testCacheRplCheckLoadReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherLoads,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil || err.Error() != utils.ErrNotFound.Error() {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 
@@ -580,7 +574,7 @@ func testCacheRplCheckLoadReplication(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
-			if err := dspEngine1RPC.Call(context.Background(), utils.ChargerSv1ProcessEvent, &utils.CGREvent{
+			if err := dspEngine1RPC.Call(utils.ChargerSv1ProcessEvent, &utils.CGREvent{
 
 				Tenant: "cgrates.org",
 				ID:     "testCacheRplCheckLoadReplication",
@@ -609,7 +603,7 @@ func testCacheRplCheckLoadReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherRoutes,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)
@@ -625,7 +619,7 @@ func testCacheRplCheckLoadReplication(t *testing.T) {
 			CacheID: utils.CacheDispatcherLoads,
 		},
 	}
-	if err := dspEngine2RPC.Call(context.Background(), utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
+	if err := dspEngine2RPC.Call(utils.CacheSv1GetItemIDs, argsAPI, &rcvKeys); err != nil {
 		t.Error(err.Error())
 	}
 	sort.Strings(rcvKeys)

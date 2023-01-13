@@ -3,10 +3,8 @@
 //
 // Copyright (C) ITsysCOM GmbH
 
-
-"logger": {
-	"type": "*syslog",        // controls the destination of logs <*syslog|*stdout|*kafka>
-	"level": 7,               // system level precision for floats 
+"general": {
+	"log_level": 7,
 },
 
 "listen": {
@@ -21,10 +19,26 @@
 	"db_name": "10",
 },
 
+
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
+	"enabled": true,
+},
+
+
+"schedulers": {
+	"enabled": true,
+},
+
+
 "cdrs": {
 	"enabled": true,
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"session_cost_retries": 0,
 },
 
@@ -44,30 +58,30 @@
 	"enabled": true,
 	"attributes_conns":["*internal"],
 	"cache": {
-		"*fileCSV": {"limit": -1, "ttl": "500ms", "static_ttl": false},
-		"*fileFWV": {"limit": -1, "ttl": "500ms", "static_ttl": false}
+		"*file_csv": {"limit": -1, "ttl": "500ms", "static_ttl": false},
+		"*file_fwv": {"limit": -1, "ttl": "500ms", "static_ttl": false}
 	},
 	"exporters": [
 		{
 			"id": "CSVExporter",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSV",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
 			"attempts": 1,
 			"field_separator": ",",
-		},		
+		},
 		{
 			"id": "CSVExporterComposed",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testComposedCSV",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
 			"attempts": 1,
 			"field_separator": ",",
 			"fields":[
-				{"tag": "Number", "path": "*hdr.Number", "type": "*constant", "value": "NumberOfEvent"},
-				{"tag": "*originID", "path": "*hdr.*originID", "type": "*constant", "value": "*originID"},
+			  {"tag": "Number", "path": "*hdr.Number", "type": "*constant", "value": "NumberOfEvent"},
+				{"tag": "CGRID", "path": "*hdr.CGRID", "type": "*constant", "value": "CGRID"},
 				{"tag": "RunID", "path": "*hdr.RunID", "type": "*constant", "value": "RunID"},
 				{"tag": "ToR", "path": "*hdr.ToR", "type": "*constant", "value": "ToR"},
 				{"tag": "OriginID", "path": "*hdr.OriginID", "type": "*constant", "value": "OriginID"},
@@ -80,10 +94,12 @@
 				{"tag": "SetupTime", "path": "*hdr.SetupTime", "type": "*constant", "value": "SetupTime", "layout": "2006-01-02T15:04:05Z07:00"},
 				{"tag": "AnswerTime", "path": "*hdr.AnswerTime", "type": "*constant", "value": "AnswerTime", "layout": "2006-01-02T15:04:05Z07:00"},
 				{"tag": "Usage", "path": "*hdr.Usage", "type": "*constant", "value": "Usage"},
-				{"tag": "Cost", "path": "*hdr.Cost", "type": "*constant", "value": "Cost"},
+				{"tag": "Cost", "path": "*hdr.Cost", "type": "*constant", "value": "Cost"}, 
+				{"tag": "RatingPlan", "path": "*hdr.RatingPlan", "type": "*constant", "value": "RatingPlan"},
+				{"tag": "RatingPlanSubject", "path": "*hdr.RatingPlanSubject", "type": "*constant", "value": "RatingPlanSubject"}, 
 
-				{"tag": "Number", "path": "*exp.Number", "type": "*variable", "value": "~*dc.NumberOfEvents"},
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+			{"tag": "Number", "path": "*exp.Number", "type": "*variable", "value": "~*dc.NumberOfEvents"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID1", "path": "*exp.OriginID", "type": "*composed", "value": "~*req.ComposedOriginID1"},
@@ -98,67 +114,18 @@
 				{"tag": "AnswerTime", "path": "*exp.AnswerTime", "type": "*variable", "value": "~*req.AnswerTime", "layout": "2006-01-02T15:04:05Z07:00"},
 				{"tag": "Usage", "path": "*exp.Usage", "type": "*variable", "value": "~*req.Usage"},
 				{"tag": "Cost", "path": "*exp.Cost", "type": "*variable", "value": "~*req.Cost{*round:4}"},
-
+				{"tag": "RatingPlan", "path": "*exp.RatingPlan", "type": "*variable", "value": "~*ec.CostDetails.Charges[0].Rating.RatingFilter.RatingPlanID"},
+				{"tag": "RatingPlanSubject", "path": "*exp.RatingPlanSubject", "type": "*variable", "value": "~*ec.CostDetails.Charges[0].Rating.RatingFilter.Subject"}, 
+ 
 				{"tag": "NumberOfEvents", "path": "*trl.NumberOfEvents", "type": "*variable", "value": "~*dc.NumberOfEvents"},
 				{"tag": "TotalDuration", "path": "*trl.TotalDuration", "type": "*variable", "value": "~*dc.TotalDuration"},
 				{"tag": "TotalSMSUsage", "path": "*trl.TotalSMSUsage", "type": "*variable", "value": "~*dc.TotalSMSUsage"},
-				{"tag": "TotalCost", "path": "*trl.TotalCost", "type": "*variable", "value": "~*dc.TotalCost{*round:4}"},
-			],
-		},
-		{
-			"id": "CSVExporterBuffered",
-			"type": "*fileCSV",
-			"export_path": "*buffer",
-			"filters": ["*string:~*req.Account:1005"],
-			"attempts": 1,
-			"field_separator": ",",
-			"synchronous": true,
-			"fields":[		
-				{"tag": "Number", "path": "*hdr.Number", "type": "*constant", "value": "NumberOfEvent"},
-				{"tag": "*originID", "path": "*hdr.*originID", "type": "*constant", "value": "*originID"},
-				{"tag": "RunID", "path": "*hdr.RunID", "type": "*constant", "value": "RunID"},
-				{"tag": "ToR", "path": "*hdr.ToR", "type": "*constant", "value": "ToR"},
-				{"tag": "OriginID", "path": "*hdr.OriginID", "type": "*constant", "value": "OriginID"},
-				{"tag": "RequestType", "path": "*hdr.RequestType", "type": "*constant", "value": "RequestType"},
-				{"tag": "Tenant", "path": "*hdr.Tenant", "type": "*constant", "value": "Tenant"},
-				{"tag": "Category", "path": "*hdr.Category", "type": "*constant", "value": "Category"},
-				{"tag": "Account", "path": "*hdr.Account", "type": "*constant", "value": "Account"},
-				{"tag": "Subject", "path": "*hdr.Subject", "type": "*constant", "value": "Subject"},
-				{"tag": "Destination", "path": "*hdr.Destination", "type": "*constant", "value": "Destination"},
-				{"tag": "SetupTime", "path": "*hdr.SetupTime", "type": "*constant", "value": "SetupTime", "layout": "2006-01-02T15:04:05Z07:00"},
-				{"tag": "AnswerTime", "path": "*hdr.AnswerTime", "type": "*constant", "value": "AnswerTime", "layout": "2006-01-02T15:04:05Z07:00"},
-				{"tag": "Usage", "path": "*hdr.Usage", "type": "*constant", "value": "Usage"},
-				{"tag": "Cost", "path": "*hdr.Cost", "type": "*constant", "value": "Cost"},
-
-				{"tag": "Number", "path": "*exp.Number", "type": "*variable", "value": "~*dc.NumberOfEvents"},
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
-				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
-				{"tag": "ToR", "path": "*exp.ToR", "type": "*constant", "value": ""},
-				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
-				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": ""},
-				{"tag": "OriginID1", "path": "*exp.OriginID", "type": "*composed", "value": "~*req.ComposedOriginID1"},
-				{"tag": "OriginID2", "path": "*exp.OriginID", "type": "*composed", "value": "~*req.ComposedOriginID2"},	
-				{"tag": "RequestType", "path": "*exp.RequestType", "type": "*variable", "value": "~*req.RequestType"},
-				{"tag": "Tenant", "path": "*exp.Tenant", "type": "*variable", "value": "~*req.Tenant"},
-				{"tag": "Category", "path": "*exp.Category", "type": "*variable", "value": "~*req.Category"},
-				{"tag": "Account", "path": "*exp.Account", "type": "*variable", "value": "~*req.Account"},
-				{"tag": "Subject", "path": "*exp.Subject", "type": "*variable", "value": "~*req.Subject"},
-				{"tag": "Destination", "path": "*exp.Destination", "type": "*variable", "value": "~*req.Destination"},
-				{"tag": "SetupTime", "path": "*exp.SetupTime", "type": "*variable", "value": "~*req.SetupTime", "layout": "2006-01-02T15:04:05Z07:00"},
-				{"tag": "AnswerTime", "path": "*exp.AnswerTime", "type": "*variable", "value": "~*req.AnswerTime", "layout": "2006-01-02T15:04:05Z07:00"},
-				{"tag": "Usage", "path": "*exp.Usage", "type": "*variable", "value": "~*req.Usage"},
-				{"tag": "Cost", "path": "*exp.Cost", "type": "*variable", "value": "~*req.Cost{*round:4}"},
-
-				
-				{"tag": "NumberOfEvents", "path": "*trl.NumberOfEvents", "type": "*variable", "value": "~*dc.NumberOfEvents"},
-				{"tag": "TotalDuration", "path": "*trl.TotalDuration", "type": "*variable", "value": "~*dc.TotalDuration"},
-				{"tag": "TotalSMSUsage", "path": "*trl.TotalSMSUsage", "type": "*variable", "value": "~*dc.TotalSMSUsage"},
-				{"tag": "TotalCost", "path": "*trl.TotalCost", "type": "*variable", "value": "~*dc.TotalCost{*round:4}"},
+				{"tag": "TotalCost", "path": "*trl.TotalCost", "type": "*variable", "value": "~*dc.TotalCost{*round:4}"}, 
 			],
 		},
 		{
 			"id": "FwvExporter",
-			"type": "*fileFWV",
+			"type": "*file_fwv",
 			"export_path": "/tmp/testFWV",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
@@ -231,13 +198,13 @@
 		},
 		{
 			"id": "HTTPPostExporter",
-			"type": "*httpPost",
+			"type": "*http_post",
 			"export_path": "http://127.0.0.1:12080/event_http",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
 			"attempts": 1,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -256,13 +223,13 @@
 		},
 		{
 			"id": "HTTPJsonMapExporter",
-			"type": "*httpJSONMap",
+			"type": "*http_json_map",
 			"export_path": "http://127.0.0.1:12081/event_json_map_http",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
 			"attempts": 1,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -282,14 +249,14 @@
 		},
 		{
 			"id": "CSVMaskedDestination",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSVMasked",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
 			"attempts": 1,
 			"field_separator": ",",
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -311,40 +278,40 @@
 			"type": "*virt",
 			"attempts": 1,
 			"fields":[
-				{"tag": "Cost", "path": "*uch.<~*opts.*originID;~*req.RunID;-Cost>", "type": "*variable",
+				{"tag": "Cost", "path": "*uch.<~*req.CGRID;~*req.RunID;-Cost>", "type": "*variable",
 					"value": "~*req.Cost", "rounding_decimals": 4},
-				{"tag": "Account", "path": "*uch.<~*opts.*originID;~*req.RunID;-Account>", "type": "*variable", "value": "~*req.Account"},
-				{"tag": "RunID", "path": "*uch.<~*opts.*originID;~*req.RunID;-RunID>", "type": "*variable", "value": "~*req.RunID"},
-				{"tag": "CustomVariable", "path": "*uch.<~*opts.*originID;~*req.RunID;-CustomVariable>",
+				{"tag": "Account", "path": "*uch.<~*req.CGRID;~*req.RunID;-Account>", "type": "*variable", "value": "~*req.Account"},
+				{"tag": "RunID", "path": "*uch.<~*req.CGRID;~*req.RunID;-RunID>", "type": "*variable", "value": "~*req.RunID"},
+				{"tag": "CustomVariable", "path": "*uch.<~*req.CGRID;~*req.RunID;-CustomVariable>",
 					"type": "*variable", "value": "CustomValue"}
 			],
 		},
 		{
 			"id": "CSVExporterFromVirt",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSVfromVirt",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
 			"attempts": 1,
 			"field_separator": ",",
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
 				{"tag": "Tenant", "path": "*exp.Tenant", "type": "*variable", "value": "~*req.Tenant"},
 				{"tag": "Account", "path": "*exp.Account", "type": "*variable", "value": "~*req.Account"},
 				{"tag": "Cost", "path": "*exp.Cost", "type": "*variable", "value": "~*req.Cost", "rounding_decimals": 4},
-				{"tag": "SupplierCustomVariable","filters": ["*exists:~*uch.<~*opts.*originID;~*req.RunID;-CustomVariable>:"],
-					"path": "*exp.SupplierCustomVariable", "type": "*variable", "value": "~*uch.<`~*opts.*originID;~*req.RunID;-CustomVariable`>"},
-				{"tag": "SupplierCost","filters": ["*exists:~*uch.<~*opts.*originID;~*req.RunID;-Cost>:"],
-					"path": "*exp.SupplierCost", "type": "*variable", "value": "~*uch.<`~*opts.*originID;~*req.RunID;-Cost`>"},
-				{"tag": "SupplierRun","filters": ["*exists:~*uch.<~*opts.*originID;~*req.RunID;-RunID>:"],
-					"path": "*exp.SupplierRun", "type": "*variable", "value": "~*uch.<`~*opts.*originID;~*req.RunID;-RunID`>"},
+				{"tag": "SupplierCustomVariable","filters": ["*exists:~*uch.<~*req.CGRID;~*req.RunID;-CustomVariable>:"],
+					"path": "*exp.SupplierCustomVariable", "type": "*variable", "value": "~*uch.<`~*req.CGRID;~*req.RunID;-CustomVariable`>"},
+				{"tag": "SupplierCost","filters": ["*exists:~*uch.<~*req.CGRID;~*req.RunID;-Cost>:"],
+					"path": "*exp.SupplierCost", "type": "*variable", "value": "~*uch.<`~*req.CGRID;~*req.RunID;-Cost`>"},
+				{"tag": "SupplierRun","filters": ["*exists:~*uch.<~*req.CGRID;~*req.RunID;-RunID>:"],
+					"path": "*exp.SupplierRun", "type": "*variable", "value": "~*uch.<`~*req.CGRID;~*req.RunID;-RunID`>"},
 			],
 		},
 		{
 			"id": "CSVExporterWIthTemplate",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSVExpTemp",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
@@ -365,7 +332,7 @@
 					//"elsIfSeqNo": 0,
 					"elsOpType": "",
 					"elsPipeline": "",
-					// "require_alias": "",
+					"require_alias": "",
 					"elsRouting": "",
 					"elsTimeout": "0",
 					//"elsVersion": 0,
@@ -373,7 +340,7 @@
 					"elsWaitForActiveShards": "",
 			},
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -391,7 +358,7 @@
 		},
 		{
 			"id": "HTTPJsonMapExporterWithNoFields",
-			"type": "*httpJSONMap",
+			"type": "*http_json_map",
 			"export_path": "http://127.0.0.1:12081/event_json_map_http",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
@@ -405,7 +372,7 @@
 		},		
 		{
 			"id": "HTTPPostExporterWithNoFields",
-			"type": "*httpPost",
+			"type": "*http_post",
 			"export_path": "http://127.0.0.1:12080/event_http",
 			"flags": ["*attributes"],
 			"attribute_context": "customContext",
@@ -424,15 +391,16 @@
 				"sqlMaxOpenConns": 100,
 				"sqlConnMaxLifetime": "0",
 				"mysqlDSNParams": {
-                    "allowOldPasswords": "true",
+					"allowOldPasswords": "true",
 					"allowNativePasswords": "true",
 				},
 			},
 			"fields":[ // in case that the path is *exp.*row user must complete all the fields one to one with his sql schema in the correct order
-				{"tag": "*originID", "path": "*exp.*row", "type": "*group", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.*row", "type": "*group", "value": "~*req.CGRID"},
 				{"tag": "AnswerTime", "path": "*exp.*row", "type": "*group", "value": "~*req.AnswerTime"},
 				{"tag": "Usage", "path": "*exp.*row", "type": "*group", "value": "~*req.Usage"},
 				{"tag": "Cost", "path": "*exp.*row", "type": "*group", "value": "~*req.Cost{*round:4}"},
+				{"tag": "CostDetails", "path": "*exp.*row", "type": "*group", "value": "~*req.CostDetails{*json}"},
 			]
 		},
 		{
@@ -449,15 +417,14 @@
 				"sqlConnMaxLifetime": "0",
 			},
 			"fields":[ // the path constains *exp.columnName
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.cgrid", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "AnswerTime", "path": "*exp.answer_time", "type": "*variable", "value": "~*req.AnswerTime"},
 				{"tag": "Cost", "path": "*exp.cost", "type": "*variable", "value": "~*req.Cost{*round:4}"},
-				{"tag": "Usage", "path": "*exp.`usage`", "type": "*variable", "value": "~*req.Usage"},
 			]
 		},
 		{
 			"id": "NatsJsonMapExporter",
-			"type": "*natsJSONMap",
+			"type": "*nats_json_map",
 			"export_path": "nats://localhost:4222",
 			"attempts": 1,
 			"opts": {
@@ -467,88 +434,26 @@
 		},
 		{
 			"id": "NatsJsonMapExporter2",										
-			"type": "*natsJSONMap",													
+			"type": "*nats_json_map",													
 			"export_path": "nats://localhost:4222",		
 			"attempts": 1,		
 			"opts": {
 				"natsSubject": "processed_cdrs",
 			}
-		},
-		{
-			"id": "SQLExportCDR",
-			"type": "*sql",
-			"export_path": "mysql://cgrates:CGRateS.org@127.0.0.1:3306",
-			"attempts": 1,
-			"opts": {
-				"sqlTableName": "cdrs", // tableName is mandatory in opts for sql exporter
-			},
-			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
-				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
-				{"tag": "OriginHost", "path": "*exp.OriginHost", "type": "*variable", "value": "~*req.OriginHost"},
-				{"tag": "Source", "path": "*exp.Source", "type": "*variable", "value": "~*req.Source"},
-				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
-				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
-				{"tag": "RequestType", "path": "*exp.RequestType", "type": "*variable", "value": "~*req.RequestType"},
-				{"tag": "Tenant", "path": "*exp.Tenant", "type": "*variable", "value": "~*req.Tenant"},
-				{"tag": "Category", "path": "*exp.Category", "type": "*variable", "value": "~*req.Category"},
-				{"tag": "Account", "path": "*exp.Account", "type": "*variable", "value": "~*req.Account"},
-				{"tag": "Subject", "path": "*exp.Subject", "type": "*variable", "value": "~*req.Subject"},
-				{"tag": "Destination", "path": "*exp.Destination", "type": "*variable", "value": "~*req.Destination"},
-				{"tag": "ExtraInfo", "path": "*exp.ExtraInfo", "type": "*variable", "value": "~*req.ExtraInfo"},
-				{"tag": "CostSource", "path": "*exp.CostSource", "type": "*variable", "value": "~*req.CostSource"},
-				{"tag": "SetupTime", "path": "*exp.SetupTime", "type": "*variable", "value": "~*req.SetupTime{*time_string}"},
-				{"tag": "AnswerTime", "path": "*exp.AnswerTime", "type": "*variable", "value": "~*req.AnswerTime{*time_string}"},
-				{"tag": "Usage", "path": "*exp.Usage", "type": "*variable", "value": "~*req.Usage{*duration}"},
-				{"tag": "Cost", "path": "*exp.Cost", "type": "*variable", "value": "~*req.Cost{*float64}"},
-				{"tag": "Partial", "path": "*exp.Partial", "type": "*variable", "value": "true","filters": ["*string:~*req.Partial:true"]},
-				{"tag": "PreRated", "path": "*exp.PreRated", "type": "*variable", "value": "true","filters": ["*string:~*req.PreRated:true"]},
-			
-				// extra fields
-				{"tag": "Opts", "path": "*opts.ExtraFields.extra1", "type": "*variable", "value": "value"}, // put all the extrafields inside *opts
-				{"tag": "ExtraFields", "path": "*exp.ExtraFields", "type": "*variable", "value": "~*opts.ExtraFields"}, // and then move them to *exp
-			
-				// cost details ??
-				{"tag": "CostDetails", "path": "*exp.CostDetails", "type": "*variable", "value": "~*req.CostDetails"}
-			]
-		},
-		{
-			"id": "KafkaExporter",								
-			"type": "*kafkaJSONMap",									
-			"export_path": "localhost:9093",			
-			"concurrent_requests": 0,							
-			"opts": {
-				"kafkaTopic": "cgrates",
-				"kafkaCAPath": "/home/kafka/kafka/ssl/ca-cert.pem"
-			},												
-			"timezone": "",										
-			"filters": [],										
-			"flags": [],										
-			"attribute_ids": [],								
-			"attribute_context": "",							
-			"synchronous": false,								
-			"blocker": false,									
-			"attempts": 1,										
-			"fields":[],										
-			"failed_posts_dir": "/var/spool/cgrates/failed_posts"
 		}
 	]
 },
 
 
-"efs": {                                                    // ExportFailover service
-    "enabled": true,						                // starts the EventReader service: <true|false>
-},
-
-
-"admins": {
-	"enabled": true
+"apiers": {
+	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 
 "templates": {
 	"requiredFields": [
-		{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+		{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 		{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 		{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 		{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},

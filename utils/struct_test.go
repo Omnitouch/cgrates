@@ -20,17 +20,19 @@ package utils
 import (
 	"math/cmplx"
 	"reflect"
+	"sort"
 	"testing"
 )
 
 func TestMissingStructFieldsCorrect(t *testing.T) {
 	var attr = struct {
-		Tenant  string
-		Account string
-		Type    string
-	}{"bevoip.eu", "danconns0001", MetaPrepaid}
+		Tenant          string
+		Account         string
+		Type            string
+		ActionTimingsID string
+	}{"bevoip.eu", "danconns0001", MetaPrepaid, "mama"}
 	if missing := MissingStructFields(&attr,
-		[]string{"Tenant", "Account", "Type"}); len(missing) != 0 {
+		[]string{"Tenant", "Account", "Type", "ActionTimingsID"}); len(missing) != 0 {
 		t.Error("Found missing field on correct struct", missing)
 	}
 }
@@ -51,7 +53,7 @@ func TestMissingStructFieldsNilCorporateTwoStructs(t *testing.T) {
 	tst := &struct {
 		APIOpts map[string]interface{}
 		*TenantID
-		*TenantWithAPIOpts
+		*TenantAccount
 	}{
 		APIOpts: map[string]interface{}{
 			OptsAPIKey: "attr1234",
@@ -108,14 +110,59 @@ func TestUpdateStructWithIfaceMap(t *testing.T) {
 	}
 }
 
+func TestMissingMapFields(t *testing.T) {
+	var attr = map[string]interface{}{
+		Tenant:            "cgrates.org",
+		AccountField:      "1001",
+		"Type":            MetaPrepaid,
+		"ActionTimingsID": "*asap",
+	}
+	if missing := MissingMapFields(attr,
+		[]string{"Tenant", "Account", "Type", "ActionTimingsID"}); len(missing) != 0 {
+		t.Error("Found missing field on correct struct", missing)
+	}
+	attr["ActionTimingsID"] = ""
+	delete(attr, "Type")
+	expected := []string{"ActionTimingsID", "Type"}
+	missing := MissingMapFields(attr,
+		[]string{"Tenant", "Account", "Type", "ActionTimingsID"})
+	sort.Strings(missing)
+	if !reflect.DeepEqual(expected, missing) {
+		t.Errorf("Expected %s ,received: %s", expected, missing)
+	}
+}
+
 func TestMissingStructFieldsAppend(t *testing.T) {
 	var attr = struct {
-		Tenant  string
-		Account string
-		Type    string
-	}{"", "", MetaPrepaid}
+		Tenant          string
+		Account         string
+		Type            string
+		ActionTimingsID string
+	}{"", "", MetaPrepaid, ""}
 	missing := MissingStructFields(&attr,
-		[]string{"Tenant", "Account", "Type"})
+		[]string{"Tenant", "Account", "Type", "ActionTimingsID"})
+	if len(missing) == 0 {
+		t.Error("Required missing field not found")
+	}
+}
+
+func TestMissingMapFieldsTrim(t *testing.T) {
+	var attr = map[string]interface{}{
+		"Tenant":  "cgrates.org",
+		"Account": "1001",
+	}
+	if missing := MissingMapFields(attr,
+		[]string{"Tenant", "Account"}); len(missing) != 0 {
+		t.Error("Found missing field on correct struct", missing)
+	}
+}
+
+func TestMissingMapFieldsMissing(t *testing.T) {
+	var attr = map[string]interface{}{
+		"Tenant":  0,
+		"Account": 0,
+	}
+	missing := MissingMapFields(attr, []string{"Tenant", "Account"})
 	if len(missing) == 0 {
 		t.Error("Required missing field not found")
 	}
@@ -218,23 +265,5 @@ func TestUpdateStructWithIfaceMapErrorDefault(t *testing.T) {
 	err := UpdateStructWithIfaceMap(s, mp)
 	if err == nil || err.Error() != "cannot update unsupported struct field: (0+0i)" {
 		t.Errorf("Expected <cannot update unsupported struct field: (0+0i)> ,received: <%+v>", err)
-	}
-}
-
-func TestContentStructFieldByIndexIsEmpty(t *testing.T) {
-	type testStr struct {
-		fld int
-	}
-	myStruct := struct {
-		content1 string
-		content2 *testStr
-	}{
-		content1: "string1",
-		content2: &testStr{
-			fld: 1,
-		},
-	}
-	if fieldByIndexIsEmpty(reflect.ValueOf(myStruct), []int{1, 0}) {
-		t.Errorf("%v", myStruct)
 	}
 }

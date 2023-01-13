@@ -19,12 +19,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
+	"context"
 	"sync"
 
 	amqpv1 "github.com/Azure/go-amqp"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewAMQPv1EE creates a poster for amqpv1
@@ -78,7 +78,7 @@ func (pstr *AMQPv1EE) Connect() (err error) {
 	return
 }
 
-func (pstr *AMQPv1EE) ExportEvent(ctx *context.Context, content, _ interface{}) (err error) {
+func (pstr *AMQPv1EE) ExportEvent(content interface{}, _ string) (err error) {
 	pstr.reqs.get()
 	pstr.RLock()
 	defer func() {
@@ -95,6 +95,7 @@ func (pstr *AMQPv1EE) ExportEvent(ctx *context.Context, content, _ interface{}) 
 		return
 	}
 	// Send message
+	ctx := context.Background()
 	err = sender.Send(ctx, amqpv1.NewMessage(content.([]byte)))
 	sender.Close(ctx)
 	return
@@ -115,5 +116,3 @@ func (pstr *AMQPv1EE) Close() (err error) {
 }
 
 func (pstr *AMQPv1EE) GetMetrics() *utils.SafeMapStorage { return pstr.dc }
-
-func (pstr *AMQPv1EE) ExtraData(*utils.CGREvent) interface{} { return nil }

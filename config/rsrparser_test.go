@@ -23,7 +23,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewRSRParsers(t *testing.T) {
@@ -163,12 +163,12 @@ func TestNewRSRParsersConstant2(t *testing.T) {
 
 	ruleStr = "constant;`>;q=0.7;expires=3600constant"
 	if _, err := NewRSRParsers(ruleStr, utils.InfieldSep); err == nil {
-		t.Error("Unexpected error: ", err)
+		t.Error("Unexpected error: ", err.Error())
 	}
 
 	ruleStr = "constant;`>;q=0.7;expires=3600`;~*req.Account"
 	if rsrParsers, err := NewRSRParsers(ruleStr, utils.InfieldSep); err != nil {
-		t.Error("Unexpected error: ", err)
+		t.Error("Unexpected error: ", err.Error())
 	} else if _, err := rsrParsers.ParseDataProvider(utils.MapStorage{}); err != utils.ErrNotFound {
 		t.Error(err)
 	}
@@ -311,13 +311,14 @@ func TestRSRParserCompile3(t *testing.T) {
 }
 func TestRSRParserDynamic(t *testing.T) {
 	ePrsr := &RSRParser{
-		Rules:       "~*opts.<~*opts.*originID;~*req.RunID;-Cost>",
-		dynRules:    NewRSRParsersMustCompile("~*opts.*originID;~*req.RunID;-Cost", ";"),
-		dynIdxStart: 7,
-		dynIdxEnd:   43,
+		Rules: "~*req.<~*req.CGRID;~*req.RunID;-Cost>",
+
+		dynRules:    NewRSRParsersMustCompile("~*req.CGRID;~*req.RunID;-Cost", ";"),
+		dynIdxStart: 6,
+		dynIdxEnd:   37,
 	}
 	prsr := &RSRParser{
-		Rules: "~*opts.<~*opts.*originID;~*req.RunID;-Cost>",
+		Rules: "~*req.<~*req.CGRID;~*req.RunID;-Cost>",
 	}
 	if err := prsr.Compile(); err != nil {
 		t.Error(err)
@@ -327,12 +328,9 @@ func TestRSRParserDynamic(t *testing.T) {
 
 	dP := utils.MapStorage{
 		utils.MetaReq: utils.MapStorage{
-
-			utils.RunID: utils.MetaDefault,
-		},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID:  "Uniq",
-			"Uniq*default-Cost": 10,
+			utils.CGRID:              "cgridUniq",
+			utils.RunID:              utils.MetaDefault,
+			"cgridUniq*default-Cost": 10,
 		},
 	}
 	if out, err := prsr.ParseDataProvider(dP); err != nil {
@@ -342,7 +340,7 @@ func TestRSRParserDynamic(t *testing.T) {
 	}
 
 	prsr = &RSRParser{
-		Rules: "~*opts.<~*opts.*originID;~*req.RunID;-Cost{*}>",
+		Rules: "~*req.<~*req.CGRID;~*req.RunID;-Cost{*}>",
 	}
 	expErr := "invalid converter value in string: <*>, err: unsupported converter definition: <*>"
 	if err := prsr.Compile(); err == nil || err.Error() != expErr {
@@ -352,19 +350,16 @@ func TestRSRParserDynamic(t *testing.T) {
 }
 
 func TestRSRParserDynamic2(t *testing.T) {
-	prsr, err := NewRSRParsersFromSlice([]string{"~*opts.<~*opts.*originID;~*req.RunID;-Cos>t", "s"})
+	prsr, err := NewRSRParsersFromSlice([]string{"~*req.<~*req.CGRID;~*req.RunID;-Cos>t", "s"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dP := utils.MapStorage{
 		utils.MetaReq: utils.MapStorage{
-
-			utils.RunID: utils.MetaDefault,
-		},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID:          "originIDUniq",
-			"originIDUniq*default-Cost": 10,
+			utils.CGRID:              "cgridUniq",
+			utils.RunID:              utils.MetaDefault,
+			"cgridUniq*default-Cost": 10,
 		},
 	}
 	if out, err := prsr.ParseDataProvider(dP); err != nil {
@@ -373,7 +368,7 @@ func TestRSRParserDynamic2(t *testing.T) {
 		t.Errorf("Expected 10s received: %q", out)
 	}
 
-	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*opts.<~*opts.*originID;~*req.RunID;-Cos>t", "s"})
+	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*req.<~*req.CGRID;~*req.RunID;-Cos>t", "s"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +379,7 @@ func TestRSRParserDynamic2(t *testing.T) {
 		t.Errorf("Expected 2.10s received: %q", out)
 	}
 
-	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*opts.<~*opts.*originID;~*req.RunID;-Cost>"})
+	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*req.<~*req.CGRID;~*req.RunID;-Cost>"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,24 +391,24 @@ func TestRSRParserDynamic2(t *testing.T) {
 	}
 
 	dP = utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID: "originIDUniq",
+		utils.MetaReq: utils.MapStorage{
+			utils.CGRID: "cgridUniq",
 		},
 	}
 	if _, err := prsr.ParseDataProvider(dP); err != utils.ErrNotFound {
 		t.Errorf("Expected error %s, received: %v", utils.ErrNotFound, err)
 	}
 
-	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*opts.*originID<~*opts.Converter>"})
+	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*req.CGRID<~*opts.Converter>"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dP = utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{},
+		utils.MetaReq: utils.MapStorage{
+			utils.CGRID: "cgridUniq",
+		},
 		utils.MetaOpts: utils.MapStorage{
-			"Converter":        "{*",
-			utils.MetaOriginID: "originIDUniq",
+			"Converter": "{*",
 		},
 	}
 	if _, err := prsr.ParseDataProvider(dP); err == nil {
@@ -422,24 +417,19 @@ func TestRSRParserDynamic2(t *testing.T) {
 }
 
 func TestRSRParserDynamic3(t *testing.T) {
-	prsr, err := NewRSRParsersFromSlice([]string{"2.", "~*opts.<~*opts.*originID;~*req.RunID>-Cost", "-", "~*req.<~*req.UnitField>"})
+	prsr, err := NewRSRParsersFromSlice([]string{"2.", "~*req.<~*req.CGRID;~*req.RunID>-Cost", "-", "~*req.<~*req.UnitField>"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dP := utils.MapStorage{
 		utils.MetaReq: utils.MapStorage{
-
-			utils.RunID: utils.MetaDefault,
-
-			"UnitField": "Unit",
-			"Unit":      "MB",
-			"IP":        "127.0.0.1",
-		},
-		utils.MetaOpts: utils.MapStorage{
-
-			utils.MetaOriginID:          "originIDUniq",
-			"originIDUniq*default-Cost": 10,
+			utils.CGRID:              "cgridUniq",
+			utils.RunID:              utils.MetaDefault,
+			"cgridUniq*default-Cost": 10,
+			"UnitField":              "Unit",
+			"Unit":                   "MB",
+			"IP":                     "127.0.0.1",
 		},
 	}
 
@@ -452,19 +442,16 @@ func TestRSRParserDynamic3(t *testing.T) {
 }
 
 func TestRSRParserParseDataProviderWithInterfaces(t *testing.T) {
-	prsr, err := NewRSRParsersFromSlice([]string{"~*opts.<~*opts.*originID;~*req.RunID;-Cos>t", "s"})
+	prsr, err := NewRSRParsersFromSlice([]string{"~*req.<~*req.CGRID;~*req.RunID;-Cos>t", "s"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dP := utils.MapStorage{
 		utils.MetaReq: utils.MapStorage{
-
-			utils.RunID: utils.MetaDefault,
-		},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID:          "originIDUniq",
-			"originIDUniq*default-Cost": 10,
+			utils.CGRID:              "cgridUniq",
+			utils.RunID:              utils.MetaDefault,
+			"cgridUniq*default-Cost": 10,
 		},
 	}
 	if out, err := prsr.ParseDataProviderWithInterfaces(dP); err != nil {
@@ -473,7 +460,7 @@ func TestRSRParserParseDataProviderWithInterfaces(t *testing.T) {
 		t.Errorf("Expected 10s received: %q", out)
 	}
 
-	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*opts.<~*opts.*originID;~*req.RunID;-Cos>t", "s"})
+	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*req.<~*req.CGRID;~*req.RunID;-Cos>t", "s"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +471,7 @@ func TestRSRParserParseDataProviderWithInterfaces(t *testing.T) {
 		t.Errorf("Expected 210s received: %q", out)
 	}
 
-	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*opts.<~*opts.*originID;~*req.RunID;-Cost>"})
+	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*req.<~*req.CGRID;~*req.RunID;-Cost>"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,24 +483,24 @@ func TestRSRParserParseDataProviderWithInterfaces(t *testing.T) {
 	}
 
 	dP = utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID: "originIDUniq",
+		utils.MetaReq: utils.MapStorage{
+			utils.CGRID: "cgridUniq",
 		},
 	}
 	if _, err := prsr.ParseDataProviderWithInterfaces(dP); err != utils.ErrNotFound {
 		t.Errorf("Expected error %s, received: %v", utils.ErrNotFound, err)
 	}
 
-	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*opts.*originID<~*opts.Converter>"})
+	prsr, err = NewRSRParsersFromSlice([]string{"2.", "~*req.CGRID<~*opts.Converter>"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dP = utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{},
+		utils.MetaReq: utils.MapStorage{
+			utils.CGRID: "cgridUniq",
+		},
 		utils.MetaOpts: utils.MapStorage{
-			"Converter":        "{*",
-			utils.MetaOriginID: "originIDUniq",
+			"Converter": "{*",
 		},
 	}
 	if _, err := prsr.ParseDataProviderWithInterfaces(dP); err == nil {
@@ -522,46 +509,42 @@ func TestRSRParserParseDataProviderWithInterfaces(t *testing.T) {
 }
 
 func TestRSRParserCompileDynRule(t *testing.T) {
-	prsr, err := NewRSRParser("~*opts.<~*opts.*originID;~*req.RunID;-Cos>t")
+	prsr, err := NewRSRParser("~*req.<~*req.CGRID;~*req.RunID;-Cos>t")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dP := utils.MapStorage{
 		utils.MetaReq: utils.MapStorage{
-
-			utils.RunID: utils.MetaDefault,
-		},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID:          "originIDUniq",
-			"originIDUniq*default-Cost": 10,
+			utils.CGRID:              "cgridUniq",
+			utils.RunID:              utils.MetaDefault,
+			"cgridUniq*default-Cost": 10,
 		},
 	}
 	if out, err := prsr.CompileDynRule(dP); err != nil {
 		t.Error(err)
-	} else if out != "~*opts.originIDUniq*default-Cost" {
-		t.Errorf("Expected ~*opts.originIDUniq*default-Cost received: %q", out)
+	} else if out != "~*req.cgridUniq*default-Cost" {
+		t.Errorf("Expected ~*req.cgridUniq*default-Cost received: %q", out)
 	}
 
 	dP = utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID: "originIDUniq",
+		utils.MetaReq: utils.MapStorage{
+			utils.CGRID: "cgridUniq",
 		},
 	}
 	if _, err := prsr.CompileDynRule(dP); err != utils.ErrNotFound {
 		t.Errorf("Expected error %s, received: %v", utils.ErrNotFound, err)
 	}
 
-	prsr, err = NewRSRParser("~*opts.*originID")
+	prsr, err = NewRSRParser("~*req.CGRID")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if out, err := prsr.CompileDynRule(dP); err != nil {
 		t.Error(err)
-	} else if out != "~*opts.*originID" {
-		t.Errorf("Expected ~*opts.*originID received: %q", out)
+	} else if out != "~*req.CGRID" {
+		t.Errorf("Expected ~*req.CGRID received: %q", out)
 	}
 }
 
@@ -821,7 +804,7 @@ func TestParseCdrcDn1(t *testing.T) {
 }
 
 func TestRSRCostDetails(t *testing.T) {
-	fieldsStr1 := `{"Category":"default_route","Tenant":"demo.cgrates.org","Subject":"voxbeam_premium","Account":"6335820713","Destination":"15143606781","ToR":"*voice","Cost":0.0007,"Timespans":[{"TimeStart":"2015-08-30T21:46:54Z","TimeEnd":"2015-08-30T21:47:06Z","Cost":0.00072,"RateInterval":{"Rating":{"ConnectFee":0,"RoundingMethod":"*middle","RoundingDecimals":5,"MaxCost":0,"MaxCostStrategy":"0","Rates":[{"GroupIntervalStart":0,"Value":0.0036,"RateIncrement":6000000000,"RateUnit":60000000000}]},"Weight":10},"DurationIndex":12000000000,"Increments":[{"Duration":6000000000,"Cost":0.00036,"BalanceInfo":{"UnitBalanceUuid":"","MoneyBalanceUuid":"40adda88-25d3-4009-b928-f39d61590439","AccountId":"*out:demo.cgrates.org:6335820713"},"BalanceRateInterval":null,"UnitInfo":null,"CompressFactor":2}],"MatchedSubject":"*out:demo.cgrates.org:default_route:voxbeam_premium","MatchedPrefix":"1514","MatchedDestId":"Canada","RatingPlanId":"RP_VOXBEAM_PREMIUM"}]}`
+	fieldsStr1 := `{"Category":"default_route","Tenant":"demo.cgrates.org","Subject":"voxbeam_premium","Account":"6335820713","Destination":"15143606781","ToR":"*voice","Cost":0.0007,"Timespans":[{"TimeStart":"2015-08-30T21:46:54Z","TimeEnd":"2015-08-30T21:47:06Z","Cost":0.00072,"RateInterval":{"Timing":{"Years":[],"Months":[],"MonthDays":[],"WeekDays":[],"StartTime":"00:00:00","EndTime":""},"Rating":{"ConnectFee":0,"RoundingMethod":"*middle","RoundingDecimals":5,"MaxCost":0,"MaxCostStrategy":"0","Rates":[{"GroupIntervalStart":0,"Value":0.0036,"RateIncrement":6000000000,"RateUnit":60000000000}]},"Weight":10},"DurationIndex":12000000000,"Increments":[{"Duration":6000000000,"Cost":0.00036,"BalanceInfo":{"UnitBalanceUuid":"","MoneyBalanceUuid":"40adda88-25d3-4009-b928-f39d61590439","AccountId":"*out:demo.cgrates.org:6335820713"},"BalanceRateInterval":null,"UnitInfo":null,"CompressFactor":2}],"MatchedSubject":"*out:demo.cgrates.org:default_route:voxbeam_premium","MatchedPrefix":"1514","MatchedDestId":"Canada","RatingPlanId":"RP_VOXBEAM_PREMIUM"}]}`
 	rsrField, err := NewRSRParser(`~cost_details:s/"MatchedDestId":"(\w+)"/${1}/`)
 	if err != nil {
 		t.Error(err)
@@ -831,7 +814,7 @@ func TestRSRCostDetails(t *testing.T) {
 	} else if parsedVal != "Canada" {
 		t.Errorf("Expecting: Canada, received: %s", parsedVal)
 	}
-	fieldsStr2 := `{"Category":"call","Tenant":"sip.test.cgrates.org","Subject":"dan","Account":"dan","Destination":"+4986517174963","ToR":"*voice","Cost":0,"Timespans":[{"TimeStart":"2015-05-13T15:03:34+02:00","TimeEnd":"2015-05-13T15:03:38+02:00","Cost":0,"RateInterval":{"Rating":{"ConnectFee":0,"RoundingMethod":"*middle","RoundingDecimals":4,"MaxCost":0,"MaxCostStrategy":"","Rates":[{"GroupIntervalStart":0,"Value":0,"RateIncrement":1000000000,"RateUnit":60000000000}]},"Weight":10},"DurationIndex":4000000000,"Increments":[{"Duration":1000000000,"Cost":0,"BalanceInfo":{"Unit":null,"Monetary":null,"AccountID":""},"CompressFactor":4}],"RoundIncrement":null,"MatchedSubject":"*out:sip.test.cgrates.org:call:*any","MatchedPrefix":"+31800","MatchedDestId":"CST_49800_DE080","RatingPlanId":"ISC_V","CompressFactor":1}],"RatedUsage":4}`
+	fieldsStr2 := `{"Category":"call","Tenant":"sip.test.cgrates.org","Subject":"dan","Account":"dan","Destination":"+4986517174963","ToR":"*voice","Cost":0,"Timespans":[{"TimeStart":"2015-05-13T15:03:34+02:00","TimeEnd":"2015-05-13T15:03:38+02:00","Cost":0,"RateInterval":{"Timing":{"Years":[],"Months":[],"MonthDays":[],"WeekDays":[],"StartTime":"00:00:00","EndTime":""},"Rating":{"ConnectFee":0,"RoundingMethod":"*middle","RoundingDecimals":4,"MaxCost":0,"MaxCostStrategy":"","Rates":[{"GroupIntervalStart":0,"Value":0,"RateIncrement":1000000000,"RateUnit":60000000000}]},"Weight":10},"DurationIndex":4000000000,"Increments":[{"Duration":1000000000,"Cost":0,"BalanceInfo":{"Unit":null,"Monetary":null,"AccountID":""},"CompressFactor":4}],"RoundIncrement":null,"MatchedSubject":"*out:sip.test.cgrates.org:call:*any","MatchedPrefix":"+31800","MatchedDestId":"CST_49800_DE080","RatingPlanId":"ISC_V","CompressFactor":1}],"RatedUsage":4}`
 	rsrField, err = NewRSRParser(`~CostDetails:s/"MatchedDestId":.*_(\w{5})/${1}/:s/"MatchedDestId":"INTERNAL"/ON010/`)
 	if err != nil {
 		t.Error(err)
@@ -892,91 +875,5 @@ func TestRSRParsersClone(t *testing.T) {
 	cln[0].converters[0] = utils.NewDataConverterMustCompile(utils.MetaIP2Hex)
 	if reflect.DeepEqual(cln[0].converters[0], rsrs[0].converters[0]) {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestRSRParsersParseDataProviderWithInterfaces2(t *testing.T) {
-	ruleStr := "~;*accounts.;~*req.Account"
-	if prsrs, err := NewRSRParsers(ruleStr, utils.InfieldSep); err != nil {
-		t.Error("Unexpected error: ", err.Error())
-	} else if rcv, err := prsrs.ParseDataProviderWithInterfaces2(utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{utils.AccountField: "1001"},
-	}); err != nil {
-		t.Errorf("Expected error <nil>, Received error <%v>", err)
-
-	} else if expected := "~*accounts.1001"; rcv != expected {
-		t.Errorf("Expected %q ,received %q", expected, rcv)
-	}
-	ruleStr = "constant;`>;q=0.7;expires=3600`;~*req.Account"
-	if prsrs, err := NewRSRParsers(ruleStr, utils.InfieldSep); err != nil {
-		t.Error("Unexpected error: ", err.Error())
-	} else if _, err := prsrs.ParseDataProviderWithInterfaces2(utils.MapStorage{}); err != utils.ErrNotFound {
-		t.Errorf("Expected error <%v>, Received error <%v>", utils.ErrNotFound, err)
-	}
-
-}
-
-func TestRSRParserParseValueInterface(t *testing.T) {
-
-	prsr := &RSRParser{
-		rsrRules: []*utils.ReSearchReplace{
-			{
-				SearchRegexp:    regexp.MustCompile(`a`),
-				ReplaceTemplate: "${1}b",
-			},
-		},
-	}
-
-	if rcv, err := prsr.parseValueInterface(""); err != nil {
-		t.Errorf("Expected error <nil>, Received error <%v>", err)
-
-	} else if expected := ""; rcv != expected {
-		t.Errorf("Expected %q ,received %q", expected, rcv)
-	}
-}
-
-func TestRSRParserParseDataProviderWithInterfaces2(t *testing.T) {
-	prsr := &RSRParser{
-		dynRules: NewRSRParsersMustCompile("~*opts.*originID;~*req.RunID;-Cost", ";"),
-	}
-
-	if _, err := prsr.ParseDataProviderWithInterfaces2(utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{utils.AccountField: "1001"},
-	}); err != utils.ErrNotFound {
-		t.Errorf("Expected error <%v>, Received error <%v>", utils.ErrNotFound, err)
-
-	}
-
-	rsrParser, _ := NewRSRParsers("~*opts.*originI;;;D;~*req.RunID;-Cost", "")
-	prsr = &RSRParser{
-		Rules:    "~*opts.<~*opts.*originID;~*req.RunID;-Cost{*}>",
-		dynRules: rsrParser,
-	}
-	expErr := "invalid converter value in string: <*>, err: unsupported converter definition: <*>"
-	if _, err := prsr.ParseDataProviderWithInterfaces2(utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{utils.AccountField: "1001"},
-	}); err.Error() != expErr {
-		t.Errorf("Expected error <%v>, Received error <%v>", expErr, err.Error())
-
-	}
-
-	prsr = &RSRParser{
-		dynRules: NewRSRParsersMustCompile("~*opts.*originID;~*req.RunID;-Cost", ";"),
-	}
-	dP := utils.MapStorage{
-		utils.MetaReq: utils.MapStorage{
-
-			utils.RunID: utils.MetaDefault,
-		},
-		utils.MetaOpts: utils.MapStorage{
-			utils.MetaOriginID:  "Uniq",
-			"Uniq*default-Cost": 10,
-		},
-	}
-	exp := "Uniq*default-Cost"
-	if rcv, err := prsr.ParseDataProviderWithInterfaces2(dP); err != nil {
-		t.Error(err)
-	} else if rcv != exp {
-		t.Errorf("Expected <%v>, \nReceived <%v>", exp, rcv)
 	}
 }

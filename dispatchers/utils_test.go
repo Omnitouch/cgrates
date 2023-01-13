@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestDParseStringSetMetaZero(t *testing.T) {

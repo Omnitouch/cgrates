@@ -22,10 +22,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewAgentRequest returns a new AgentRequest
@@ -64,7 +63,7 @@ func NewAgentRequest(req utils.DataProvider,
 		filterS:    filterS,
 		Opts:       opts,
 		Cfg:        config.CgrConfig().GetDataProvider(),
-		ExtraDP:    extraDP, // used for extra dataproviders like *hdr and *trl
+		ExtraDP:    extraDP,
 	}
 	if tnt, err := tntTpl.ParseDataProvider(ar); err == nil && tnt != utils.EmptyString {
 		ar.Tenant = tnt
@@ -193,7 +192,7 @@ func (ar *AgentRequest) FieldAsString(fldPath []string) (val string, err error) 
 func (ar *AgentRequest) SetFields(tplFlds []*config.FCTemplate) (err error) {
 	ar.tmp = &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
 	for _, tplFld := range tplFlds {
-		if pass, err := ar.filterS.Pass(context.TODO(), ar.Tenant,
+		if pass, err := ar.filterS.Pass(ar.Tenant,
 			tplFld.Filters, ar); err != nil {
 			return err
 		} else if !pass {
@@ -234,6 +233,7 @@ func (ar *AgentRequest) SetFields(tplFlds []*config.FCTemplate) (err error) {
 					Path:      tplFld.Path,
 				}
 			}
+
 			nMItm := &utils.DataLeaf{Data: out, NewBranch: tplFld.NewBranch, AttributeID: tplFld.AttributeID}
 			switch tplFld.Type {
 			case utils.MetaComposed:
@@ -286,7 +286,7 @@ func (ar *AgentRequest) SetAsSlice(fullPath *utils.FullPath, nm *utils.DataLeaf)
 	case utils.MetaOpts:
 		return ar.Opts.Set(fullPath.PathSlice[1:], nm.Data)
 	case utils.MetaUCH:
-		return engine.Cache.Set(context.TODO(), utils.CacheUCH, fullPath.Path[5:], nm.Data, nil, true, utils.NonTransactional)
+		return engine.Cache.Set(utils.CacheUCH, fullPath.Path[5:], nm.Data, nil, true, utils.NonTransactional)
 	}
 }
 
@@ -344,7 +344,7 @@ func (ar *AgentRequest) Remove(fullPath *utils.FullPath) error {
 	case utils.MetaOpts:
 		return ar.Opts.Remove(fullPath.PathSlice[1:])
 	case utils.MetaUCH:
-		return engine.Cache.Remove(context.TODO(), utils.CacheUCH, fullPath.Path[5:], true, utils.NonTransactional)
+		return engine.Cache.Remove(utils.CacheUCH, fullPath.Path[5:], true, utils.NonTransactional)
 	}
 }
 
@@ -425,7 +425,7 @@ func (ar *AgentRequest) Append(fullPath *utils.FullPath, val *utils.DataLeaf) (e
 	case utils.MetaOpts:
 		return ar.Opts.Set(fullPath.PathSlice[1:], val.Data)
 	case utils.MetaUCH:
-		return engine.Cache.Set(context.TODO(), utils.CacheUCH, fullPath.Path[5:], val.Data, nil, true, utils.NonTransactional)
+		return engine.Cache.Set(utils.CacheUCH, fullPath.Path[5:], val.Data, nil, true, utils.NonTransactional)
 	}
 }
 
@@ -476,6 +476,6 @@ func (ar *AgentRequest) Compose(fullPath *utils.FullPath, val *utils.DataLeaf) (
 		} else {
 			prv = utils.IfaceAsString(prvI) + utils.IfaceAsString(val.Data)
 		}
-		return engine.Cache.Set(context.TODO(), utils.CacheUCH, path, prv, nil, true, utils.NonTransactional)
+		return engine.Cache.Set(utils.CacheUCH, path, prv, nil, true, utils.NonTransactional)
 	}
 }

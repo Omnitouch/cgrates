@@ -42,9 +42,16 @@
 	"db_name": "10", 						// data_db database name to connect to
 },
 
-"rates": {
+
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
 	"enabled": true,
 },
+
 
 "resources": {
 	"enabled": true,
@@ -66,7 +73,7 @@
 
 "sessions": {
 	"enabled": true,
-	"rates_conns": ["*localhost"],
+	"rals_conns": ["*localhost"],
 	"resources_conns": ["*localhost"],
 	"attributes_conns": ["*localhost"],
 },

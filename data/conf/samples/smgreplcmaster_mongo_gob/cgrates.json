@@ -22,12 +22,23 @@
 
 "data_db": {								// database used to store runtime data (eg: accounts, cdr stats)
 	"db_type": "mongo",					// stor database type to use: <mysql|postgres>
-	"db_port": 27017, 						// the port to reach the datadb
+	"db_port": 27017, 						// the port to reach the stordb
 	"db_name": "datadb",
 	"db_password": "",
 },
 
-"rates": {
+"stor_db": {
+	"db_type": "mongo",					// stor database type to use: <mysql|postgres>
+	"db_port": 27017, 						// the port to reach the stordb
+	"db_name": "stordb",
+	"db_password": "",
+},
+
+"rals": {
+	"enabled": true,
+},
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -48,13 +59,14 @@
 "sessions": {
 	"enabled": true,
 	"replication_conns": ["rplConn"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 }

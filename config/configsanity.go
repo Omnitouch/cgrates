@@ -24,7 +24,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -34,12 +34,38 @@ func (cfg *CGRConfig) CheckConfigSanity() error {
 }
 
 func (cfg *CGRConfig) checkConfigSanity() error {
-
+	// Rater checks
+	if cfg.ralsCfg.Enabled {
+		for _, connID := range cfg.ralsCfg.StatSConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.statsCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.StatService, utils.RALService)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.RALService, connID)
+			}
+		}
+		for _, connID := range cfg.ralsCfg.ThresholdSConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.thresholdSCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.ThresholdS, utils.RALService)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.RALService, connID)
+			}
+		}
+	}
 	// CDRServer checks
 	if cfg.cdrsCfg.Enabled {
 		for _, connID := range cfg.cdrsCfg.ChargerSConns {
 			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.chargerSCfg.Enabled {
 				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.ChargerS, utils.CDRs)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.CDRs, connID)
+			}
+		}
+		for _, connID := range cfg.cdrsCfg.RaterConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.ralsCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.RALService, utils.CDRs)
 			}
 			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
 				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.CDRs, connID)
@@ -115,6 +141,9 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 			}
 
 			for _, field := range data.Fields {
+				if field.Type != utils.MetaComposed && field.Type != utils.MetaString && field.Type != utils.MetaVariable {
+					return fmt.Errorf("<%s> invalid field type %s for %s at %s", utils.LoaderS, field.Type, data.Type, field.Tag)
+				}
 				if field.Path == utils.EmptyString {
 					return fmt.Errorf("<%s> %s for %s at %s", utils.LoaderS, utils.NewErrMandatoryIeMissing(utils.Path), data.Type, field.Tag)
 				}
@@ -145,7 +174,15 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SessionS, connID)
 			}
 		}
-		for _, connID := range cfg.sessionSCfg.ResourceSConns {
+		for _, connID := range cfg.sessionSCfg.RALsConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.ralsCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.RALService, utils.SessionS)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SessionS, connID)
+			}
+		}
+		for _, connID := range cfg.sessionSCfg.ResSConns {
 			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.resourceSCfg.Enabled {
 				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.ResourceS, utils.SessionS)
 			}
@@ -153,7 +190,7 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SessionS, connID)
 			}
 		}
-		for _, connID := range cfg.sessionSCfg.ThresholdSConns {
+		for _, connID := range cfg.sessionSCfg.ThreshSConns {
 			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.thresholdSCfg.Enabled {
 				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.ThresholdS, utils.SessionS)
 			}
@@ -177,7 +214,7 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SessionS, connID)
 			}
 		}
-		for _, connID := range cfg.sessionSCfg.AttributeSConns {
+		for _, connID := range cfg.sessionSCfg.AttrSConns {
 			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.attributeSCfg.Enabled {
 				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.AttributeS, utils.SessionS)
 			}
@@ -332,7 +369,6 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 			}
 		}
 	}
-
 	//Radius Agent
 	if cfg.radiusAgentCfg.Enabled {
 		if len(cfg.radiusAgentCfg.SessionSConns) == 0 {
@@ -548,10 +584,8 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 	}
 
 	if cfg.attributeSCfg.Enabled {
-		for _, opt := range cfg.attributeSCfg.Opts.ProcessRuns {
-			if opt.Value < 1 {
-				return fmt.Errorf("<%s> processRuns needs to be bigger than 0", utils.AttributeS)
-			}
+		if cfg.attributeSCfg.Opts.ProcessRuns < 1 {
+			return fmt.Errorf("<%s> process_runs needs to be bigger than 0", utils.AttributeS)
 		}
 	}
 	if cfg.chargerSCfg.Enabled {
@@ -564,7 +598,6 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 			}
 		}
 	}
-
 	// ResourceLimiter checks
 	if cfg.resourceSCfg.Enabled {
 		for _, connID := range cfg.resourceSCfg.ThresholdSConns {
@@ -613,6 +646,45 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.RouteS, connID)
 			}
 		}
+		for _, connID := range cfg.routeSCfg.RALsConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.ralsCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.RALService, utils.RouteS)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.RouteS, connID)
+			}
+		}
+	}
+	// Scheduler check connection with CDR Server
+	if cfg.schedulerCfg.Enabled {
+		for _, connID := range cfg.schedulerCfg.CDRsConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.cdrsCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.CDRs, utils.SchedulerS)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SchedulerS, connID)
+			}
+		}
+		for _, connID := range cfg.schedulerCfg.ThreshSConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.thresholdSCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.ThresholdS, utils.SchedulerS)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SchedulerS, connID)
+			}
+		}
+		for _, connID := range cfg.schedulerCfg.StatSConns {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.statsCfg.Enabled {
+				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.StatS, utils.SchedulerS)
+			}
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
+				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.SchedulerS, connID)
+			}
+		}
+		if err := utils.CheckInLineFilter(cfg.schedulerCfg.Filters); err != nil {
+			return fmt.Errorf("<%s> got %s in %s", utils.SchedulerS, err, utils.Filters)
+		}
+
 	}
 	// EventReader sanity checks
 	if cfg.ersCfg.Enabled {
@@ -639,7 +711,7 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				return fmt.Errorf("<%s> wrong partial expiry action for reader with ID: %s", utils.ERs, rdr.ID)
 			}
 			if pAct != utils.MetaNone { // if is *none we do not process the evicted events
-				if rdr.Opts.PartialOrderField != nil && *rdr.Opts.PartialOrderField == utils.EmptyString {
+				if rdr.Opts.PartialOrderField != nil && *rdr.Opts.PartialOrderField == utils.EmptyString { // the field we order after must not be empty
 					return fmt.Errorf("<%s> empty %s for reader with ID: %s", utils.ERs, utils.PartialOrderFieldOpt, rdr.ID)
 				}
 			}
@@ -649,11 +721,10 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				if rdr.Opts.PartialPath != nil {
 					path = *rdr.Opts.PartialPath
 				}
-				if _, err := os.Stat(utils.IfaceAsString(path)); err != nil && os.IsNotExist(err) {
+				if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
 					return fmt.Errorf("<%s> nonexistent partial folder: %s for reader with ID: %s", utils.ERs, path, rdr.ID)
 				}
 				if pAct == utils.MetaDumpToFile {
-
 					if rdr.Opts.PartialCSVFieldSeparator != nil && // the separtor must not be empty
 						*rdr.Opts.PartialCSVFieldSeparator == utils.EmptyString {
 						return fmt.Errorf("<%s> empty %s for reader with ID: %s", utils.ERs, utils.PartialCSVFieldSepartorOpt, rdr.ID)
@@ -767,9 +838,6 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 			switch exp.Type {
 			case utils.MetaFileCSV:
 				for _, dir := range []string{exp.ExportPath} {
-					if dir == utils.MetaBuffer {
-						break
-					}
 					if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
 						return fmt.Errorf("<%s> nonexistent folder: %s for exporter with ID: %s", utils.EEs, dir, exp.ID)
 					}
@@ -779,9 +847,6 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				}
 			case utils.MetaFileFWV:
 				for _, dir := range []string{exp.ExportPath} {
-					if dir == utils.MetaBuffer {
-						break
-					}
 					if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
 						return fmt.Errorf("<%s> nonexistent folder: %s for exporter with ID: %s", utils.EEs, dir, exp.ID)
 					}
@@ -823,6 +888,14 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 			if err := utils.CheckInLineFilter(exp.Filters); err != nil {
 				return fmt.Errorf("<%s> %s for %s at %s", utils.EEs, err, exp.Filters, utils.ExportersCfg)
 			}
+		}
+	}
+	// StorDB sanity checks
+	if cfg.storDbCfg.Type == utils.Postgres {
+		if !utils.IsSliceMember([]string{utils.PostgresSSLModeDisable, utils.PostgressSSLModeAllow,
+			utils.PostgresSSLModePrefer, utils.PostgressSSLModeRequire, utils.PostgresSSLModeVerifyCa,
+			utils.PostgresSSLModeVerifyFull}, cfg.storDbCfg.Opts.PgSSLMode) {
+			return fmt.Errorf("<%s> unsupported sslmode for storDB", utils.StorDB)
 		}
 	}
 	// DataDB sanity checks
@@ -873,45 +946,34 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 		}
 	}
 	// APIer sanity checks
-	for _, connID := range cfg.admS.AttributeSConns {
+	for _, connID := range cfg.apier.AttributeSConns {
 		if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.attributeSCfg.Enabled {
-			return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.AttributeS, utils.AdminS)
+			return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.AttributeS, utils.APIerSv1)
 		}
 		if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
-			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.AdminS, connID)
+			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.APIerSv1, connID)
 		}
 	}
-	for _, connID := range cfg.admS.ActionSConns {
-		if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.actionSCfg.Enabled {
-			return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.SchedulerS, utils.AdminS)
+	for _, connID := range cfg.apier.SchedulerConns {
+		if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.schedulerCfg.Enabled {
+			return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.SchedulerS, utils.APIerSv1)
 		}
 		if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
-			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.AdminS, connID)
+			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.APIerSv1, connID)
 		}
 	}
 	// Dispatcher sanity check
 	if cfg.dispatcherSCfg.Enabled {
 		for _, connID := range cfg.dispatcherSCfg.AttributeSConns {
-			if strings.HasPrefix(connID, utils.MetaDispatchers) && !cfg.attributeSCfg.Enabled {
+			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.attributeSCfg.Enabled {
 				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.AttributeS, utils.DispatcherS)
 			}
-			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaDispatchers) {
+			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
 				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.DispatcherS, connID)
 			}
 		}
 	}
 	// Cache check
-	for _, connID := range cfg.cacheCfg.RemoteConns {
-		conn, has := cfg.rpcConns[connID]
-		if !has {
-			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.CacheS, connID)
-		}
-		for _, rpc := range conn.Conns {
-			if rpc.Transport != utils.MetaGOB {
-				return fmt.Errorf("<%s> unsupported transport <%s> for connection with ID: <%s>", utils.CacheS, rpc.Transport, connID)
-			}
-		}
-	}
 	for _, connID := range cfg.cacheCfg.ReplicationConns {
 		conn, has := cfg.rpcConns[connID]
 		if !has {
@@ -949,9 +1011,9 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.FilterS, connID)
 		}
 	}
-	for _, connID := range cfg.filterSCfg.AccountSConns {
-		if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.accountSCfg.Enabled {
-			return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.AccountS, utils.FilterS)
+	for _, connID := range cfg.filterSCfg.ApierSConns {
+		if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.apier.Enabled {
+			return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.ApierS, utils.FilterS)
 		}
 		if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
 			return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.FilterS, connID)
@@ -1029,17 +1091,9 @@ func (cfg *CGRConfig) checkConfigSanity() error {
 				return fmt.Errorf("<%s> nonexistent DB folder: %q", utils.AnalyzerS, cfg.analyzerSCfg.DBPath)
 			}
 		}
-		// TTL and CleanupInterval should allways be biger than zero in order to not keep unecesary logs in index
+		// TTL and CleanupInterval should always be biger than zero in order to not keep unecesary logs in index
 		if cfg.analyzerSCfg.TTL <= 0 {
 			return fmt.Errorf("<%s> the TTL needs to be bigger than 0", utils.AnalyzerS)
-		}
-		for _, connID := range cfg.analyzerSCfg.EEsConns {
-			if strings.HasPrefix(connID, utils.MetaInternal) && !cfg.eesCfg.Enabled {
-				return fmt.Errorf("<%s> not enabled but requested by <%s> component", utils.EEs, utils.AnalyzerS)
-			}
-			if _, has := cfg.rpcConns[connID]; !has && !strings.HasPrefix(connID, utils.MetaInternal) {
-				return fmt.Errorf("<%s> connection with id: <%s> not defined", utils.AnalyzerS, connID)
-			}
 		}
 		if cfg.analyzerSCfg.CleanupInterval <= 0 {
 			return fmt.Errorf("<%s> the CleanupInterval needs to be bigger than 0", utils.AnalyzerS)

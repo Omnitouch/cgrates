@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
@@ -98,6 +98,10 @@ func testDspChcPing(t *testing.T) {
 func testDspChcLoadAfterFolder(t *testing.T) {
 	var rcvStats map[string]*ltcache.CacheStats
 	expStats := engine.GetDefaultEmptyCacheStats()
+	expStats[utils.CacheActions].Items = 1
+	expStats[utils.CacheDestinations].Items = 4
+	expStats[utils.CacheLoadIDs].Items = 18
+	expStats[utils.CacheRPCConnections].Items = 2
 	args := utils.AttrCacheIDsWithAPIOpts{
 		APIOpts: map[string]interface{}{
 			utils.OptsAPIKey: "chc12345",
@@ -121,17 +125,23 @@ func testDspChcLoadAfterFolder(t *testing.T) {
 	} else if reply != utils.OK {
 		t.Error(reply)
 	}
+	expStats[utils.CacheActionPlans].Items = 1
+	expStats[utils.CacheActions].Items = 2
 	expStats[utils.CacheAttributeProfiles].Items = 11
 	expStats[utils.CacheChargerProfiles].Items = 2
 	expStats[utils.CacheFilters].Items = 7
+	expStats[utils.CacheRatingPlans].Items = 6
+	expStats[utils.CacheRatingProfiles].Items = 7
 	expStats[utils.CacheResourceProfiles].Items = 1
 	expStats[utils.CacheResources].Items = 1
+	expStats[utils.CacheReverseDestinations].Items = 4
 	expStats[utils.CacheStatQueueProfiles].Items = 2
 	expStats[utils.CacheStatQueues].Items = 2
 	expStats[utils.CacheRouteProfiles].Items = 3
 	expStats[utils.CacheThresholdProfiles].Items = 2
 	expStats[utils.CacheThresholds].Items = 2
-	expStats[utils.CacheLoadIDs].Items = 28
+	expStats[utils.CacheLoadIDs].Items = 30
+	expStats[utils.CacheTimings].Items = 10
 	expStats[utils.CacheThresholdFilterIndexes].Items = 2
 	expStats[utils.CacheThresholdFilterIndexes].Groups = 1
 	expStats[utils.CacheStatFilterIndexes].Items = 7
@@ -142,15 +152,10 @@ func testDspChcLoadAfterFolder(t *testing.T) {
 	expStats[utils.CacheResourceFilterIndexes].Groups = 1
 	expStats[utils.CacheChargerFilterIndexes].Items = 1
 	expStats[utils.CacheChargerFilterIndexes].Groups = 1
-	expStats[utils.CacheAttributeFilterIndexes].Items = 10
-	expStats[utils.CacheAttributeFilterIndexes].Groups = 2
+	expStats[utils.CacheAttributeFilterIndexes].Items = 11
+	expStats[utils.CacheAttributeFilterIndexes].Groups = 4
 	expStats[utils.CacheReverseFilterIndexes].Items = 8
 	expStats[utils.CacheReverseFilterIndexes].Groups = 6
-	expStats[utils.CacheRateProfiles].Items = 2
-	expStats[utils.CacheRateProfilesFilterIndexes].Items = 1
-	expStats[utils.CacheRateProfilesFilterIndexes].Groups = 1
-	expStats[utils.CacheRateFilterIndexes].Items = 2
-	expStats[utils.CacheRateFilterIndexes].Groups = 2
 	if err := dispEngine.RPC.Call(utils.CacheSv1GetCacheStats, &args, &rcvStats); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expStats, rcvStats) {
@@ -161,49 +166,55 @@ func testDspChcLoadAfterFolder(t *testing.T) {
 func testDspChcPrecacheStatus(t *testing.T) {
 	var reply map[string]string
 	expected := map[string]string{
-		utils.CacheResourceProfiles:            utils.MetaReady,
-		utils.CacheResources:                   utils.MetaReady,
-		utils.CacheStatQueueProfiles:           utils.MetaReady,
-		utils.CacheStatQueues:                  utils.MetaReady,
-		utils.CacheThresholdProfiles:           utils.MetaReady,
-		utils.CacheThresholds:                  utils.MetaReady,
-		utils.CacheFilters:                     utils.MetaReady,
-		utils.CacheRouteProfiles:               utils.MetaReady,
-		utils.CacheAttributeProfiles:           utils.MetaReady,
-		utils.CacheChargerProfiles:             utils.MetaReady,
-		utils.CacheDispatcherProfiles:          utils.MetaReady,
-		utils.CacheDispatcherHosts:             utils.MetaReady,
-		utils.CacheDiameterMessages:            utils.MetaReady,
-		utils.CacheAttributeFilterIndexes:      utils.MetaReady,
-		utils.CacheResourceFilterIndexes:       utils.MetaReady,
-		utils.CacheStatFilterIndexes:           utils.MetaReady,
-		utils.CacheThresholdFilterIndexes:      utils.MetaReady,
-		utils.CacheRouteFilterIndexes:          utils.MetaReady,
-		utils.CacheChargerFilterIndexes:        utils.MetaReady,
-		utils.CacheDispatcherFilterIndexes:     utils.MetaReady,
-		utils.CacheRateProfilesFilterIndexes:   utils.MetaReady,
-		utils.CacheRateFilterIndexes:           utils.MetaReady,
-		utils.CacheRateProfiles:                utils.MetaReady,
-		utils.CacheLoadIDs:                     utils.MetaReady,
-		utils.CacheCDRIDs:                      utils.MetaReady,
-		utils.CacheClosedSessions:              utils.MetaReady,
-		utils.CacheDispatcherRoutes:            utils.MetaReady,
-		utils.CacheEventResources:              utils.MetaReady,
-		utils.CacheRPCConnections:              utils.MetaReady,
-		utils.CacheRPCResponses:                utils.MetaReady,
-		utils.CacheUCH:                         utils.MetaReady,
-		utils.CacheSTIR:                        utils.MetaReady,
-		utils.CacheDispatcherLoads:             utils.MetaReady,
-		utils.CacheDispatchers:                 utils.MetaReady,
-		utils.CacheEventCharges:                utils.MetaReady,
-		utils.CacheReverseFilterIndexes:        utils.MetaReady,
-		utils.CacheCapsEvents:                  utils.MetaReady,
-		utils.CacheActionProfiles:              utils.MetaReady,
-		utils.CacheActionProfilesFilterIndexes: utils.MetaReady,
-		utils.CacheAccountsFilterIndexes:       utils.MetaReady,
-		utils.CacheAccounts:                    utils.MetaReady,
-		utils.MetaAPIBan:                       utils.MetaReady,
-		utils.CacheReplicationHosts:            utils.MetaReady,
+		utils.CacheDestinations:            utils.MetaReady,
+		utils.CacheReverseDestinations:     utils.MetaReady,
+		utils.CacheRatingPlans:             utils.MetaReady,
+		utils.CacheRatingProfiles:          utils.MetaReady,
+		utils.CacheActions:                 utils.MetaReady,
+		utils.CacheActionPlans:             utils.MetaReady,
+		utils.CacheAccountActionPlans:      utils.MetaReady,
+		utils.CacheActionTriggers:          utils.MetaReady,
+		utils.CacheSharedGroups:            utils.MetaReady,
+		utils.CacheResourceProfiles:        utils.MetaReady,
+		utils.CacheResources:               utils.MetaReady,
+		utils.CacheTimings:                 utils.MetaReady,
+		utils.CacheStatQueueProfiles:       utils.MetaReady,
+		utils.CacheStatQueues:              utils.MetaReady,
+		utils.CacheThresholdProfiles:       utils.MetaReady,
+		utils.CacheThresholds:              utils.MetaReady,
+		utils.CacheFilters:                 utils.MetaReady,
+		utils.CacheRouteProfiles:           utils.MetaReady,
+		utils.CacheAttributeProfiles:       utils.MetaReady,
+		utils.CacheChargerProfiles:         utils.MetaReady,
+		utils.CacheDispatcherProfiles:      utils.MetaReady,
+		utils.CacheDispatcherHosts:         utils.MetaReady,
+		utils.CacheDiameterMessages:        utils.MetaReady,
+		utils.CacheAttributeFilterIndexes:  utils.MetaReady,
+		utils.CacheResourceFilterIndexes:   utils.MetaReady,
+		utils.CacheStatFilterIndexes:       utils.MetaReady,
+		utils.CacheThresholdFilterIndexes:  utils.MetaReady,
+		utils.CacheRouteFilterIndexes:      utils.MetaReady,
+		utils.CacheChargerFilterIndexes:    utils.MetaReady,
+		utils.CacheDispatcherFilterIndexes: utils.MetaReady,
+		utils.CacheLoadIDs:                 utils.MetaReady,
+		utils.CacheCDRIDs:                  utils.MetaReady,
+		utils.CacheClosedSessions:          utils.MetaReady,
+		utils.CacheDispatcherRoutes:        utils.MetaReady,
+		utils.CacheEventResources:          utils.MetaReady,
+		utils.CacheRPCConnections:          utils.MetaReady,
+		utils.CacheRPCResponses:            utils.MetaReady,
+		utils.CacheRatingProfilesTmp:       utils.MetaReady,
+		utils.CacheUCH:                     utils.MetaReady,
+		utils.CacheSTIR:                    utils.MetaReady,
+		utils.CacheDispatcherLoads:         utils.MetaReady,
+		utils.CacheDispatchers:             utils.MetaReady,
+		utils.CacheEventCharges:            utils.MetaReady,
+		utils.CacheReverseFilterIndexes:    utils.MetaReady,
+		utils.CacheCapsEvents:              utils.MetaReady,
+
+		utils.MetaAPIBan: utils.MetaReady,
+
+		utils.CacheReplicationHosts: utils.MetaReady,
 	}
 
 	if err := dispEngine.RPC.Call(utils.CacheSv1PrecacheStatus, utils.AttrCacheIDsWithAPIOpts{

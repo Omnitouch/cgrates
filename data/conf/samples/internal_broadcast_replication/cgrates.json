@@ -30,8 +30,22 @@
 	"db_type": "*internal",	
 },
 
-"rates": {
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+
+"rals": {
 	"enabled": true,
+	"thresholds_conns": ["broadcast_conn"],
+	"max_increments":3000000,
+},
+
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["broadcast_conn"],
 },
 
 
@@ -85,14 +99,15 @@
 	"routes_conns": ["broadcast_conn"],
 	"resources_conns": ["broadcast_conn"],
 	"attributes_conns": ["broadcast_conn"],
-	"rates_conns": ["broadcast_conn"],
+	"rals_conns": ["broadcast_conn"],
 	"cdrs_conns": ["broadcast_conn"],
 	"chargers_conns": ["broadcast_conn"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["broadcast_conn"],
 },
 
 

@@ -19,15 +19,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package migrator
 
 import (
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 type internalMigrator struct {
-	dm       *engine.DataManager
-	iDB      *engine.InternalDB
-	dataKeys []string
-	qryIdx   *int
+	dm  *engine.DataManager
+	iDB *engine.InternalDB
 }
 
 func newInternalMigrator(dm *engine.DataManager) (iDBMig *internalMigrator) {
@@ -39,6 +37,98 @@ func newInternalMigrator(dm *engine.DataManager) (iDBMig *internalMigrator) {
 
 func (iDBMig *internalMigrator) DataManager() *engine.DataManager {
 	return iDBMig.dm
+}
+
+// Account methods
+// V1
+// get
+func (iDBMig *internalMigrator) getv1Account() (v1Acnt *v1Account, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1Account(x *v1Account) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1Account(id string) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// V2
+// get
+func (iDBMig *internalMigrator) getv2Account() (v2Acnt *v2Account, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV2Account(x *v2Account) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV2Account(id string) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// ActionPlans methods
+// get
+func (iDBMig *internalMigrator) getV1ActionPlans() (v1aps *v1ActionPlans, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1ActionPlans(x *v1ActionPlans) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1ActionPlans(x *v1ActionPlans) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// Actions methods
+// get
+func (iDBMig *internalMigrator) getV1Actions() (v1acs *v1Actions, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1Actions(x *v1Actions) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1Actions(x v1Actions) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// ActionTriggers methods
+// get
+func (iDBMig *internalMigrator) getV1ActionTriggers() (v1acts *v1ActionTriggers, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1ActionTriggers(x *v1ActionTriggers) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1ActionTriggers(x *v1ActionTriggers) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// SharedGroup methods
+// get
+func (iDBMig *internalMigrator) getV1SharedGroup() (v1sg *v1SharedGroup, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1SharedGroup(x *v1SharedGroup) (err error) {
+	return utils.ErrNotImplemented
 }
 
 // Stats methods
@@ -62,6 +152,17 @@ func (iDBMig *internalMigrator) getV2Stats() (v2 *engine.StatQueue, err error) {
 
 // set
 func (iDBMig *internalMigrator) setV2Stats(v2 *engine.StatQueue) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// Action  methods
+// get
+func (iDBMig *internalMigrator) getV2ActionTrigger() (v2at *v2ActionTrigger, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV2ActionTrigger(x *v2ActionTrigger) (err error) {
 	return utils.ErrNotImplemented
 }
 
@@ -93,6 +194,54 @@ func (iDBMig *internalMigrator) setV2ThresholdProfile(x *v2Threshold) (err error
 
 // rem
 func (iDBMig *internalMigrator) remV2ThresholdProfile(tenant, id string) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// Alias methods
+// get
+func (iDBMig *internalMigrator) getV1Alias() (v1a *v1Alias, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1Alias(al *v1Alias) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1Alias(key string) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// User methods
+// get
+func (iDBMig *internalMigrator) getV1User() (v1u *v1UserProfile, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1User(us *v1UserProfile) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1User(key string) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// DerivedChargers methods
+// get
+func (iDBMig *internalMigrator) getV1DerivedChargers() (v1d *v1DerivedChargersWithKey, err error) {
+	return nil, utils.ErrNotImplemented
+}
+
+// set
+func (iDBMig *internalMigrator) setV1DerivedChargers(dc *v1DerivedChargersWithKey) (err error) {
+	return utils.ErrNotImplemented
+}
+
+// rem
+func (iDBMig *internalMigrator) remV1DerivedChargers(key string) (err error) {
 	return utils.ErrNotImplemented
 }
 
@@ -133,7 +282,7 @@ func (iDBMig *internalMigrator) remV3AttributeProfile(tenant, id string) (err er
 func (iDBMig *internalMigrator) getV4AttributeProfile() (v4attrPrf *v4AttributeProfile, err error) {
 	return nil, utils.ErrNotImplemented
 }
-func (iDBMig *internalMigrator) getV5AttributeProfile() (v4attrPrf *v6AttributeProfile, err error) {
+func (iDBMig *internalMigrator) getV5AttributeProfile() (v4attrPrf *engine.AttributeProfile, err error) {
 	return nil, utils.ErrNotImplemented
 }
 

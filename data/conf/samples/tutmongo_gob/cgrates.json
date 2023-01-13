@@ -28,8 +28,24 @@
 	"db_port": 27017,
 },
 
-"rates": {
+
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
+
+
+"rals": {
 	"enabled": true,
+	"thresholds_conns": ["*internal"],
+	"max_increments":3000000,
+},
+
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["conn1"],
 },
 
 
@@ -78,7 +94,7 @@
 
 "sessions": {
 	"enabled": true,
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
@@ -88,22 +104,21 @@
 	"out_datadb_type": "mongo",
 	"out_datadb_port": "27017",
 	"out_datadb_name": "10",
-
+	"out_stordb_type": "mongo",
+	"out_stordb_port": "27017",
+	"out_stordb_name": "cgrates",
 	"users_filters":["Account"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 
 "filters": {								
-	"accounts_conns": ["*internal"],
-},
-
-"accounts": {
-    "enabled": true
+	"apiers_conns": ["*internal"],
 },
 
 }

@@ -19,6 +19,24 @@
 },
 
 
+"stor_db": {
+	"db_type": "postgres",					// stor database type to use: <mysql|postgres>
+	"db_port": 5432, 						// the port to reach the stordb
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
+	"enabled": true,
+	"thresholds_conns": ["*internal"],
+},
+
+
+"schedulers": {
+	"enabled": true,					// start Scheduler service: <true|false>
+},
+
+
 "cdrs": {
 	"enabled": true,					// start the CDR Server service:  <true|false>
 },
@@ -70,22 +88,19 @@
 "sessions": {
 	"enabled": true,
 	"chargers_conns": ["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 
 "filters": {								
-	"accounts_conns": ["*internal"],
-},
-
-"accounts": {
-    "enabled": true
+	"apiers_conns": ["*internal"],
 },
 
 }

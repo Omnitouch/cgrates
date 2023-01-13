@@ -23,20 +23,21 @@ import (
 	"io"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewCoreService returns the Core Service
 func NewCoreService(cfg *config.CGRConfig, caps *engine.Caps, server *cores.Server,
-	internalCoreSChan chan birpc.ClientConnector, anz *AnalyzerService,
-	fileCpu io.Closer, fileMEM string, stopMemPrf chan struct{},
-	shdWg *sync.WaitGroup, srvDep map[string]*sync.WaitGroup) *CoreService {
+	internalCoreSChan chan rpcclient.ClientConnector, anz *AnalyzerService,
+	fileCpu io.Closer, fileMEM string, shdWg *sync.WaitGroup, stopMemPrf chan struct{},
+	shdChan *utils.SyncedChan, srvDep map[string]*sync.WaitGroup) *CoreService {
 	return &CoreService{
+		shdChan:    shdChan,
 		shdWg:      shdWg,
 		stopMemPrf: stopMemPrf,
 		connChan:   internalCoreSChan,
@@ -47,7 +48,6 @@ func NewCoreService(cfg *config.CGRConfig, caps *engine.Caps, server *cores.Serv
 		server:     server,
 		anz:        anz,
 		srvDep:     srvDep,
-		csCh:       make(chan *cores.CoreS, 1),
 	}
 }
 
@@ -60,17 +60,18 @@ type CoreService struct {
 	stopChan   chan struct{}
 	shdWg      *sync.WaitGroup
 	stopMemPrf chan struct{}
+	shdChan    *utils.SyncedChan
 	fileCpu    io.Closer
 	fileMem    string
-	cS         *cores.CoreS
-	connChan   chan birpc.ClientConnector
+	cS         *cores.CoreService
+	rpc        *v1.CoreSv1
+	connChan   chan rpcclient.ClientConnector
 	anz        *AnalyzerService
 	srvDep     map[string]*sync.WaitGroup
-	csCh       chan *cores.CoreS
 }
 
 // Start should handle the service start
-func (cS *CoreService) Start(_ *context.Context, shtDw context.CancelFunc) (_ error) {
+func (cS *CoreService) Start() (err error) {
 	if cS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
@@ -79,34 +80,29 @@ func (cS *CoreService) Start(_ *context.Context, shtDw context.CancelFunc) (_ er
 	defer cS.Unlock()
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.CoreS))
 	cS.stopChan = make(chan struct{})
-	cS.cS = cores.NewCoreService(cS.cfg, cS.caps, cS.fileCpu, cS.fileMem, cS.stopChan, cS.stopMemPrf, cS.shdWg, shtDw)
-	cS.csCh <- cS.cS
-	srv, _ := engine.NewService(cS.cS)
-	// srv, _ := birpc.NewService(apis.NewCoreSv1(cS.cS), utils.EmptyString, false)
+	cS.cS = cores.NewCoreService(cS.cfg, cS.caps, cS.fileCpu, cS.fileMem, cS.stopChan, cS.shdWg, cS.stopMemPrf, cS.shdChan)
+	cS.rpc = v1.NewCoreSv1(cS.cS)
 	if !cS.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			cS.server.RpcRegister(s)
-		}
+		cS.server.RpcRegister(cS.rpc)
 	}
-	cS.connChan <- cS.anz.GetInternalCodec(srv, utils.CoreS)
+	cS.connChan <- cS.anz.GetInternalCodec(cS.rpc, utils.CoreS)
 	return
 }
 
 // Reload handles the change of config
-func (cS *CoreService) Reload(*context.Context, context.CancelFunc) error {
-	return nil
+func (cS *CoreService) Reload() (err error) {
+	return
 }
 
 // Shutdown stops the service
-func (cS *CoreService) Shutdown() (_ error) {
+func (cS *CoreService) Shutdown() (err error) {
 	cS.Lock()
 	defer cS.Unlock()
 	cS.cS.Shutdown()
 	close(cS.stopChan)
 	cS.cS = nil
+	cS.rpc = nil
 	<-cS.connChan
-	<-cS.csCh
-	cS.server.RpcUnregisterName(utils.CoreSv1)
 	return
 }
 
@@ -128,15 +124,8 @@ func (cS *CoreService) ShouldRun() bool {
 }
 
 // GetCoreS returns the coreS
-func (cS *CoreService) WaitForCoreS(ctx *context.Context) (cs *cores.CoreS, err error) {
+func (cS *CoreService) GetCoreS() *cores.CoreService {
 	cS.RLock()
-	cSCh := cS.csCh
-	cS.RUnlock()
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case cs = <-cSCh:
-		cSCh <- cs
-	}
-	return
+	defer cS.RUnlock()
+	return cS.cS
 }

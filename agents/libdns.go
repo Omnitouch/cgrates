@@ -24,8 +24,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/miekg/dns"
 )
 
@@ -34,7 +34,9 @@ func newDnsReply(req *dns.Msg) (rply *dns.Msg) {
 	rply.SetReply(req)
 	if len(req.Question) > 0 {
 		rply.Question = make([]dns.Question, len(req.Question))
-		copy(rply.Question, req.Question)
+		for i, q := range req.Question {
+			rply.Question[i] = q
+		}
 	}
 	if opts := rply.IsEdns0(); opts != nil {
 		rply.SetEdns0(4096, false).IsEdns0().Option = opts.Option

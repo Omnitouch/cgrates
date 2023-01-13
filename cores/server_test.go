@@ -26,11 +26,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/analyzers"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/analyzers"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewServer(t *testing.T) {
@@ -45,10 +45,6 @@ func TestNewServer(t *testing.T) {
 	}
 	rcv := NewServer(caps)
 	rcv.stopbiRPCServer = nil
-	rcv.httpServer = nil
-	rcv.httpsServer = nil
-	rcv.rpcServer = nil
-	rcv.birpcSrv = nil
 	if !reflect.DeepEqual(expected, rcv) {
 		t.Errorf("Expected %+v, received %+v", expected, rcv)
 	}
@@ -64,7 +60,7 @@ func TestNewServer(t *testing.T) {
 	}
 }
 
-func TestRegisterHTTPFunc(t *testing.T) {
+func TestRegisterHttpFunc(t *testing.T) {
 	log.SetOutput(io.Discard)
 	cfgDflt := config.NewDefaultCGRConfig()
 	cfgDflt.CoreSCfg().CapsStatsInterval = 1
@@ -86,7 +82,7 @@ func TestRegisterHTTPFunc(t *testing.T) {
 
 	handler := func(http.ResponseWriter, *http.Request) {}
 
-	rcv.RegisterHTTPFunc("/home", handler)
+	rcv.RegisterHttpFunc("/home", handler)
 
 	rcv.RpcRegisterName(utils.EmptyString, handler)
 

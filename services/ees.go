@@ -22,20 +22,20 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewEventExporterService constructs EventExporterService
 func NewEventExporterService(cfg *config.CGRConfig, filterSChan chan *engine.FilterS,
 	connMgr *engine.ConnManager, server *cores.Server,
-	intConnChan chan birpc.ClientConnector, anz *AnalyzerService,
+	intConnChan chan rpcclient.ClientConnector, anz *AnalyzerService,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &EventExporterService{
 		cfg:         cfg,
@@ -57,11 +57,12 @@ type EventExporterService struct {
 	filterSChan chan *engine.FilterS
 	connMgr     *engine.ConnManager
 	server      *cores.Server
-	intConnChan chan birpc.ClientConnector
+	intConnChan chan rpcclient.ClientConnector
 	rldChan     chan struct{}
 	stopChan    chan struct{}
 
-	eeS    *ees.EeS
+	eeS    *ees.EventExporterS
+	rpc    *v1.EeSv1
 	anz    *AnalyzerService
 	srvDep map[string]*sync.WaitGroup
 }
@@ -84,7 +85,7 @@ func (es *EventExporterService) IsRunning() bool {
 }
 
 // Reload handles the change of config
-func (es *EventExporterService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (es *EventExporterService) Reload() (err error) {
 	es.rldChan <- struct{}{}
 	return // for the momment nothing to reload
 }
@@ -97,37 +98,31 @@ func (es *EventExporterService) Shutdown() (err error) {
 	es.eeS.Shutdown()
 	es.eeS = nil
 	<-es.intConnChan
-	es.server.RpcUnregisterName(utils.EeSv1)
 	return
 }
 
 // Start should handle the service start
-func (es *EventExporterService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (es *EventExporterService) Start() (err error) {
 	if es.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, es.filterSChan); err != nil {
-		return
-	}
+	fltrS := <-es.filterSChan
+	es.filterSChan <- fltrS
 
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.EEs))
 
 	es.Lock()
 	defer es.Unlock()
 
-	es.eeS = ees.NewEventExporterS(es.cfg, filterS, es.connMgr)
+	es.eeS = ees.NewEventExporterS(es.cfg, fltrS, es.connMgr)
 	es.stopChan = make(chan struct{})
 	go es.eeS.ListenAndServe(es.stopChan, es.rldChan)
 
-	srv, _ := engine.NewService(es.eeS)
-	// srv, _ := birpc.NewService(es.rpc, "", false)
+	es.rpc = v1.NewEeSv1(es.eeS)
 	if !es.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			es.server.RpcRegister(s)
-		}
+		es.server.RpcRegister(es.rpc)
 	}
-	es.intConnChan <- es.anz.GetInternalCodec(srv, utils.EEs)
+	es.intConnChan <- es.anz.GetInternalCodec(es.eeS, utils.EEs)
 	return
 }

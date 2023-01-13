@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -240,7 +240,7 @@ func TestHttpAgentCfgloadFromJsonCfgCase3(t *testing.T) {
 				ID:             utils.StringPointer("OutboundAUTHDryRun"),
 				Filters:        &[]string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
 				Tenant:         utils.StringPointer("cgrates.org"),
-				Flags:          &[]string{"*dryRun"},
+				Flags:          &[]string{"*dryrun"},
 				Request_fields: &[]*FcTemplateJsonCfg{},
 				Reply_fields:   &[]*FcTemplateJsonCfg{},
 			},
@@ -256,7 +256,7 @@ func TestHttpAgentCfgloadFromJsonCfgCase3(t *testing.T) {
 			ID:            "OutboundAUTHDryRun",
 			Filters:       []string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
 			Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
-			Flags:         utils.FlagsWithParams{"*dryRun": {}},
+			Flags:         utils.FlagsWithParams{"*dryrun": {}},
 			RequestFields: []*FCTemplate{},
 			ReplyFields:   []*FCTemplate{},
 		}},
@@ -386,18 +386,108 @@ func TestHttpAgentCfgloadFromJsonCfgCase7(t *testing.T) {
 			ID: "RandomID",
 		},
 	}
-	jsnCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr)
-	if err != nil {
+	if jsnCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
 	} else if err = jsnCfg.httpAgentCfg.loadFromJSONCfg(cfgJSON, jsnCfg.generalCfg.RSRSep); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(&expected, &jsnCfg.httpAgentCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsnCfg.httpAgentCfg))
 	}
+}
 
-	cfgJSON = nil
-	if err = jsnCfg.httpAgentCfg.loadFromJSONCfg(cfgJSON, jsnCfg.generalCfg.RSRSep); err != nil {
+func TestHttpAgentCfgappendHttpAgntProcCfgs(t *testing.T) {
+	initial := &HTTPAgentCfg{
+		ID:             "conecto1",
+		URL:            "/conecto",
+		SessionSConns:  []string{utils.MetaLocalHost},
+		RequestPayload: "*url",
+		ReplyPayload:   "*xml",
+		RequestProcessors: []*RequestProcessor{{
+			ID:            "OutboundAUTHDryRun",
+			Filters:       []string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
+			Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
+			Flags:         utils.FlagsWithParams{"*dryrun": {}},
+			RequestFields: []*FCTemplate{},
+			ReplyFields: []*FCTemplate{{
+				Tag:       "Allow",
+				Path:      "response.Allow",
+				Type:      "*constant",
+				Value:     NewRSRParsersMustCompile("1", utils.InfieldSep),
+				Mandatory: true,
+			}},
+		}},
+	}
+	initial.RequestProcessors[0].ReplyFields[0].ComputePath()
+	proceses := &[]*ReqProcessorJsnCfg{{
+		ID:             utils.StringPointer("OutboundAUTHDryRun1"),
+		Filters:        &[]string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
+		Tenant:         utils.StringPointer("cgrates.org"),
+		Flags:          &[]string{"*dryrun"},
+		Request_fields: &[]*FcTemplateJsonCfg{},
+		Reply_fields: &[]*FcTemplateJsonCfg{{
+			Tag:       utils.StringPointer("Allow"),
+			Path:      utils.StringPointer("response.Allow"),
+			Type:      utils.StringPointer("*constant"),
+			Value:     utils.StringPointer("1"),
+			Mandatory: utils.BoolPointer(true),
+		}},
+	}, {
+		ID:             utils.StringPointer("OutboundAUTHDryRun"),
+		Filters:        &[]string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
+		Tenant:         utils.StringPointer("cgrates.org"),
+		Flags:          &[]string{"*dryrun"},
+		Request_fields: &[]*FcTemplateJsonCfg{},
+		Reply_fields: &[]*FcTemplateJsonCfg{{
+			Tag:       utils.StringPointer("Allow"),
+			Path:      utils.StringPointer("response.Allow"),
+			Type:      utils.StringPointer("*constant"),
+			Value:     utils.StringPointer("1"),
+			Mandatory: utils.BoolPointer(false),
+		}},
+	},
+	}
+	expected := &HTTPAgentCfg{
+		ID:             "conecto1",
+		URL:            "/conecto",
+		SessionSConns:  []string{utils.MetaLocalHost},
+		RequestPayload: "*url",
+		ReplyPayload:   "*xml",
+		RequestProcessors: []*RequestProcessor{{
+			ID:            "OutboundAUTHDryRun",
+			Filters:       []string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
+			Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
+			Flags:         utils.FlagsWithParams{"*dryrun": {}},
+			RequestFields: []*FCTemplate{},
+			ReplyFields: []*FCTemplate{{
+				Tag:       "Allow",
+				Path:      "response.Allow",
+				Type:      "*constant",
+				Value:     NewRSRParsersMustCompile("1", utils.InfieldSep),
+				Mandatory: false,
+				Layout:    time.RFC3339,
+			}},
+		}, {
+			ID:            "OutboundAUTHDryRun1",
+			Filters:       []string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
+			Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
+			Flags:         utils.FlagsWithParams{"*dryrun": {}},
+			RequestFields: []*FCTemplate{},
+			ReplyFields: []*FCTemplate{{
+				Tag:       "Allow",
+				Path:      "response.Allow",
+				Type:      "*constant",
+				Value:     NewRSRParsersMustCompile("1", utils.InfieldSep),
+				Mandatory: true,
+				Layout:    time.RFC3339,
+			}},
+		}},
+	}
+	expected.RequestProcessors[0].ReplyFields[0].ComputePath()
+	expected.RequestProcessors[1].ReplyFields[0].ComputePath()
+	if err = initial.appendHTTPAgntProcCfgs(proceses, utils.InfieldSep); err != nil {
 		t.Error(err)
+	} else if !reflect.DeepEqual(expected, initial) {
+		t.Errorf("Expected: %+v , received: %+v", utils.ToJSON(expected), utils.ToJSON(initial))
 	}
 }
 
@@ -415,7 +505,7 @@ func TestHttpAgentCfgAsMapInterface(t *testing.T) {
 				"id": "OutboundAUTHDryRun",
 				"filters": ["*string:~*req.request_type:OutboundAUTH","*string:~*req.Msisdn:497700056231"],
 				"tenant": "cgrates.org",
-				"flags": ["*dryRun"],
+				"flags": ["*dryrun"],
                 "timezone": "",
 				"request_fields":[],
 				"reply_fields":[
@@ -447,7 +537,7 @@ func TestHttpAgentCfgAsMapInterface(t *testing.T) {
 					utils.IDCfg:            "OutboundAUTHDryRun",
 					utils.FiltersCfg:       []string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 					utils.TenantCfg:        "cgrates.org",
-					utils.FlagsCfg:         []string{"*dryRun"},
+					utils.FlagsCfg:         []string{"*dryrun"},
 					utils.TimezoneCfg:      "",
 					utils.RequestFieldsCfg: []map[string]interface{}{},
 					utils.ReplyFieldsCfg: []map[string]interface{}{
@@ -494,296 +584,13 @@ func TestHTTPAgentCfgsClone(t *testing.T) {
 		},
 	}
 	rcv := ban.Clone()
-	if !reflect.DeepEqual(ban, *rcv) {
-		t.Errorf("Expected: %+v\nReceived: %+v", utils.ToJSON(ban), utils.ToJSON(*rcv))
+	if !reflect.DeepEqual(ban, rcv) {
+		t.Errorf("Expected: %+v\nReceived: %+v", utils.ToJSON(ban), utils.ToJSON(rcv))
 	}
-	if (*rcv)[0].SessionSConns[1] = ""; ban[0].SessionSConns[1] != "*conn1" {
+	if rcv[0].SessionSConns[1] = ""; ban[0].SessionSConns[1] != "*conn1" {
 		t.Errorf("Expected clone to not modify the cloned")
 	}
-	if (*rcv)[0].RequestProcessors[0].ID = ""; ban[0].RequestProcessors[0].ID != "OutboundAUTHDryRun" {
+	if rcv[0].RequestProcessors[0].ID = ""; ban[0].RequestProcessors[0].ID != "OutboundAUTHDryRun" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestEqualsHTTPAgentCfgs(t *testing.T) {
-	v1 := HTTPAgentCfgs{
-		{
-			ID:             "RANDOM_ID",
-			URL:            "/url",
-			SessionSConns:  []string{"*localhost"},
-			RequestPayload: "*url",
-			ReplyPayload:   "*xml",
-			RequestProcessors: []*RequestProcessor{
-				{
-					ID:            "OutboundAUTHDryRun",
-					Filters:       []string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
-					Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
-					Flags:         utils.FlagsWithParams{utils.MetaDryRun: {}},
-					RequestFields: []*FCTemplate{},
-					ReplyFields: []*FCTemplate{
-						{
-							Tag:       "Allow",
-							Path:      "response.Allow",
-							Type:      "*constant",
-							Value:     NewRSRParsersMustCompile("1", utils.InfieldSep),
-							Mandatory: true,
-							Layout:    time.RFC3339,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	v2 := HTTPAgentCfgs{
-		{
-			ID:             "RANDOM_ID2",
-			URL:            "/url",
-			SessionSConns:  []string{"*localhost"},
-			RequestPayload: "*url",
-			ReplyPayload:   "*xml",
-			RequestProcessors: []*RequestProcessor{
-				{
-					ID:            "OutboundAUTHDryRun",
-					Filters:       []string{"*string:*req.request_type:OutboundAUTH", "*string:*req.Msisdn:497700056231"},
-					Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
-					Flags:         utils.FlagsWithParams{utils.MetaDryRun: {}},
-					RequestFields: []*FCTemplate{},
-					ReplyFields: []*FCTemplate{
-						{
-							Tag:       "Allow",
-							Path:      "response.Allow",
-							Type:      "*constant",
-							Value:     NewRSRParsersMustCompile("1", utils.InfieldSep),
-							Mandatory: true,
-							Layout:    time.RFC3339,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	if equalsHTTPAgentCfgs(v1, v2) {
-		t.Error("HTTPAgents should not match")
-	}
-
-	v2[0].ID = "RANDOM_ID"
-
-	if !equalsHTTPAgentCfgs(v1, v2) {
-		t.Error("HTTPAgents should match")
-	}
-
-	v2 = HTTPAgentCfgs{}
-	if equalsHTTPAgentCfgs(v1, v2) {
-		t.Error("HTTPAgents should not match")
-	}
-}
-
-func TestGetHttpAgentJsonCfg(t *testing.T) {
-	d := []*HttpAgentJsonCfg{
-		{
-			Id:             utils.StringPointer("ID_1"),
-			Url:            utils.StringPointer("/url"),
-			Sessions_conns: &[]string{"*localhost"},
-		},
-	}
-
-	expected := &HttpAgentJsonCfg{
-		Id:             utils.StringPointer("ID_1"),
-		Url:            utils.StringPointer("/url"),
-		Sessions_conns: &[]string{"*localhost"},
-	}
-
-	rcv, idx := getHttpAgentJsonCfg(d, "ID_1")
-	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", expected, rcv)
-	} else if idx != 0 {
-		t.Errorf("Expected %v \n but received \n %v", 0, idx)
-	}
-
-	rcv, idx = getHttpAgentJsonCfg(d, "ID_2")
-	if rcv != nil {
-		t.Errorf("Expected %v \n but received \n %v", expected, rcv)
-	} else if idx != -1 {
-		t.Errorf("Expected %v \n but received \n %v", 0, idx)
-	}
-}
-
-func TestGetHttpAgentCfg(t *testing.T) {
-	d := HTTPAgentCfgs{
-		{
-			ID:            "ID_1",
-			URL:           "/url",
-			SessionSConns: []string{"*localhost"},
-		},
-	}
-
-	expected := &HTTPAgentCfg{
-		ID:            "ID_1",
-		URL:           "/url",
-		SessionSConns: []string{"*localhost"},
-	}
-
-	rcv := getHTTPAgentCfg(d, "ID_1")
-	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", expected, rcv)
-	}
-
-	expected = new(HTTPAgentCfg)
-	rcv = getHTTPAgentCfg(d, "ID_2")
-	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", expected, rcv)
-	}
-}
-
-func TestDiffHttpAgentJson(t *testing.T) {
-	var d *HttpAgentJsonCfg
-
-	v1 := &HTTPAgentCfg{
-		ID:             "http_agent",
-		URL:            "http_url",
-		SessionSConns:  []string{"*localhost"},
-		RequestPayload: "request_payload",
-		ReplyPayload:   "reply_payload",
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID: "req_processors",
-			},
-		},
-	}
-
-	v2 := &HTTPAgentCfg{
-		ID:                "http_agent2",
-		URL:               "http_url2",
-		SessionSConns:     []string{"*birpc"},
-		RequestPayload:    "request_payload2",
-		ReplyPayload:      "reply_payload2",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	expected := &HttpAgentJsonCfg{
-		Id:                 utils.StringPointer("http_agent2"),
-		Url:                utils.StringPointer("http_url2"),
-		Sessions_conns:     &[]string{"*birpc"},
-		Request_payload:    utils.StringPointer("request_payload2"),
-		Reply_payload:      utils.StringPointer("reply_payload2"),
-		Request_processors: &[]*ReqProcessorJsnCfg{},
-	}
-
-	rcv := diffHttpAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &HttpAgentJsonCfg{
-		Request_processors: &[]*ReqProcessorJsnCfg{},
-	}
-	rcv = diffHttpAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffHttpAgentsJsonCfg(t *testing.T) {
-	var d *[]*HttpAgentJsonCfg
-
-	v1 := HTTPAgentCfgs{
-		{
-			ID:             "http_agent",
-			URL:            "http_url",
-			SessionSConns:  []string{"*localhost"},
-			RequestPayload: "request_payload",
-			ReplyPayload:   "reply_payload",
-			RequestProcessors: []*RequestProcessor{
-				{
-					ID: "req_processors",
-				},
-			},
-		},
-	}
-
-	v2 := HTTPAgentCfgs{
-		{
-			ID:                "http_agent2",
-			URL:               "http_url2",
-			SessionSConns:     []string{"*birpc"},
-			RequestPayload:    "request_payload2",
-			ReplyPayload:      "reply_payload2",
-			RequestProcessors: []*RequestProcessor{},
-		},
-	}
-
-	expected := &[]*HttpAgentJsonCfg{
-		{
-			Id:                 utils.StringPointer("http_agent2"),
-			Url:                utils.StringPointer("http_url2"),
-			Sessions_conns:     &[]string{"*birpc"},
-			Request_payload:    utils.StringPointer("request_payload2"),
-			Reply_payload:      utils.StringPointer("reply_payload2"),
-			Request_processors: &[]*ReqProcessorJsnCfg{},
-		},
-	}
-
-	rcv := diffHttpAgentsJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = &[]*HttpAgentJsonCfg{
-		{
-			Id: utils.StringPointer("http_agent2"),
-		},
-	}
-
-	rcv = diffHttpAgentsJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = &[]*HttpAgentJsonCfg{
-		{
-			Id: utils.StringPointer("http_agent2"),
-		},
-	}
-
-	v1 = v2
-	expected = &[]*HttpAgentJsonCfg{
-		{
-			Id: utils.StringPointer("http_agent2"),
-		},
-	}
-	rcv = diffHttpAgentsJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestHttpAgentCloneSection(t *testing.T) {
-	httpCfg := HTTPAgentCfgs{
-		{
-			ID:             "http_agent",
-			URL:            "http_url",
-			SessionSConns:  []string{"*localhost"},
-			RequestPayload: "request_payload",
-			ReplyPayload:   "reply_payload",
-		},
-	}
-
-	exp := &HTTPAgentCfgs{
-		{
-			ID:                "http_agent",
-			URL:               "http_url",
-			SessionSConns:     []string{"*localhost"},
-			RequestPayload:    "request_payload",
-			ReplyPayload:      "reply_payload",
-			RequestProcessors: []*RequestProcessor{},
-		},
-	}
-
-	rcv := httpCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

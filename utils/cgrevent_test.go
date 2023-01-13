@@ -24,6 +24,25 @@ import (
 	"time"
 )
 
+func TestCGREventHasField(t *testing.T) {
+	//empty check
+	cgrEvent := new(CGREvent)
+	rcv := cgrEvent.HasField("")
+	if rcv {
+		t.Error("Expecting: false, received: ", rcv)
+	}
+	//normal check
+	cgrEvent = &CGREvent{
+		Event: map[string]interface{}{
+			Usage: 20 * time.Second,
+		},
+	}
+	rcv = cgrEvent.HasField("Usage")
+	if !rcv {
+		t.Error("Expecting: true, received: ", rcv)
+	}
+}
+
 func TestCGREventCheckMandatoryFields(t *testing.T) {
 	//empty check
 	cgrEvent := new(CGREvent)
@@ -128,7 +147,7 @@ func TestCGREventFieldAsTime(t *testing.T) {
 	if answ != se.Event[AnswerTime] {
 		t.Errorf("Expecting: %+v, received: %+v", se.Event[AnswerTime], answ)
 	}
-	_, err = seErr.FieldAsTime(AnswerTime, "CET")
+	answ, err = seErr.FieldAsTime(AnswerTime, "CET")
 	if err != ErrNotFound {
 		t.Error(err)
 	}
@@ -175,10 +194,77 @@ func TestCGREventFieldAsString(t *testing.T) {
 	}
 }
 
+func TestCGREventFieldAsFloat64(t *testing.T) {
+	se := &CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "supplierEvent1",
+		Event: map[string]interface{}{
+			AnswerTime:         time.Now(),
+			"supplierprofile1": "Supplier",
+			"UsageInterval":    "54.2",
+			"PddInterval":      "1s",
+			"Weight":           20.0,
+		},
+	}
+	answ, err := se.FieldAsFloat64("UsageInterval")
+	if err != nil {
+		t.Error(err)
+	}
+	if answ != float64(54.2) {
+		t.Errorf("Expecting: %+v, received: %+v", se.Event["UsageInterval"], answ)
+	}
+	answ, err = se.FieldAsFloat64("Weight")
+	if err != nil {
+		t.Error(err)
+	}
+	if answ != float64(20.0) {
+		t.Errorf("Expecting: %+v, received: %+v", se.Event["Weight"], answ)
+	}
+	answ, err = se.FieldAsFloat64("PddInterval")
+	if err == nil || err.Error() != `strconv.ParseFloat: parsing "1s": invalid syntax` {
+		t.Errorf("Expected %s, received %s", `strconv.ParseFloat: parsing "1s": invalid syntax`, err)
+	}
+	if answ != 0 {
+		t.Errorf("Expecting: %+v, received: %+v", 0, answ)
+	}
+
+	if _, err := se.FieldAsFloat64(AnswerTime); err == nil || !strings.HasPrefix(err.Error(), "cannot convert field") {
+		t.Errorf("Unexpected error : %+v", err)
+	}
+	if _, err := se.FieldAsFloat64(AccountField); err == nil || err.Error() != ErrNotFound.Error() {
+		t.Errorf("Expected %s, received %s", ErrNotFound, err)
+	}
+	// }
+}
+
+// }
+func TestCGREventTenantID(t *testing.T) {
+	//empty check
+	cgrEvent := new(CGREvent)
+	rcv := cgrEvent.TenantID()
+	eOut := ":"
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting: %+v, received: %+v", eOut, rcv)
+	}
+	//normal check
+	cgrEvent = &CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "supplierEvent1",
+	}
+	rcv = cgrEvent.TenantID()
+	eOut = "cgrates.org:supplierEvent1"
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting: %+v, received: %+v", eOut, rcv)
+	}
+
+}
+
 func TestCGREventClone(t *testing.T) {
+	now := time.Now()
 	ev := &CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "supplierEvent1",
+		Time:   &now,
 		Event: map[string]interface{}{
 			AnswerTime:         time.Now(),
 			"supplierprofile1": "Supplier",
@@ -193,6 +279,105 @@ func TestCGREventClone(t *testing.T) {
 	cloned := ev.Clone()
 	if !reflect.DeepEqual(ev, cloned) {
 		t.Errorf("Expecting: %+v, received: %+v", ev, cloned)
+	}
+	if cloned.Time == ev.Time {
+		t.Errorf("Expecting: different pointer but received: %+v", cloned.Time)
+	}
+}
+
+func TestCGREventconsumeRoutePaginator(t *testing.T) {
+	//empty check
+	var opts map[string]interface{}
+	rcv, err := GetRoutePaginatorFromOpts(opts)
+	if err != nil {
+		t.Error(err)
+	}
+	var eOut Paginator
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting:  %+v, received: %+v", eOut, rcv)
+	}
+	opts = nil
+	rcv, err = GetRoutePaginatorFromOpts(opts)
+	if err != nil {
+		t.Error(err)
+	}
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting:  %+v, received: %+v", eOut, rcv)
+	}
+	//normal check
+	opts = map[string]interface{}{
+		OptsRoutesLimit:  18,
+		OptsRoutesOffset: 20,
+	}
+
+	eOut = Paginator{
+		Limit:  IntPointer(18),
+		Offset: IntPointer(20),
+	}
+	rcv, err = GetRoutePaginatorFromOpts(opts)
+	if err != nil {
+		t.Error(err)
+	}
+	//check if *rouLimit and *rouOffset was deleted
+	if _, has := opts[OptsRoutesLimit]; has {
+		t.Errorf("*rouLimit wasn't deleted")
+	} else if _, has := opts[OptsRoutesOffset]; has {
+		t.Errorf("*rouOffset wasn't deleted")
+	}
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting:  %+v, received: %+v", eOut, rcv)
+	}
+	//check without *rouLimit, but with *rouOffset
+	opts = map[string]interface{}{
+		OptsRoutesOffset: 20,
+	}
+
+	eOut = Paginator{
+		Offset: IntPointer(20),
+	}
+	rcv, err = GetRoutePaginatorFromOpts(opts)
+	if err != nil {
+		t.Error(err)
+	}
+	//check if *rouLimit and *rouOffset was deleted
+	if _, has := opts[OptsRoutesLimit]; has {
+		t.Errorf("*rouLimit wasn't deleted")
+	} else if _, has := opts[OptsRoutesOffset]; has {
+		t.Errorf("*rouOffset wasn't deleted")
+	}
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting:  %+v, received: %+v", eOut, rcv)
+	}
+	//check with notAnInt at *rouLimit
+	opts = map[string]interface{}{
+		OptsRoutesLimit: "Not an int",
+	}
+	eOut = Paginator{}
+	rcv, err = GetRoutePaginatorFromOpts(opts)
+	if err == nil {
+		t.Error("Expected error")
+	}
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting:  %+v, received: %+v", eOut, rcv)
+	}
+	//check with notAnInt at and *rouOffset
+	opts = map[string]interface{}{
+		OptsRoutesOffset: "Not an int",
+	}
+	eOut = Paginator{}
+	rcv, err = GetRoutePaginatorFromOpts(opts)
+	if err == nil {
+		t.Error("Expected error")
+	}
+	if !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting:  %+v, received: %+v", eOut, rcv)
+	}
+}
+
+func TestCGREventconsumeRoutePaginatorCase1(t *testing.T) {
+	opts := map[string]interface{}{}
+	if _, err := GetRoutePaginatorFromOpts(opts); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -215,6 +400,115 @@ func TestCGREventOptAsInt64(t *testing.T) {
 	errExpect := ErrNotFound
 	if _, err = ev.OptAsInt64("nonExistingKey"); err == nil || err != errExpect {
 		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", errExpect, err)
+	}
+}
+
+func TestCGREventFieldAsInt64(t *testing.T) {
+	se := &CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "supplierEvent1",
+		Event: map[string]interface{}{
+			AnswerTime:         time.Now(),
+			"supplierprofile1": "Supplier",
+			"UsageInterval":    "54",
+			"PddInterval":      "1s",
+			"Weight":           20,
+		},
+	}
+	answ, err := se.FieldAsInt64("UsageInterval")
+	if err != nil {
+		t.Error(err)
+	}
+	if answ != int64(54) {
+		t.Errorf("Expecting: %+v, received: %+v", se.Event["UsageInterval"], answ)
+	}
+	answ, err = se.FieldAsInt64("Weight")
+	if err != nil {
+		t.Error(err)
+	}
+	if answ != int64(20) {
+		t.Errorf("Expecting: %+v, received: %+v", se.Event["Weight"], answ)
+	}
+	answ, err = se.FieldAsInt64("PddInterval")
+	if err == nil || err.Error() != `strconv.ParseInt: parsing "1s": invalid syntax` {
+		t.Errorf("Expected %s, received %s", `strconv.ParseInt: parsing "1s": invalid syntax`, err)
+	}
+	if answ != 0 {
+		t.Errorf("Expecting: %+v, received: %+v", 0, answ)
+	}
+
+	if _, err := se.FieldAsInt64(AnswerTime); err == nil || !strings.HasPrefix(err.Error(), "cannot convert field") {
+		t.Errorf("Unexpected error : %+v", err)
+	}
+	if _, err := se.FieldAsInt64(AccountField); err == nil || err.Error() != ErrNotFound.Error() {
+		t.Errorf("Expected %s, received %s", ErrNotFound, err)
+	}
+	// }
+}
+
+func TestCGREventOptAsStringEmpty(t *testing.T) {
+	ev := &CGREvent{}
+
+	expstr := ""
+	experr := ErrNotFound
+	received, err := ev.OptAsString("testString")
+
+	if !reflect.DeepEqual(received, expstr) {
+		t.Errorf("\nExpected: %q, \nReceived: %q", expstr, received)
+	}
+	if err == nil || err != experr {
+		t.Errorf("\nExpected: %q, \nReceived: %q", experr, err)
+	}
+}
+
+func TestCGREventOptAsString(t *testing.T) {
+	ev := &CGREvent{
+		APIOpts: map[string]interface{}{
+			"testKey": 13,
+		},
+	}
+
+	received, err := ev.OptAsString("testKey")
+	if err != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, err)
+	}
+	expected := "13"
+
+	if received != expected {
+		t.Errorf("\nExpected: %q, \nReceived: %q", expected, received)
+	}
+}
+
+func TestCGREventOptAsDurationEmpty(t *testing.T) {
+	ev := &CGREvent{}
+
+	var expdur time.Duration
+	experr := ErrNotFound
+	received, err := ev.OptAsDuration("testString")
+
+	if !reflect.DeepEqual(received, expdur) {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", expdur, received)
+	}
+	if err == nil || err != experr {
+		t.Errorf("\nExpected: %q, \nReceived: %q", experr, err)
+	}
+}
+
+func TestCGREventOptAsDuration(t *testing.T) {
+	ev := &CGREvent{
+		APIOpts: map[string]interface{}{
+			"testKey": 30,
+		},
+	}
+
+	received, err := ev.OptAsDuration("testKey")
+	if err != nil {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", nil, err)
+	}
+	expected := 30 * time.Nanosecond
+
+	if received != expected {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", expected, received)
 	}
 }
 
@@ -328,84 +622,40 @@ func TestNMAsCGREvent(t *testing.T) {
 	}
 	if cgrEv := NMAsCGREvent(nM, "cgrates.org",
 		NestingSep, MapStorage{}); cgrEv.Tenant != "cgrates.org" ||
+		cgrEv.Time == nil ||
 		!reflect.DeepEqual(eEv, cgrEv.Event) {
 		t.Errorf("expecting: %+v, \nreceived: %+v", ToJSON(eEv), ToJSON(cgrEv.Event))
 	}
 }
 
-func TestCGREventSetCloneable(t *testing.T) {
-	cgrEv := &CGREvent{
-		clnb: false,
-	}
-
-	cgrEv.SetCloneable(true)
-	if !cgrEv.clnb {
-		t.Error("Expected clnb to be set to true")
-	}
-}
-
 func TestCGREventRPCClone(t *testing.T) {
-	cgrEv := &CGREvent{
+	att := &CGREvent{
 		Tenant: "cgrates.org",
-		ID:     "testID",
+		ID:     "234",
+		clnb:   false,
+		Time:   TimePointer(time.Date(2013, 12, 30, 15, 0, 1, 0, time.UTC)),
 		Event: map[string]interface{}{
-			AnswerTime:         nil,
-			"supplierprofile1": "Supplier",
-			"UsageInterval":    "54.2",
-			"PddInterval":      "1s",
-			"Weight":           20.0,
+			"key": "value",
 		},
 		APIOpts: map[string]interface{}{
-			"testKey": 12,
-		},
-		clnb: false, //first make it non clonable
-	}
-
-	rcv, err := cgrEv.RPCClone()
-	if err != nil {
-		t.Error(err)
-	}
-
-	if !reflect.DeepEqual(cgrEv, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", cgrEv, rcv)
-	}
-
-	cgrEv.clnb = true
-	rcv, err = cgrEv.RPCClone()
-	if err != nil {
-		t.Error(err)
-	}
-	exp := &CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			AnswerTime:         nil,
-			"supplierprofile1": "Supplier",
-			"UsageInterval":    "54.2",
-			"PddInterval":      "1s",
-			"Weight":           20.0,
-		},
-		APIOpts: map[string]interface{}{
-			"testKey": 12,
-		},
-		clnb: false,
-	}
-	if !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", exp, rcv.(*CGREvent))
-	}
-}
-
-func TestHasField(t *testing.T) {
-	ev := &CGREvent{
-		Event: map[string]interface{}{
-			"supplierprofile1": "Supplier",
+			"rand": "we",
 		},
 	}
 
-	exp := true
-
-	if rcv := ev.HasField("supplierprofile1"); !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n received %v", exp, rcv)
+	if rec, _ := att.RPCClone(); !reflect.DeepEqual(rec, att) {
+		t.Errorf("expected %v and received %v ", ToJSON(att), ToJSON(rec))
 
 	}
+
+	att.SetCloneable(true)
+	if att.clnb != true {
+		t.Error("expected true")
+	}
+	rec, _ := att.RPCClone()
+	att.SetCloneable(false)
+	if !reflect.DeepEqual(rec, att) {
+		t.Errorf("expected %v and received %v ", att, rec)
+
+	}
+
 }

@@ -25,10 +25,9 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -157,7 +156,7 @@ func register(req *http.Request) (*json.RawMessage, error) {
 			return sReq.Id, err
 		}
 		for _, id := range args.IDs {
-			if err = engine.Cache.Remove(context.TODO(), utils.CacheDispatcherHosts, utils.ConcatenatedKey(args.Tenant, id), true, utils.NonTransactional); err != nil {
+			if err = engine.Cache.Remove(utils.CacheDispatcherHosts, utils.ConcatenatedKey(args.Tenant, id), true, utils.NonTransactional); err != nil {
 				utils.Logger.Warning(fmt.Sprintf("<%s> Failed to remove DispatcherHost <%s> from cache because: %s",
 					utils.RegistrarC, id, err))
 				hasErrors = true
@@ -172,7 +171,7 @@ func register(req *http.Request) (*json.RawMessage, error) {
 		}
 
 		for _, dH := range dH {
-			if err = engine.Cache.Set(context.TODO(), utils.CacheDispatcherHosts, dH.TenantID(), dH, nil,
+			if err = engine.Cache.Set(utils.CacheDispatcherHosts, dH.TenantID(), dH, nil,
 				true, utils.NonTransactional); err != nil {
 				utils.Logger.Warning(fmt.Sprintf("<%s> Failed to set DispatcherHost <%s> in cache because: %s",
 					utils.RegistrarC, dH.TenantID(), err))
@@ -190,16 +189,16 @@ func register(req *http.Request) (*json.RawMessage, error) {
 			return sReq.Id, err
 		}
 		rpcConns := config.CgrConfig().RPCConns()
-		config.CgrConfig().LockSections(config.RPCConnsJSON)
+		config.CgrConfig().LockSections(config.RPCConnsJsonName)
 		for connID := range config.RemoveRPCCons(rpcConns, utils.NewStringSet(args.IDs)) {
-			if err = engine.Cache.Remove(context.TODO(), utils.CacheRPCConnections, connID,
+			if err = engine.Cache.Remove(utils.CacheRPCConnections, connID,
 				true, utils.NonTransactional); err != nil {
 				utils.Logger.Warning(fmt.Sprintf("<%s> Failed to remove connection <%s> in cache because: %s",
 					utils.RegistrarC, connID, err))
 				hasErrors = true
 			}
 		}
-		config.CgrConfig().UnlockSections(config.RPCConnsJSON)
+		config.CgrConfig().UnlockSections(config.RPCConnsJsonName)
 	case utils.RegistrarSv1RegisterRPCHosts:
 		dH, err := unmarshallRegisterArgs(req, *sReq.Params)
 		if err != nil {
@@ -210,16 +209,16 @@ func register(req *http.Request) (*json.RawMessage, error) {
 			cfgHosts[dH.ID] = dH.RemoteHost
 		}
 		rpcConns := config.CgrConfig().RPCConns()
-		config.CgrConfig().LockSections(config.RPCConnsJSON)
+		config.CgrConfig().LockSections(config.RPCConnsJsonName)
 		for connID := range config.UpdateRPCCons(rpcConns, cfgHosts) {
-			if err = engine.Cache.Remove(context.TODO(), utils.CacheRPCConnections, connID,
+			if err = engine.Cache.Remove(utils.CacheRPCConnections, connID,
 				true, utils.NonTransactional); err != nil {
 				utils.Logger.Warning(fmt.Sprintf("<%s> Failed to remove connection <%s> in cache because: %s",
 					utils.RegistrarC, connID, err))
 				hasErrors = true
 			}
 		}
-		config.CgrConfig().UnlockSections(config.RPCConnsJSON)
+		config.CgrConfig().UnlockSections(config.RPCConnsJsonName)
 	}
 	if hasErrors {
 		return sReq.Id, utils.ErrPartiallyExecuted
@@ -249,7 +248,7 @@ func getConnPort(cfg *config.CGRConfig, transport string, tls bool) (port string
 		} else {
 			address = cfg.ListenCfg().HTTPListen
 		}
-		extraPath = cfg.HTTPCfg().JsonRPCURL
+		extraPath = cfg.HTTPCfg().HTTPJsonRPCURL
 	case rpcclient.BiRPCJSON:
 		address = cfg.SessionSCfg().ListenBijson
 	case rpcclient.BiRPCGOB:

@@ -255,13 +255,13 @@ flags
 	**\*none**
 		Disable transfering the request from *Diameter* to *CGRateS* side. Used mostly to pasively answer *Diameter* requests or troubleshoot (mostly in combination with *\*log* flag).
 
-	**\*dryRun**
+	**\*dryrun**
 		Together with not transfering the request on CGRateS side will also log the *Diameter* request/reply, useful for troubleshooting.
 
 	**\*auth**
 		Sends the request for authorization on CGRateS.
 
-		Auxiliary flags available: **\*attributes**, **\*thresholds**, **\*stats**, **\*resources**, **\*accounts**, **\*routes**, **\*rouIgnoreErrors**, **\*routesEventCost**, **\*rouMaxCost** which are used to influence the auth behavior on CGRateS side. More info on that can be found on the **SessionS** component's API behavior.
+		Auxiliary flags available: **\*attributes**, **\*thresholds**, **\*stats**, **\*resources**, **\*accounts**, **\*routes**, **\*routes_ignore_errors**, **\*routes_event_cost**, **\*routes_maxcost** which are used to influence the auth behavior on CGRateS side. More info on that can be found on the **SessionS** component's API behavior.
 
 	**\*initiate**
 		Initiates a session out of request on CGRateS side.
@@ -281,7 +281,7 @@ flags
 	**\*message**
 		Process the request as individual message charging on CGRateS side.
 
-		Auxiliary flags available: **\*attributes**, **\*thresholds**, **\*stats**, **\*resources**, **\*accounts**, **\*routes**, **\*rouIgnoreErrors**, **\*routesEventCost**, **\*rouMaxCost** which are used to influence the behavior on CGRateS side.
+		Auxiliary flags available: **\*attributes**, **\*thresholds**, **\*stats**, **\*resources**, **\*accounts**, **\*routes**, **\*routes_ignore_errors**, **\*routes_event_cost**, **\*routes_maxcost** which are used to influence the behavior on CGRateS side.
 
 
 	**\*event**
@@ -332,10 +332,10 @@ type
 	**\*group**
 		Writes out the variable value, postpending to the list of variables with the same path
 
-	**\*usageDifference**
+	**\*usage_difference**
 		Calculates the usage difference between two arguments passed in the *value*. Requires 2 arguments: *$stopTime;$startTime*
 
-	**\*ccUsage**
+	**\*cc_usage**
 		Calculates the usage out of *CallControl* message. Requires 3 arguments: *$reqNumber;$usedCCTime;$debitInterval*
 
 	**\*sum**
@@ -344,7 +344,7 @@ type
 	**\*difference**
 		Calculates the difference between all arguments passed within *value*. Possible value types are (in this order): duration, time, float, int.
 
-	**\*valueExponent**
+	**\*value_exponent**
 		Calculates the exponent of a value. It requires two values: *$val;$exp*
 
 	**\*template**

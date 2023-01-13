@@ -13,8 +13,21 @@
 	"db_type": "*internal",	
 },
 
-"rates": {
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+
+"rals": {
 	"enabled": true,
+	"thresholds_conns": ["*internal"],
+},
+
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["*internal"],
 },
 
 
@@ -67,14 +80,15 @@
 	"routes_conns": ["*internal"],
 	"resources_conns": ["*internal"],
 	"attributes_conns": ["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

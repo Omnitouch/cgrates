@@ -22,21 +22,21 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewSIPAgent returns the sip Agent
 func NewSIPAgent(cfg *config.CGRConfig, filterSChan chan *engine.FilterS,
-	connMgr *engine.ConnManager,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &SIPAgent{
 		cfg:         cfg,
 		filterSChan: filterSChan,
+		shdChan:     shdChan,
 		connMgr:     connMgr,
 		srvDep:      srvDep,
 	}
@@ -47,6 +47,7 @@ type SIPAgent struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	filterSChan chan *engine.FilterS
+	shdChan     *utils.SyncedChan
 
 	sip     *agents.SIPAgent
 	connMgr *engine.ConnManager
@@ -56,15 +57,13 @@ type SIPAgent struct {
 }
 
 // Start should handle the sercive start
-func (sip *SIPAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (sip *SIPAgent) Start() (err error) {
 	if sip.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, sip.filterSChan); err != nil {
-		return
-	}
+	filterS := <-sip.filterSChan
+	sip.filterSChan <- filterS
 
 	sip.Lock()
 	defer sip.Unlock()
@@ -75,19 +74,17 @@ func (sip *SIPAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (err
 			utils.SIPAgent, err))
 		return
 	}
-	go sip.listenAndServe(shtDwn)
+	go func() {
+		if err = sip.sip.ListenAndServe(); err != nil {
+			utils.Logger.Err(fmt.Sprintf("<%s> error: <%s>", utils.SIPAgent, err.Error()))
+			sip.shdChan.CloseOnce() // stop the engine here
+		}
+	}()
 	return
 }
 
-func (sip *SIPAgent) listenAndServe(shtDwn context.CancelFunc) {
-	if err := sip.sip.ListenAndServe(); err != nil {
-		utils.Logger.Err(fmt.Sprintf("<%s> error: <%s>", utils.SIPAgent, err.Error()))
-		shtDwn() // stop the engine here
-	}
-}
-
 // Reload handles the change of config
-func (sip *SIPAgent) Reload(_ *context.Context, shtDwn context.CancelFunc) (err error) {
+func (sip *SIPAgent) Reload() (err error) {
 	if sip.oldListen == sip.cfg.SIPAgentCfg().Listen {
 		return
 	}
@@ -96,7 +93,12 @@ func (sip *SIPAgent) Reload(_ *context.Context, shtDwn context.CancelFunc) (err 
 	sip.oldListen = sip.cfg.SIPAgentCfg().Listen
 	sip.sip.InitStopChan()
 	sip.Unlock()
-	go sip.listenAndServe(shtDwn)
+	go func() {
+		if err := sip.sip.ListenAndServe(); err != nil {
+			utils.Logger.Err(fmt.Sprintf("<%s> error: <%s>", utils.SIPAgent, err.Error()))
+			sip.shdChan.CloseOnce() // stop the engine here
+		}
+	}()
 	return
 }
 

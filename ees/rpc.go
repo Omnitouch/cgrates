@@ -23,10 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewRpcEE(cfg *config.EventExporterCfg, dc *utils.SafeMapStorage,
@@ -67,11 +66,11 @@ func (e *RPCee) Connect() (err error) {
 	return
 }
 
-func (e *RPCee) ExportEvent(ctx *context.Context, args, _ interface{}) (err error) {
+func (e *RPCee) ExportEvent(args interface{}, _ string) (err error) {
 	e.Lock()
 	defer e.Unlock()
 	var rply string
-	return e.connMgr.Call(ctx, e.connIDs, e.serviceMethod, args, &rply)
+	return e.connMgr.Call(e.connIDs, nil, e.serviceMethod, args, &rply)
 }
 
 func (e *RPCee) Close() (err error) {
@@ -84,9 +83,14 @@ func (e *RPCee) Close() (err error) {
 func (e *RPCee) GetMetrics() (mp *utils.SafeMapStorage) {
 	return e.dc
 }
-func (e *RPCee) ExtraData(ev *utils.CGREvent) interface{} { return nil }
 
 func (e *RPCee) PrepareMap(mp *utils.CGREvent) (interface{}, error) {
+	if mp == nil {
+		return nil, nil
+	}
+	if mp.APIOpts == nil {
+		mp.APIOpts = make(map[string]interface{})
+	}
 	for i, v := range e.Cfg().Opts.RPCAPIOpts {
 		mp.APIOpts[i] = v
 	}

@@ -19,8 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // UpdateReplicationFilters will set the connID in cache
@@ -33,13 +32,13 @@ func UpdateReplicationFilters(objType, objID, connID string) {
 }
 
 // replicate will call Set/Remove APIs on ReplicatorSv1
-func replicate(ctx *context.Context, connMgr *ConnManager, connIDs []string, filtered bool, objType, objID, method string, args interface{}) (err error) {
+func replicate(connMgr *ConnManager, connIDs []string, filtered bool, objType, objID, method string, args interface{}) (err error) {
 	// the reply is string for Set/Remove APIs
 	// ignored in favor of the error
 	var reply string
 	if !filtered {
 		// is not partial so send to all defined connections
-		return utils.CastRPCErr(connMgr.Call(ctx, connIDs, method, args, &reply))
+		return utils.CastRPCErr(connMgr.Call(connIDs, nil, method, args, &reply))
 	}
 	// is partial so get all the replicationHosts from cache based on object Type and ID
 	// alp_cgrates.org:ATTR1
@@ -49,19 +48,19 @@ func replicate(ctx *context.Context, connMgr *ConnManager, connIDs []string, fil
 		rplcHostIDs.Add(hostID.(string))
 	}
 	// using the replication hosts call the method
-	return utils.CastRPCErr(connMgr.CallWithConnIDs(connIDs, ctx, rplcHostIDs,
+	return utils.CastRPCErr(connMgr.CallWithConnIDs(connIDs, rplcHostIDs,
 		method, args, &reply))
 }
 
 // replicateMultipleIDs will do the same thing as replicate but uses multiple objectIDs
 // used when setting the LoadIDs
-func replicateMultipleIDs(ctx *context.Context, connMgr *ConnManager, connIDs []string, filtered bool, objType string, objIDs []string, method string, args interface{}) (err error) {
+func replicateMultipleIDs(connMgr *ConnManager, connIDs []string, filtered bool, objType string, objIDs []string, method string, args interface{}) (err error) {
 	// the reply is string for Set/Remove APIs
 	// ignored in favor of the error
 	var reply string
 	if !filtered {
 		// is not partial so send to all defined connections
-		return utils.CastRPCErr(connMgr.Call(ctx, connIDs, method, args, &reply))
+		return utils.CastRPCErr(connMgr.Call(connIDs, nil, method, args, &reply))
 	}
 	// is partial so get all the replicationHosts from cache based on object Type and ID
 	// combine all hosts in a single set so if we receive a get with one ID in list
@@ -74,6 +73,6 @@ func replicateMultipleIDs(ctx *context.Context, connMgr *ConnManager, connIDs []
 		}
 	}
 	// using the replication hosts call the method
-	return utils.CastRPCErr(connMgr.CallWithConnIDs(connIDs, ctx, rplcHostIDs,
+	return utils.CastRPCErr(connMgr.CallWithConnIDs(connIDs, rplcHostIDs,
 		method, args, &reply))
 }

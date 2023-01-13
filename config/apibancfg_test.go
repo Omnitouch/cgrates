@@ -21,8 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestAPIBanCfgloadFromJsonCfg(t *testing.T) {
@@ -50,7 +49,9 @@ func TestAPIBanCfgloadFromJsonCfg(t *testing.T) {
 	}
 	if jsnCfg, err := NewCgrJsonCfgFromBytes([]byte(cfgJSONStr)); err != nil {
 		t.Error(err)
-	} else if err = alS.Load(context.Background(), jsnCfg, nil); err != nil {
+	} else if jsnalS, err := jsnCfg.ApiBanCfgJson(); err != nil {
+		t.Error(err)
+	} else if err = alS.loadFromJSONCfg(jsnalS); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, alS) {
 		t.Errorf("Expected: %+v , received: %+v", expected, alS)
@@ -72,9 +73,11 @@ func TestAPIBanCfgAsMapInterface(t *testing.T) {
 	}
 	if jsnCfg, err := NewCgrJsonCfgFromBytes([]byte(cfgJSONStr)); err != nil {
 		t.Error(err)
-	} else if err = alS.Load(context.Background(), jsnCfg, nil); err != nil {
+	} else if jsnalS, err := jsnCfg.ApiBanCfgJson(); err != nil {
 		t.Error(err)
-	} else if rcv := alS.AsMapInterface(""); !reflect.DeepEqual(eMap, rcv) {
+	} else if err = alS.loadFromJSONCfg(jsnalS); err != nil {
+		t.Error(err)
+	} else if rcv := alS.AsMapInterface(); !reflect.DeepEqual(eMap, rcv) {
 		t.Errorf("Expected: %+v\nReceived: %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -90,53 +93,5 @@ func TestAPIBanCfgClone(t *testing.T) {
 	}
 	if rcv.Keys[0] = ""; ban.Keys[0] != "key1" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffAPIBanJsonCfg(t *testing.T) {
-	var d *APIBanJsonCfg
-
-	v1 := &APIBanCfg{
-		Enabled: false,
-		Keys:    []string{"key1", "key2"},
-	}
-
-	v2 := &APIBanCfg{
-		Enabled: true,
-		Keys:    []string{"key3", "key4"},
-	}
-
-	expected := &APIBanJsonCfg{
-		Enabled: utils.BoolPointer(true),
-		Keys:    &[]string{"key3", "key4"},
-	}
-
-	rcv := diffAPIBanJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v2 = v1
-	expected2 := &APIBanJsonCfg{}
-
-	rcv = diffAPIBanJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected2) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
-	}
-}
-
-func TestAPIBanCloneSection(t *testing.T) {
-	apbCfg := &APIBanCfg{
-		Enabled: false,
-		Keys:    []string{"key1", "key2"},
-	}
-
-	exp := &APIBanCfg{
-		Enabled: false,
-		Keys:    []string{"key1", "key2"},
-	}
-	rcv := apbCfg.CloneSection()
-	if !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

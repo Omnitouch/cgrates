@@ -29,11 +29,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 )
 
 var (
@@ -48,6 +47,7 @@ var (
 		testCreateDirectory,
 		testHTTPJsonMapLoadConfig,
 		testHTTPJsonMapResetDataDB,
+		testHTTPJsonMapResetStorDb,
 		testHTTPJsonMapStartEngine,
 		testHTTPJsonMapRPCConn,
 		testHTTPJsonMapStartHTTPServer,
@@ -67,13 +67,19 @@ func TestHTTPJsonMapExport(t *testing.T) {
 func testHTTPJsonMapLoadConfig(t *testing.T) {
 	var err error
 	httpJSONMapCfgPath = path.Join(*dataDir, "conf", "samples", httpJSONMapConfigDir)
-	if httpJSONMapCfg, err = config.NewCGRConfigFromPath(context.Background(), httpJSONMapCfgPath); err != nil {
+	if httpJSONMapCfg, err = config.NewCGRConfigFromPath(httpJSONMapCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testHTTPJsonMapResetDataDB(t *testing.T) {
-	if err := engine.InitDataDB(httpJSONMapCfg); err != nil {
+	if err := engine.InitDataDb(httpJSONMapCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testHTTPJsonMapResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(httpJSONMapCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -106,13 +112,14 @@ func testHTTPJsonMapStartHTTPServer(t *testing.T) {
 }
 
 func testHTTPJsonMapExportEvent(t *testing.T) {
-	eventVoice := &utils.CGREventWithEeIDs{
+	eventVoice := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"HTTPJsonMapExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "voiceEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaVoice,
 				utils.OriginID:     "dsafdsaf",
 				utils.OriginHost:   "192.168.1.1",
@@ -125,26 +132,25 @@ func testHTTPJsonMapExportEvent(t *testing.T) {
 				utils.SetupTime:    time.Unix(1383813745, 0).UTC(),
 				utils.AnswerTime:   time.Unix(1383813746, 0).UTC(),
 				utils.Usage:        10 * time.Second,
-
-				utils.Cost: 1.01,
+				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         1.01,
 				"ExtraFields": map[string]string{"extra1": "val_extra1",
 					"extra2": "val_extra2", "extra3": "val_extra3"},
 			},
 			APIOpts: map[string]interface{}{
-				utils.MetaOriginID:  utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
 				utils.MetaEventType: utils.CDR,
-				utils.RunID:         utils.MetaDefault,
 			},
 		},
 	}
 
-	eventData := &utils.CGREventWithEeIDs{
+	eventData := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"HTTPJsonMapExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "dataEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("abcdef", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaData,
 				utils.OriginID:     "abcdef",
 				utils.OriginHost:   "192.168.1.1",
@@ -157,26 +163,25 @@ func testHTTPJsonMapExportEvent(t *testing.T) {
 				utils.SetupTime:    time.Unix(1383813745, 0).UTC(),
 				utils.AnswerTime:   time.Unix(1383813746, 0).UTC(),
 				utils.Usage:        10 * time.Nanosecond,
-
-				utils.Cost: 0.012,
+				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         0.012,
 				"ExtraFields": map[string]string{"extra1": "val_extra1",
 					"extra2": "val_extra2", "extra3": "val_extra3"},
 			},
 			APIOpts: map[string]interface{}{
-				utils.MetaOriginID:  utils.Sha1("abcdef", time.Unix(1383813745, 0).UTC().String()),
 				utils.MetaEventType: utils.CDR,
-				utils.RunID:         utils.MetaDefault,
 			},
 		},
 	}
 
-	eventSMS := &utils.CGREventWithEeIDs{
+	eventSMS := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"HTTPJsonMapExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "SMSEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("sdfwer", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaSMS,
 				utils.OriginID:     "sdfwer",
 				utils.OriginHost:   "192.168.1.1",
@@ -189,35 +194,31 @@ func testHTTPJsonMapExportEvent(t *testing.T) {
 				utils.SetupTime:    time.Unix(1383813745, 0).UTC(),
 				utils.AnswerTime:   time.Unix(1383813746, 0).UTC(),
 				utils.Usage:        1,
-
-				utils.Cost:    0.15,
-				utils.OrderID: 10,
+				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         0.15,
+				utils.OrderID:      10,
 				"ExtraFields": map[string]string{"extra1": "val_extra1",
 					"extra2": "val_extra2", "extra3": "val_extra3"},
 			},
 			APIOpts: map[string]interface{}{
-				utils.MetaOriginID:  utils.Sha1("sdfwer", time.Unix(1383813745, 0).UTC().String()),
 				utils.MetaEventType: utils.CDR,
-				utils.RunID:         utils.MetaDefault,
 			},
 		},
 	}
 
-	eventSMSNoFields := &utils.CGREventWithEeIDs{
+	eventSMSNoFields := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"HTTPJsonMapExporterWithNoFields"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "SMSEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaSMS,
 				utils.Tenant:       "cgrates.org",
 				utils.Category:     "call",
 				utils.AccountField: "1001",
 				utils.Destination:  "1002",
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()),
 				utils.RunID:        utils.MetaDefault,
 			},
 		},
@@ -229,7 +230,7 @@ func testHTTPJsonMapExportEvent(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	// verify HTTPJsonMap for eventVoice
 	for key, strVal := range map[string]string{
-		utils.MetaOriginID: utils.IfaceAsString(eventVoice.APIOpts[utils.MetaOriginID]),
+		utils.CGRID:        utils.IfaceAsString(eventVoice.Event[utils.CGRID]),
 		utils.ToR:          utils.IfaceAsString(eventVoice.Event[utils.ToR]),
 		utils.Category:     utils.IfaceAsString(eventVoice.Event[utils.Category]),
 		utils.AccountField: utils.IfaceAsString(eventVoice.Event[utils.AccountField]),
@@ -252,7 +253,7 @@ func testHTTPJsonMapExportEvent(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	// verify HTTPJsonMap for eventData
 	for key, strVal := range map[string]string{
-		utils.MetaOriginID: utils.IfaceAsString(eventData.APIOpts[utils.MetaOriginID]),
+		utils.CGRID:        utils.IfaceAsString(eventData.Event[utils.CGRID]),
 		utils.ToR:          utils.IfaceAsString(eventData.Event[utils.ToR]),
 		utils.Category:     utils.IfaceAsString(eventData.Event[utils.Category]),
 		utils.AccountField: utils.IfaceAsString(eventData.Event[utils.AccountField]),
@@ -275,7 +276,7 @@ func testHTTPJsonMapExportEvent(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	// verify HTTPJsonMap for eventSMS
 	for key, strVal := range map[string]string{
-		utils.MetaOriginID: utils.IfaceAsString(eventSMS.APIOpts[utils.MetaOriginID]),
+		utils.CGRID:        utils.IfaceAsString(eventSMS.Event[utils.CGRID]),
 		utils.ToR:          utils.IfaceAsString(eventSMS.Event[utils.ToR]),
 		utils.Category:     utils.IfaceAsString(eventSMS.Event[utils.Category]),
 		utils.AccountField: utils.IfaceAsString(eventSMS.Event[utils.AccountField]),

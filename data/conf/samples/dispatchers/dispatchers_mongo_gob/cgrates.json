@@ -26,7 +26,11 @@
 },
 
 
-
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
 
 "caches":{
 	"partitions": {
@@ -34,13 +38,16 @@
 	},
 },
 
-"rates": {
-	"enabled": true,
+"schedulers": {
+	"enabled": true,				
 },
-
 
 "attributes": {
 	"enabled": true
+},
+
+"rals": {
+	"enabled": true,
 },
 
 
@@ -58,7 +65,7 @@
 "sessions": {
 	"enabled": true,
 	"attributes_conns": ["conn1"],
-	"rates_conns": ["conn1"],
+	"rals_conns": ["conn1"],
 	"resources_conns": ["conn1"],
 	"chargers_conns": ["conn1"],
 	"listen_bijson": ":3014",
@@ -71,7 +78,8 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 }

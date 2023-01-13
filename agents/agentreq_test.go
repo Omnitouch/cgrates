@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/radigo"
 	"github.com/Omnitouch/go-diameter/v4/diam"
 	"github.com/Omnitouch/go-diameter/v4/diam/avp"
@@ -39,12 +39,12 @@ import (
 
 func TestAgReqSetFields(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
 	// populate request, emulating the way will be done in HTTPAgent
-	agReq.Opts.Set([]string{utils.MetaOriginID},
+	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}},
 		utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC).String()))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.ToR, PathSlice: []string{utils.ToR}}, utils.MetaVoice)
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, "1001")
@@ -140,7 +140,7 @@ func TestAgentRequestSetFields(t *testing.T) {
 		utils.Tenant:       "cgrates.org",
 	}
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	ar := NewAgentRequest(utils.MapStorage(req), nil,
 		nil, nil, nil, config.NewRSRParsersMustCompile("", utils.NestingSep),
@@ -488,7 +488,7 @@ func TestAgentRequestSetFields(t *testing.T) {
 
 func TestAgReqMaxCost(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -534,7 +534,7 @@ func TestAgReqParseFieldDiameter(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -587,7 +587,7 @@ func TestAgReqParseFieldRadius(t *testing.T) {
 	//create radiusDataProvider
 	dP := newRADataProvider(pkt)
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -630,7 +630,7 @@ Host: api.cgrates.org
 	//create radiusDataProvider
 	dP, _ := newHTTPUrlDP(req)
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -701,7 +701,7 @@ func TestAgReqParseFieldHttpXml(t *testing.T) {
 	//create radiusDataProvider
 	dP, _ := newHTTPXmlDP(req)
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 
 	filterS := engine.NewFilterS(cfg, nil, dm)
@@ -731,12 +731,13 @@ func TestAgReqParseFieldHttpXml(t *testing.T) {
 
 func TestAgReqEmptyFilter(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
 	// populate request, emulating the way will be done in HTTPAgent
-	agReq.Opts.Set([]string{utils.MetaOriginID}, utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC).String()))
+	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}},
+		utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC).String()))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1001"))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.Destination, PathSlice: []string{utils.Destination}}, utils.NewLeafNode("1002"))
 
@@ -772,7 +773,7 @@ func TestAgReqEmptyFilter(t *testing.T) {
 
 func TestAgReqMetaExponent(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -798,7 +799,7 @@ func TestAgReqMetaExponent(t *testing.T) {
 
 func TestAgReqFieldAsNone(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -836,7 +837,7 @@ func TestAgReqFieldAsNone(t *testing.T) {
 
 func TestAgReqFieldAsNone2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -876,7 +877,7 @@ func TestAgReqFieldAsNone2(t *testing.T) {
 
 func TestAgReqSetField2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -932,7 +933,7 @@ func TestAgReqSetField2(t *testing.T) {
 
 func TestAgReqFieldAsInterface(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -956,7 +957,6 @@ func TestAgReqFieldAsInterface(t *testing.T) {
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.ToR, PathSlice: []string{utils.ToR}}, &utils.DataNode{Type: utils.NMSliceType, Slice: []*utils.DataNode{{Type: utils.NMDataType, Value: &utils.DataLeaf{Data: utils.MetaVoice}}}})
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1001"))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.Destination, PathSlice: []string{utils.Destination}}, utils.NewLeafNode("1002"))
-	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.Tenant, PathSlice: []string{utils.Tenant}}, utils.NewLeafNode("cgrates.org"))
 
 	path := []string{utils.MetaCgreq, utils.Usage}
 	var expVal interface{}
@@ -994,7 +994,7 @@ func TestAgReqFieldAsInterface(t *testing.T) {
 	path = []string{utils.MetaTenant}
 	expVal = "cgrates.org"
 	if rply, err := agReq.FieldAsInterface(path); err != nil {
-		t.Error(err)
+		t.Error()
 	} else if !reflect.DeepEqual(rply, expVal) {
 		t.Errorf("Expected %v , received: %v", utils.ToJSON(expVal), utils.ToJSON(rply))
 	}
@@ -1002,18 +1002,18 @@ func TestAgReqFieldAsInterface(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathCgrReq(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	aqReq := NewAgentRequest(nil, nil, nil, nil, nil, nil,
 		"cgrates.org", utils.EmptyString, filterS, nil)
-	aqReq.Opts.Set([]string{utils.MetaOriginID}, utils.NewLeafNode("CGRATES_ID1"))
+	aqReq.CGRRequest.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}}, utils.NewLeafNode("CGRATES_ID1"))
 	aqReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1002"))
 	aqReq.CGRRequest.Set(&utils.FullPath{Path: utils.AnswerTime, PathSlice: []string{utils.AnswerTime}}, utils.NewLeafNode(time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC)))
 
 	path := []string{utils.MetaCgreq}
 	expVal := utils.NewOrderedNavigableMap()
-
+	expVal.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}}, &utils.DataLeaf{Data: "CGRATES_ID1"})
 	expVal.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, &utils.DataLeaf{Data: "1002"})
 	expVal.Set(&utils.FullPath{Path: utils.AnswerTime, PathSlice: []string{utils.AnswerTime}}, &utils.DataLeaf{Data: time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC)})
 	if rply, err := aqReq.FieldAsInterface(path); err != nil {
@@ -1025,7 +1025,7 @@ func TestAgReqFieldAsInterfaceForOneFldPathCgrReq(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathVars(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	dN := &utils.DataNode{
@@ -1053,7 +1053,7 @@ func TestAgReqFieldAsInterfaceForOneFldPathVars(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathCgrReply(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	dN := &utils.DataNode{
@@ -1081,7 +1081,7 @@ func TestAgReqFieldAsInterfaceForOneFldPathCgrReply(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathTmp(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	dN := &utils.DataNode{
@@ -1110,22 +1110,21 @@ func TestAgReqFieldAsInterfaceForOneFldPathTmp(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathReq(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	dP := &utils.MapStorage{
+		utils.CGRID:        "CGRATES_ID1",
 		utils.AccountField: "1002",
 		utils.AnswerTime:   time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC),
 	}
-	opts := utils.MapStorage{
-		utils.MetaOriginID: "CGRATES_ID1",
-	}
-	aqReq := NewAgentRequest(dP, nil, nil, nil, opts, nil,
+	aqReq := NewAgentRequest(dP, nil, nil, nil, nil, nil,
 		"cgrates.org", utils.EmptyString, filterS, nil)
 
 	path := []string{utils.MetaReq}
 
 	expVal := &utils.MapStorage{
+		utils.CGRID:        "CGRATES_ID1",
 		utils.AccountField: "1002",
 		utils.AnswerTime:   time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC),
 	}
@@ -1138,17 +1137,18 @@ func TestAgReqFieldAsInterfaceForOneFldPathReq(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathDiamReq(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	aqReq := NewAgentRequest(nil, nil, nil, nil, nil, nil,
 		"cgrates.org", utils.EmptyString, filterS, nil)
-	aqReq.Opts.Set([]string{utils.MetaOriginID}, utils.NewLeafNode("CGRATES_ID1"))
+	aqReq.diamreq.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}}, utils.NewLeafNode("CGRATES_ID1"))
 	aqReq.diamreq.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1002"))
 	aqReq.diamreq.Set(&utils.FullPath{Path: utils.AnswerTime, PathSlice: []string{utils.AnswerTime}}, utils.NewLeafNode(time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC)))
 
 	path := []string{utils.MetaDiamreq}
 	expVal := utils.NewOrderedNavigableMap()
+	expVal.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}}, &utils.DataLeaf{Data: "CGRATES_ID1"})
 	expVal.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, &utils.DataLeaf{Data: "1002"})
 	expVal.Set(&utils.FullPath{Path: utils.AnswerTime, PathSlice: []string{utils.AnswerTime}}, &utils.DataLeaf{Data: time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC)})
 	if rply, err := aqReq.FieldAsInterface(path); err != nil {
@@ -1160,18 +1160,18 @@ func TestAgReqFieldAsInterfaceForOneFldPathDiamReq(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathReply(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	aqReq := NewAgentRequest(nil, nil, nil, nil, nil, nil,
 		"cgrates.org", utils.EmptyString, filterS, nil)
-
+	aqReq.Reply.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}}, utils.NewLeafNode("CGRATES_ID1"))
 	aqReq.Reply.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1002"))
 	aqReq.Reply.Set(&utils.FullPath{Path: utils.AnswerTime, PathSlice: []string{utils.AnswerTime}}, utils.NewLeafNode(time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC)))
 
 	path := []string{utils.MetaRep}
 	expVal := utils.NewOrderedNavigableMap()
-
+	expVal.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}}, &utils.DataLeaf{Data: "CGRATES_ID1"})
 	expVal.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, &utils.DataLeaf{Data: "1002"})
 	expVal.Set(&utils.FullPath{Path: utils.AnswerTime, PathSlice: []string{utils.AnswerTime}}, &utils.DataLeaf{Data: time.Date(2013, 12, 30, 14, 59, 31, 0, time.UTC)})
 	if rply, err := aqReq.FieldAsInterface(path); err != nil {
@@ -1183,7 +1183,7 @@ func TestAgReqFieldAsInterfaceForOneFldPathReply(t *testing.T) {
 
 func TestAgReqFieldAsInterfaceForOneFldPathOpts(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	opts := utils.MapStorage{
@@ -1210,7 +1210,7 @@ func TestAgReqFieldAsInterfaceForOneFldPathCfg(t *testing.T) {
 
 	cfg := config.NewDefaultCGRConfig()
 	config.SetCgrConfig(cfg)
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	aqReq := NewAgentRequest(nil, nil, nil, nil, nil, nil,
@@ -1230,7 +1230,7 @@ func TestAgReqFieldAsInterfaceForOneFldPathCfg(t *testing.T) {
 
 func TestAgReqNewARWithCGRRplyAndRply(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 
@@ -1275,7 +1275,7 @@ func TestAgReqNewARWithCGRRplyAndRply(t *testing.T) {
 
 func TestAgReqSetCGRReplyWithError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 
@@ -1313,7 +1313,7 @@ func (ev myEv) AsNavigableMap() map[string]*utils.DataNode {
 
 func TestAgReqSetCGRReplyWithoutError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 
@@ -1374,7 +1374,7 @@ func TestAgReqParseFieldMetaCCUsage(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1389,7 +1389,7 @@ func TestAgReqParseFieldMetaCCUsage(t *testing.T) {
 	tplFlds[0].ComputePath()
 
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid arguments <[{"Rules":"~*req.Session-Id"}]> to *ccUsage` {
+		err.Error() != `invalid arguments <[{"Rules":"~*req.Session-Id"}]> to *cc_usage` {
 		t.Error(err)
 	}
 
@@ -1401,7 +1401,7 @@ func TestAgReqParseFieldMetaCCUsage(t *testing.T) {
 	}
 	tplFlds[0].ComputePath()
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid requestNumber <simuhuawei;1449573472;00002> to *ccUsage` {
+		err.Error() != `invalid requestNumber <simuhuawei;1449573472;00002> to *cc_usage` {
 		t.Error(err)
 	}
 
@@ -1413,7 +1413,7 @@ func TestAgReqParseFieldMetaCCUsage(t *testing.T) {
 	}
 	tplFlds[0].ComputePath()
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid usedCCTime <simuhuawei;1449573472;00002> to *ccUsage` {
+		err.Error() != `invalid usedCCTime <simuhuawei;1449573472;00002> to *cc_usage` {
 		t.Error(err)
 	}
 
@@ -1425,7 +1425,7 @@ func TestAgReqParseFieldMetaCCUsage(t *testing.T) {
 	}
 	tplFlds[0].ComputePath()
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid debitInterval <simuhuawei;1449573472;00002> to *ccUsage` {
+		err.Error() != `invalid debitInterval <simuhuawei;1449573472;00002> to *cc_usage` {
 		t.Error(err)
 	}
 
@@ -1458,7 +1458,7 @@ func TestAgReqParseFieldMetaUsageDifference(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1471,7 +1471,7 @@ func TestAgReqParseFieldMetaUsageDifference(t *testing.T) {
 			Mandatory: true},
 	}
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid arguments <[{"Rules":"~*req.Session-Id"}]> to *usageDifference` {
+		err.Error() != `invalid arguments <[{"Rules":"~*req.Session-Id"}]> to *usage_difference` {
 		t.Error(err)
 	}
 
@@ -1524,7 +1524,7 @@ func TestAgReqParseFieldMetaSum(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1568,7 +1568,7 @@ func TestAgReqParseFieldMetaDifference(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1612,7 +1612,7 @@ func TestAgReqParseFieldMetaMultiply(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1656,7 +1656,7 @@ func TestAgReqParseFieldMetaDivide(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1700,7 +1700,7 @@ func TestAgReqParseFieldMetaValueExponent(t *testing.T) {
 	//create diameterDataProvider
 	dP := newDADataProvider(nil, m)
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -1713,7 +1713,7 @@ func TestAgReqParseFieldMetaValueExponent(t *testing.T) {
 			Mandatory: true},
 	}
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid arguments <[{"Rules":"~*req.Session-Id"}]> to *valueExponent` {
+		err.Error() != `invalid arguments <[{"Rules":"~*req.Session-Id"}]> to *value_exponent` {
 		t.Error(err)
 	}
 
@@ -1735,7 +1735,7 @@ func TestAgReqParseFieldMetaValueExponent(t *testing.T) {
 			Mandatory: true},
 	}
 	if _, err := agReq.ParseField(tplFlds[0]); err == nil ||
-		err.Error() != `invalid value <simuhuawei;1449573472;00002> to *valueExponent` {
+		err.Error() != `invalid value <simuhuawei;1449573472;00002> to *value_exponent` {
 		t.Error(err)
 	}
 	tplFlds = []*config.FCTemplate{
@@ -1754,7 +1754,7 @@ func TestAgReqParseFieldMetaValueExponent(t *testing.T) {
 
 func TestAgReqOverwrite(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -1806,7 +1806,7 @@ func TestAgReqOverwrite(t *testing.T) {
 
 func TestAgReqGroupType(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -1850,7 +1850,7 @@ func TestAgReqGroupType(t *testing.T) {
 
 func TestAgReqSetFieldsInTmp(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -1882,7 +1882,7 @@ func TestAgReqSetFieldsInTmp(t *testing.T) {
 
 func TestAgReqSetFieldsIp2Hex(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -1909,7 +1909,7 @@ func TestAgReqSetFieldsIp2Hex(t *testing.T) {
 
 func TestAgReqSetFieldsString2Hex(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -1936,12 +1936,13 @@ func TestAgReqSetFieldsString2Hex(t *testing.T) {
 
 func TestAgReqSetFieldsWithRemove(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
 	// populate request, emulating the way will be done in HTTPAgent
-	agReq.Opts.Set([]string{utils.MetaOriginID}, utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC).String()))
+	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.CGRID, PathSlice: []string{utils.CGRID}},
+		utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC).String()))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.ToR, PathSlice: []string{utils.ToR}}, utils.NewLeafNode(utils.MetaVoice))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1001"))
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.Destination, PathSlice: []string{utils.Destination}}, utils.NewLeafNode("1002"))
@@ -2063,11 +2064,9 @@ func TestAgReqSetFieldsWithRemove(t *testing.T) {
 
 func TestAgReqSetFieldsInCache(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
-	connMgr := engine.NewConnManager(cfg)
-	engine.NewCacheS(cfg, dm, connMgr, nil)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1001"))
 
@@ -2105,13 +2104,12 @@ func TestAgReqSetFieldsInCache(t *testing.T) {
 
 func TestAgReqSetFieldsInCacheWithTimeOut(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
-	connMgr := engine.NewConnManager(cfg)
 
 	cfg.CacheCfg().Partitions[utils.CacheUCH].TTL = time.Second
-	engine.Cache = engine.NewCacheS(cfg, dm, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
 	agReq.CGRRequest.Set(&utils.FullPath{Path: utils.AccountField, PathSlice: []string{utils.AccountField}}, utils.NewLeafNode("1001"))
 
@@ -2201,7 +2199,7 @@ func TestAgReqFiltersInsideField(t *testing.T) {
 		}})
 	//create diameterDataProvider
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	//pass the data provider to agent request
@@ -2232,7 +2230,7 @@ func TestAgReqFiltersInsideField(t *testing.T) {
 
 func TestAgReqDynamicPath(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -2300,7 +2298,7 @@ func TestAgReqDynamicPath(t *testing.T) {
 
 func TestAgReqRoundingDecimals(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(nil, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
@@ -2343,16 +2341,16 @@ func TestAgReqRoundingDecimals(t *testing.T) {
 $go test -bench=.  -run=^$ -benchtime=10s -count=3
 goos: linux
 goarch: amd64
-pkg: github.com/Omnitouch/cgrates/agents
+pkg: github.com/cgrates/cgrates/agents
 BenchmarkAgReqSetField-16    	  990145	     12012 ns/op
 BenchmarkAgReqSetField-16    	 1000000	     12478 ns/op
 BenchmarkAgReqSetField-16    	  904732	     13250 ns/op
 PASS
-ok  	github.com/Omnitouch/cgrates/agents	36.788s
+ok  	github.com/cgrates/cgrates/agents	36.788s
 */
 func BenchmarkAgReqSetField(b *testing.B) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	tplFlds := []*config.FCTemplate{
@@ -2416,7 +2414,7 @@ func TestNeedsMaxUsage(t *testing.T) {
 
 func TestAgReqSetFieldsFromCfg(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 
@@ -2714,7 +2712,7 @@ func TestAgentRequestParseFieldDateTimeError(t *testing.T) {
 }
 
 func TestAgentRequestParseFieldDateTimeError2(t *testing.T) {
-	prsr, err := config.NewRSRParsersFromSlice([]string{"2.", "~*opts.*originID<~*opts.Converter>"})
+	prsr, err := config.NewRSRParsersFromSlice([]string{"2.", "~*req.CGRID<~*opts.Converter>"})
 	if err != nil {
 		t.Fatal(err)
 	}

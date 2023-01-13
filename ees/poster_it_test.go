@@ -21,7 +21,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -33,9 +39,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -60,83 +65,89 @@ type TestContent struct {
 	Var2 string
 }
 
-/*
-	func TestHttpJsonPoster(t *testing.T) {
-		SetFailedPostCacheTTL(time.Millisecond)
-		content := &TestContent{Var1: "Val1", Var2: "Val2"}
-		jsn, _ := json.Marshal(content)
-		pstr, err := NewHTTPjsonMapEE(&config.EventExporterCfg{
-			ExportPath:     "http://localhost:8080/invalid",
-			Attempts:       3,
-			FailedPostsDir: "/tmp",
-			Opts:           &config.EventExporterOpts{},
-		}, config.CgrConfig(), nil, nil)
-		if err != nil {
-			t.Error(err)
-		}
-		if err = ExportWithAttempts(context.Background(), pstr, &HTTPPosterRequest{Body: jsn, Header: make(http.Header)}, ""); err == nil {
-			t.Error("Expected error")
-		}
-		AddFailedPost("/tmp", "http://localhost:8080/invalid", utils.MetaHTTPjsonMap, "test1", jsn, &config.EventExporterOpts{})
-		time.Sleep(5 * time.Millisecond)
-		fs, err := filepath.Glob("/tmp/test1*")
-		if err != nil {
-			t.Fatal(err)
-		} else if len(fs) == 0 {
-			t.Fatal("Expected at least one file")
-		}
-
-		ev, err := NewExportEventsFromFile(fs[0])
-		if err != nil {
-			t.Fatal(err)
-		} else if len(ev.Events) == 0 {
-			t.Fatal("Expected at least one event")
-		}
-		if !reflect.DeepEqual(jsn, ev.Events[0]) {
-			t.Errorf("Expecting: %q, received: %q", string(jsn), ev.Events[0])
-		}
+func TestHttpJsonPoster(t *testing.T) {
+	SetFailedPostCacheTTL(time.Millisecond)
+	content := &TestContent{Var1: "Val1", Var2: "Val2"}
+	jsn, _ := json.Marshal(content)
+	pstr, err := NewHTTPjsonMapEE(&config.EventExporterCfg{
+		ExportPath:     "http://localhost:8080/invalid",
+		Attempts:       3,
+		FailedPostsDir: "/tmp",
+		Opts:           &config.EventExporterOpts{},
+	}, config.CgrConfig(), nil, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if err = ExportWithAttempts(pstr, &HTTPPosterRequest{Body: jsn, Header: make(http.Header)}, ""); err == nil {
+		t.Error("Expected error")
+	}
+	AddFailedPost("/tmp", "http://localhost:8080/invalid", utils.MetaHTTPjsonMap, jsn, &config.EventExporterOpts{})
+	time.Sleep(5 * time.Millisecond)
+	fs, err := filepath.Glob("/tmp/EEs*")
+	if err != nil {
+		t.Fatal(err)
+	} else if len(fs) == 0 {
+		t.Fatal("Expected at least one file")
 	}
 
-	func TestHttpBytesPoster(t *testing.T) {
-		SetFailedPostCacheTTL(time.Millisecond)
-		content := []byte(`Test
-			Test2
-			`)
-		pstr, err := NewHTTPjsonMapEE(&config.EventExporterCfg{
-			ExportPath:     "http://localhost:8080/invalid",
-			Attempts:       3,
-			FailedPostsDir: "/tmp",
-			Opts:           &config.EventExporterOpts{},
-		}, config.CgrConfig(), nil, nil)
-		if err != nil {
-			t.Error(err)
-		}
-		if err = ExportWithAttempts(context.Background(), pstr, &HTTPPosterRequest{Body: content, Header: make(http.Header)}, ""); err == nil {
-			t.Error("Expected error")
-		}
-		AddFailedPost("/tmp", "http://localhost:8080/invalid", utils.ContentJSON, "test2", content, &config.EventExporterOpts{})
-		time.Sleep(5 * time.Millisecond)
-		fs, err := filepath.Glob("/tmp/test2*")
-		if err != nil {
-			t.Fatal(err)
-		} else if len(fs) == 0 {
-			t.Fatal("Expected at least one file")
-		}
-		ev, err := NewExportEventsFromFile(fs[0])
-		if err != nil {
-			t.Fatal(err)
-		} else if len(ev.Events) == 0 {
-			t.Fatal("Expected at least one event")
-		}
-		if !reflect.DeepEqual(content, ev.Events[0]) {
-			t.Errorf("Expecting: %q, received: %q", string(content), ev.Events[0])
-		}
+	ev, err := NewExportEventsFromFile(fs[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if len(ev.Events) == 0 {
+		t.Fatal("Expected at least one event")
 	}
-*/
+	if !reflect.DeepEqual(jsn, ev.Events[0]) {
+		t.Errorf("Expecting: %q, received: %q", string(jsn), ev.Events[0])
+	}
+	os.Remove(fs[0])
+}
+
+func TestHttpBytesPoster(t *testing.T) {
+	SetFailedPostCacheTTL(time.Millisecond)
+	content := []byte(`Test
+		Test2
+		`)
+	pstr, err := NewHTTPjsonMapEE(&config.EventExporterCfg{
+		ExportPath:     "http://localhost:8080/invalid",
+		Attempts:       3,
+		FailedPostsDir: "/tmp",
+		Opts:           &config.EventExporterOpts{},
+	}, config.CgrConfig(), nil, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if err = ExportWithAttempts(pstr, &HTTPPosterRequest{Body: content, Header: make(http.Header)}, ""); err == nil {
+		t.Error("Expected error")
+	}
+	AddFailedPost("/tmp", "http://localhost:8080/invalid", utils.ContentJSON, content, &config.EventExporterOpts{})
+	time.Sleep(5 * time.Millisecond)
+	fs, err := filepath.Glob("/tmp/test2*")
+	if err != nil {
+		t.Fatal(err)
+	} else if len(fs) == 0 {
+		t.Fatal("Expected at least one file")
+	}
+	ev, err := NewExportEventsFromFile(fs[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if len(ev.Events) == 0 {
+		t.Fatal("Expected at least one event")
+	}
+	if !reflect.DeepEqual(content, ev.Events[0]) {
+		t.Errorf("Expecting: %q, received: %q", string(content), ev.Events[0])
+	}
+	os.Remove(fs[0])
+}
+
 func TestSQSPoster(t *testing.T) {
 	if !*itTestSQS {
 		return
 	}
+	cfg1 := config.NewDefaultCGRConfig()
+
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg1.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+
 	//#####################################
 	// update this variables
 	endpoint := "https://sqs.us-east-2.amazonaws.com"
@@ -160,7 +171,7 @@ func TestSQSPoster(t *testing.T) {
 		Attempts:   5,
 		Opts:       opts,
 	}, nil)
-	if err := ExportWithAttempts(context.Background(), pstr, []byte(body), "", nil, "cgrates.org"); err != nil {
+	if err := ExportWithAttempts(pstr, []byte(body), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -215,6 +226,10 @@ func TestS3Poster(t *testing.T) {
 	if !*itTestS3 {
 		return
 	}
+	cfg1 := config.NewDefaultCGRConfig()
+
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg1.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 
 	//#####################################
 	// update this variables
@@ -239,7 +254,7 @@ func TestS3Poster(t *testing.T) {
 		Attempts:   5,
 		Opts:       opts,
 	}, nil)
-	if err := ExportWithAttempts(context.Background(), pstr, []byte(body), key, nil, "cgrates.org"); err != nil {
+	if err := ExportWithAttempts(pstr, []byte(body), key); err != nil {
 		t.Fatal(err)
 	}
 	key += ".json"
@@ -277,6 +292,10 @@ func TestAMQPv1Poster(t *testing.T) {
 	if !*itTestAMQPv1 {
 		return
 	}
+	cfg1 := config.NewDefaultCGRConfig()
+
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg1.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 
 	//#####################################
 	// update this variables
@@ -294,7 +313,7 @@ func TestAMQPv1Poster(t *testing.T) {
 		Attempts:   5,
 		Opts:       opts,
 	}, nil)
-	if err := ExportWithAttempts(context.Background(), pstr, []byte(body), "", nil, "cgrates.org"); err != nil {
+	if err := ExportWithAttempts(pstr, []byte(body), ""); err != nil {
 		t.Fatal(err)
 	}
 	// Create client
@@ -333,9 +352,7 @@ func TestAMQPv1Poster(t *testing.T) {
 	}
 
 	// Accept message
-	if err = receiver.AcceptMessage(ctx, msg); err != nil {
-		t.Fatalf("Failure accepting message: %v", err)
-	}
+	msg.Accept(ctx)
 	if rply := string(msg.GetData()); rply != body {
 		t.Errorf("Expected: %q, received: %q", body, rply)
 	}

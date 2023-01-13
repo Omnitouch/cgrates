@@ -19,8 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package config
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // DNSAgentCfg the config section that describes the DNS Agent
@@ -31,15 +30,6 @@ type DNSAgentCfg struct {
 	SessionSConns     []string
 	Timezone          string
 	RequestProcessors []*RequestProcessor
-}
-
-// loadDNSAgentCfg loads the DNSAgent section of the configuration
-func (da *DNSAgentCfg) Load(ctx *context.Context, jsnCfg ConfigDB, cfg *CGRConfig) (err error) {
-	jsnDNSCfg := new(DNSAgentJsonCfg)
-	if err = jsnCfg.GetSection(ctx, DNSAgentJSON, jsnDNSCfg); err != nil {
-		return
-	}
-	return da.loadFromJSONCfg(jsnDNSCfg, cfg.generalCfg.RSRSep)
 }
 
 func (da *DNSAgentCfg) loadFromJSONCfg(jsnCfg *DNSAgentJsonCfg, sep string) (err error) {
@@ -59,15 +49,40 @@ func (da *DNSAgentCfg) loadFromJSONCfg(jsnCfg *DNSAgentJsonCfg, sep string) (err
 		da.Timezone = *jsnCfg.Timezone
 	}
 	if jsnCfg.Sessions_conns != nil {
-		da.SessionSConns = updateBiRPCInternalConns(*jsnCfg.Sessions_conns, utils.MetaSessionS)
+		da.SessionSConns = make([]string, len(*jsnCfg.Sessions_conns))
+		for idx, connID := range *jsnCfg.Sessions_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			da.SessionSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				da.SessionSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS)
+			}
+		}
 	}
-	da.RequestProcessors, err = appendRequestProcessors(da.RequestProcessors, jsnCfg.Request_processors, sep)
+	if jsnCfg.Request_processors != nil {
+		for _, reqProcJsn := range *jsnCfg.Request_processors {
+			rp := new(RequestProcessor)
+			var haveID bool
+			for _, rpSet := range da.RequestProcessors {
+				if reqProcJsn.ID != nil && rpSet.ID == *reqProcJsn.ID {
+					rp = rpSet // Will load data into the one set
+					haveID = true
+					break
+				}
+			}
+			if err = rp.loadFromJSONCfg(reqProcJsn, sep); err != nil {
+				return
+			}
+			if !haveID {
+				da.RequestProcessors = append(da.RequestProcessors, rp)
+			}
+		}
+	}
 	return
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (da DNSAgentCfg) AsMapInterface(separator string) interface{} {
-	mp := map[string]interface{}{
+func (da *DNSAgentCfg) AsMapInterface(separator string) (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
 		utils.EnabledCfg:   da.Enabled,
 		utils.ListenCfg:    da.Listen,
 		utils.ListenNetCfg: da.ListenNet,
@@ -78,16 +93,20 @@ func (da DNSAgentCfg) AsMapInterface(separator string) interface{} {
 	for i, item := range da.RequestProcessors {
 		requestProcessors[i] = item.AsMapInterface(separator)
 	}
-	mp[utils.RequestProcessorsCfg] = requestProcessors
+	initialMP[utils.RequestProcessorsCfg] = requestProcessors
 
 	if da.SessionSConns != nil {
-		mp[utils.SessionSConnsCfg] = getBiRPCInternalJSONConns(da.SessionSConns)
+		sessionSConns := make([]string, len(da.SessionSConns))
+		for i, item := range da.SessionSConns {
+			sessionSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS) {
+				sessionSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.SessionSConnsCfg] = sessionSConns
 	}
-	return mp
+	return
 }
-
-func (DNSAgentCfg) SName() string            { return DNSAgentJSON }
-func (da DNSAgentCfg) CloneSection() Section { return da.Clone() }
 
 // Clone returns a deep copy of DNSAgentCfg
 func (da DNSAgentCfg) Clone() (cln *DNSAgentCfg) {
@@ -98,7 +117,10 @@ func (da DNSAgentCfg) Clone() (cln *DNSAgentCfg) {
 		Timezone:  da.Timezone,
 	}
 	if da.SessionSConns != nil {
-		cln.SessionSConns = utils.CloneStringSlice(da.SessionSConns)
+		cln.SessionSConns = make([]string, len(da.SessionSConns))
+		for i, con := range da.SessionSConns {
+			cln.SessionSConns[i] = con
+		}
 	}
 	if da.RequestProcessors != nil {
 		cln.RequestProcessors = make([]*RequestProcessor, len(da.RequestProcessors))
@@ -109,35 +131,107 @@ func (da DNSAgentCfg) Clone() (cln *DNSAgentCfg) {
 	return
 }
 
-// DNSAgentJsonCfg
-type DNSAgentJsonCfg struct {
-	Enabled            *bool
-	Listen             *string
-	Listen_net         *string
-	Sessions_conns     *[]string
-	Timezone           *string
-	Request_processors *[]*ReqProcessorJsnCfg
+// RequestProcessor is the request processor configuration
+type RequestProcessor struct {
+	ID            string
+	Tenant        RSRParsers
+	Filters       []string
+	Flags         utils.FlagsWithParams
+	Timezone      string
+	RequestFields []*FCTemplate
+	ReplyFields   []*FCTemplate
 }
 
-func diffDNSAgentJsonCfg(d *DNSAgentJsonCfg, v1, v2 *DNSAgentCfg, separator string) *DNSAgentJsonCfg {
-	if d == nil {
-		d = new(DNSAgentJsonCfg)
+func (rp *RequestProcessor) loadFromJSONCfg(jsnCfg *ReqProcessorJsnCfg, sep string) (err error) {
+	if jsnCfg == nil {
+		return nil
 	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
+	if jsnCfg.ID != nil {
+		rp.ID = *jsnCfg.ID
 	}
-	if v1.Listen != v2.Listen {
-		d.Listen = utils.StringPointer(v2.Listen)
+	if jsnCfg.Filters != nil {
+		rp.Filters = make([]string, len(*jsnCfg.Filters))
+		for i, fltr := range *jsnCfg.Filters {
+			rp.Filters[i] = fltr
+		}
 	}
-	if v1.ListenNet != v2.ListenNet {
-		d.Listen_net = utils.StringPointer(v2.ListenNet)
+	if jsnCfg.Flags != nil {
+		rp.Flags = utils.FlagsWithParamsFromSlice(*jsnCfg.Flags)
 	}
-	if !utils.SliceStringEqual(v1.SessionSConns, v2.SessionSConns) {
-		d.Sessions_conns = utils.SliceStringPointer(getBiRPCInternalJSONConns(v2.SessionSConns))
+	if jsnCfg.Timezone != nil {
+		rp.Timezone = *jsnCfg.Timezone
 	}
-	if v1.Timezone != v2.Timezone {
-		d.Timezone = utils.StringPointer(v2.Timezone)
+	if jsnCfg.Tenant != nil {
+		if rp.Tenant, err = NewRSRParsers(*jsnCfg.Tenant, sep); err != nil {
+			return err
+		}
 	}
-	d.Request_processors = diffReqProcessorsJsnCfg(d.Request_processors, v1.RequestProcessors, v2.RequestProcessors, separator)
-	return d
+	if jsnCfg.Request_fields != nil {
+		if rp.RequestFields, err = FCTemplatesFromFCTemplatesJSONCfg(*jsnCfg.Request_fields, sep); err != nil {
+			return
+		}
+	}
+	if jsnCfg.Reply_fields != nil {
+		if rp.ReplyFields, err = FCTemplatesFromFCTemplatesJSONCfg(*jsnCfg.Reply_fields, sep); err != nil {
+			return
+		}
+	}
+	return nil
+}
+
+// AsMapInterface returns the config as a map[string]interface{}
+func (rp *RequestProcessor) AsMapInterface(separator string) (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
+		utils.IDCfg:       rp.ID,
+		utils.FiltersCfg:  rp.Filters,
+		utils.FlagsCfg:    rp.Flags.SliceFlags(),
+		utils.TimezoneCfg: rp.Timezone,
+	}
+	if rp.Tenant != nil {
+		initialMP[utils.TenantCfg] = rp.Tenant.GetRule(separator)
+	}
+	if rp.RequestFields != nil {
+		requestFields := make([]map[string]interface{}, len(rp.RequestFields))
+		for i, item := range rp.RequestFields {
+			requestFields[i] = item.AsMapInterface(separator)
+		}
+		initialMP[utils.RequestFieldsCfg] = requestFields
+	}
+	if rp.ReplyFields != nil {
+		replyFields := make([]map[string]interface{}, len(rp.ReplyFields))
+		for i, item := range rp.ReplyFields {
+			replyFields[i] = item.AsMapInterface(separator)
+		}
+		initialMP[utils.ReplyFieldsCfg] = replyFields
+	}
+	return
+}
+
+// Clone returns a deep copy of APIBanCfg
+func (rp RequestProcessor) Clone() (cln *RequestProcessor) {
+	cln = &RequestProcessor{
+		ID:       rp.ID,
+		Tenant:   rp.Tenant.Clone(),
+		Flags:    rp.Flags.Clone(),
+		Timezone: rp.Timezone,
+	}
+	if rp.Filters != nil {
+		cln.Filters = make([]string, len(rp.Filters))
+		for i, fltr := range rp.Filters {
+			cln.Filters[i] = fltr
+		}
+	}
+	if rp.RequestFields != nil {
+		cln.RequestFields = make([]*FCTemplate, len(rp.RequestFields))
+		for i, rf := range rp.RequestFields {
+			cln.RequestFields[i] = rf.Clone()
+		}
+	}
+	if rp.ReplyFields != nil {
+		cln.ReplyFields = make([]*FCTemplate, len(rp.ReplyFields))
+		for i, rf := range rp.ReplyFields {
+			cln.ReplyFields[i] = rf.Clone()
+		}
+	}
+	return
 }

@@ -23,43 +23,29 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"net/rpc"
+	"net/rpc/jsonrpc"
 	"os/exec"
 	"path"
 	"reflect"
-	"sort"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/birpc/jsonrpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
 var (
 	dataDir   = flag.String("data_dir", "/usr/share/cgrates", "CGR data dir path here")
 	dbType    = flag.String("dbtype", utils.MetaInternal, "The type of DataBase (Internal/Mongo/mySql)")
-	waitRater = flag.Int("wait_rater", 100, "Number of milliseconds to wait for rater to start and cache")
 	encoding  = flag.String("rpc", utils.MetaJSON, "what encoding whould be used for rpc comunication")
+	waitRater = flag.Int("wait_rater", 100, "Number of miliseconds to wait for rater to start and cache")
 )
-
-func newRPCClient(cfg *config.ListenCfg) (c *birpc.Client, err error) {
-	switch *encoding {
-	case utils.MetaJSON:
-		return jsonrpc.Dial(utils.TCP, cfg.RPCJSONListen)
-	case utils.MetaGOB:
-		return birpc.Dial(utils.TCP, cfg.RPCGOBListen)
-	default:
-		return nil, errors.New("UNSUPPORTED_RPC")
-	}
-}
 
 func TestLoadConfig(t *testing.T) {
 	// DataDb
@@ -71,6 +57,7 @@ func TestLoadConfig(t *testing.T) {
 	*dataDBUser = "cgrates2"
 	*dataDBPasswd = "toor"
 	*dbRedisSentinel = "sentinel1"
+	*dbRedisConnectTimeout = 5 * time.Second
 	expDBcfg := &config.DataDbCfg{
 		Type:     utils.Redis,
 		Host:     "localhost",
@@ -82,14 +69,41 @@ func TestLoadConfig(t *testing.T) {
 			RedisMaxConns:           10,
 			RedisConnectAttempts:    20,
 			RedisSentinel:           "sentinel1",
-			MongoQueryTimeout:       10 * time.Second,
+			RedisCluster:            false,
 			RedisClusterSync:        5 * time.Second,
 			RedisClusterOndownDelay: 0,
-			RedisCluster:            false,
+			RedisConnectTimeout:     5 * time.Second,
+			MongoQueryTimeout:       10 * time.Second,
 			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
+	}
+	// StorDB
+	*storDBType = utils.MetaPostgres
+	*storDBHost = "localhost"
+	*storDBPort = "2012"
+	*storDBName = "cgrates2"
+	*storDBUser = "10"
+	*storDBPasswd = "toor"
+	expStorDB := &config.StorDbCfg{
+		Type:                utils.Postgres,
+		Host:                "localhost",
+		Port:                "2012",
+		Name:                "cgrates2",
+		User:                "10",
+		Password:            "toor",
+		StringIndexedFields: []string{},
+		PrefixIndexedFields: []string{},
+		Opts: &config.StorDBOpts{
+			SQLMaxOpenConns:    100,
+			SQLMaxIdleConns:    10,
+			SQLConnMaxLifetime: 0,
+			MongoQueryTimeout:  10 * time.Second,
+			PgSSLMode:          "disable",
+			MySQLLocation:      "Local",
+			MySQLDSNParams:     map[string]string{},
+		},
 	}
 	// Loader
 	*tpid = "1"
@@ -104,6 +118,7 @@ func TestLoadConfig(t *testing.T) {
 	*timezone = utils.Local
 	ldrCfg := loadConfig()
 	ldrCfg.DataDbCfg().Items = nil
+	ldrCfg.StorDbCfg().Items = nil
 	if !reflect.DeepEqual(ldrCfg.DataDbCfg(), expDBcfg) {
 		t.Errorf("Expected %s received %s", utils.ToJSON(expDBcfg), utils.ToJSON(ldrCfg.DataDbCfg()))
 	}
@@ -112,6 +127,9 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if ldrCfg.GeneralCfg().DefaultTimezone != utils.Local {
 		t.Errorf("Expected %s received %s", utils.Local, ldrCfg.GeneralCfg().DefaultTimezone)
+	}
+	if !reflect.DeepEqual(ldrCfg.StorDbCfg(), expStorDB) {
+		t.Errorf("Expected %s received %s", utils.ToJSON(expStorDB), utils.ToJSON(ldrCfg.StorDbCfg()))
 	}
 	if !ldrCfg.LoaderCgrCfg().DisableReverse {
 		t.Errorf("Expected %v received %v", true, ldrCfg.LoaderCgrCfg().DisableReverse)
@@ -134,8 +152,8 @@ func TestLoadConfig(t *testing.T) {
 	if !reflect.DeepEqual(ldrCfg.LoaderCgrCfg().CachesConns, []string{}) {
 		t.Errorf("Expected %v received %v", []string{}, ldrCfg.LoaderCgrCfg().CachesConns)
 	}
-	if !reflect.DeepEqual(ldrCfg.LoaderCgrCfg().ActionSConns, []string{}) {
-		t.Errorf("Expected %v received %v", []string{}, ldrCfg.LoaderCgrCfg().ActionSConns)
+	if !reflect.DeepEqual(ldrCfg.LoaderCgrCfg().SchedulerConns, []string{}) {
+		t.Errorf("Expected %v received %v", []string{}, ldrCfg.LoaderCgrCfg().SchedulerConns)
 	}
 	*cacheSAddress = "127.0.0.1"
 	*schedulerAddress = "127.0.0.2"
@@ -146,8 +164,8 @@ func TestLoadConfig(t *testing.T) {
 		t.Errorf("Expected %v received %v", expAddrs, ldrCfg.LoaderCgrCfg().CachesConns)
 	}
 	expAddrs = []string{"127.0.0.2"}
-	if !reflect.DeepEqual(ldrCfg.LoaderCgrCfg().ActionSConns, expAddrs) {
-		t.Errorf("Expected %v received %v", expAddrs, ldrCfg.LoaderCgrCfg().ActionSConns)
+	if !reflect.DeepEqual(ldrCfg.LoaderCgrCfg().SchedulerConns, expAddrs) {
+		t.Errorf("Expected %v received %v", expAddrs, ldrCfg.LoaderCgrCfg().SchedulerConns)
 	}
 	expaddr := config.RPCConns{
 		utils.MetaBiJSONLocalHost: {
@@ -199,19 +217,25 @@ var (
 	ldrItTests = []func(t *testing.T){
 		testLoadItLoadConfig,
 		testLoadItResetDataDB,
-
+		testLoadItResetStorDb,
 		testLoadItStartLoader,
+		// testLoadItStartLoaderFlushStorDB,
 		testLoadItCheckTenantFlag,
+		// testLoadItRpcClient,
 		testLoadItStartLoaderWithTenant,
-
 		testLoadItConnectToDB,
 		testLoadItCheckAttributes,
 		testLoadItStartLoaderRemove,
 		testLoadItCheckAttributes2,
 
+		testLoadItStartLoaderToStorDB,
+		testLoadItStartLoaderFlushStorDB,
+		testLoadItStartLoaderFromStorDB,
 		testLoadItCheckAttributes2,
 
+		testLoadItStartLoaderToStorDB,
 		testLoadItCheckAttributes2,
+		testLoadItStartLoaderFromStorDB,
 		testLoadItCheckAttributes,
 	}
 )
@@ -237,13 +261,19 @@ func TestLoadIt(t *testing.T) {
 func testLoadItLoadConfig(t *testing.T) {
 	var err error
 	ldrItCfgPath = path.Join(*dataDir, "conf", "samples", ldrItCfgDir)
-	if ldrItCfg, err = config.NewCGRConfigFromPath(context.Background(), ldrItCfgPath); err != nil {
+	if ldrItCfg, err = config.NewCGRConfigFromPath(ldrItCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testLoadItResetDataDB(t *testing.T) {
-	if err := engine.InitDataDB(ldrItCfg); err != nil {
+	if err := engine.InitDataDb(ldrItCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testLoadItResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(ldrItCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -277,7 +307,8 @@ func testLoadItCheckAttributes(t *testing.T) {
 	eAttrPrf := &engine.AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ATTR_1001_SIMPLEAUTH",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*opts.*context:simpleauth"},
+		FilterIDs: []string{"*string:~*req.Account:1001"},
+		Contexts:  []string{"simpleauth"},
 		Attributes: []*engine.Attribute{
 			{
 				FilterIDs: []string{},
@@ -286,25 +317,12 @@ func testLoadItCheckAttributes(t *testing.T) {
 				Value:     config.NewRSRParsersMustCompile("CGRateS.org", utils.InfieldSep),
 			},
 		},
-		Blockers: utils.DynamicBlockers{
-			{
-				Blocker: false,
-			},
-		},
-	}
-	eAttrPrf.Weights = make(utils.DynamicWeights, 1)
-	eAttrPrf.Weights[0] = &utils.DynamicWeight{
 		Weight: 20.0,
 	}
-	if attr, err := db.GetAttributeProfileDrv(context.Background(), "cgrates.org", "ATTR_1001_SIMPLEAUTH"); err != nil {
+	if attr, err := db.GetAttributeProfileDrv("cgrates.org", "ATTR_1001_SIMPLEAUTH"); err != nil {
 		t.Fatal(err)
-	} else {
-		attr.Compile()
-		sort.Strings(eAttrPrf.FilterIDs)
-		sort.Strings(attr.FilterIDs)
-		if !reflect.DeepEqual(eAttrPrf, attr) {
-			t.Errorf("Expecting: %+v, received: %+v", utils.ToJSON(eAttrPrf), utils.ToJSON(attr))
-		}
+	} else if attr.Compile(); !reflect.DeepEqual(eAttrPrf, attr) {
+		t.Errorf("Expecting: %+v, received: %+v", utils.ToJSON(eAttrPrf), utils.ToJSON(attr))
 	}
 }
 
@@ -323,7 +341,35 @@ func testLoadItStartLoaderRemove(t *testing.T) {
 }
 
 func testLoadItCheckAttributes2(t *testing.T) {
-	if _, err := db.GetAttributeProfileDrv(context.Background(), "cgrates.org", "ATTR_1001_SESSIONAUTH"); err != utils.ErrNotFound {
+	if _, err := db.GetAttributeProfileDrv("cgrates.org", "ATTR_1001_SESSIONAUTH"); err != utils.ErrNotFound {
+		t.Fatal(err)
+	}
+}
+
+func testLoadItStartLoaderToStorDB(t *testing.T) {
+	cmd := exec.Command("cgr-loader", "-config_path="+ldrItCfgPath, "-path="+path.Join(*dataDir, "tariffplans", "tutorial"), "-caches_address=", "-scheduler_address=", "-to_stordb", "-tpid=TPID")
+	output := bytes.NewBuffer(nil)
+	outerr := bytes.NewBuffer(nil)
+	cmd.Stdout = output
+	cmd.Stderr = outerr
+	if err := cmd.Run(); err != nil {
+		t.Log(cmd.Args)
+		t.Log(output.String())
+		t.Log(outerr.String())
+		t.Fatal(err)
+	}
+}
+
+func testLoadItStartLoaderFromStorDB(t *testing.T) {
+	cmd := exec.Command("cgr-loader", "-config_path="+ldrItCfgPath, "-caches_address=", "-scheduler_address=", "-from_stordb", "-tpid=TPID")
+	output := bytes.NewBuffer(nil)
+	outerr := bytes.NewBuffer(nil)
+	cmd.Stdout = output
+	cmd.Stderr = outerr
+	if err := cmd.Run(); err != nil {
+		t.Log(cmd.Args)
+		t.Log(output.String())
+		t.Log(outerr.String())
 		t.Fatal(err)
 	}
 }
@@ -345,13 +391,13 @@ func testLoadItStartLoaderWithTenant(t *testing.T) {
 
 type mockCache int
 
-func (c *mockCache) ReloadCache(ctx *context.Context, args *utils.AttrReloadCacheWithAPIOpts, reply *string) (err error) {
+func (c *mockCache) ReloadCache(args *utils.AttrReloadCacheWithAPIOpts, reply *string) (err error) {
 	resp = args.Tenant
 	*reply = "OK"
 	return nil
 }
 
-func (c *mockCache) Clear(ctx *context.Context, args *utils.AttrCacheIDsWithAPIOpts,
+func (c *mockCache) Clear(args *utils.AttrCacheIDsWithAPIOpts,
 	reply *string) error {
 	*reply = args.Tenant
 	return nil
@@ -362,7 +408,7 @@ var listener net.Listener
 var resp string
 
 func testLoadItCheckTenantFlag(t *testing.T) {
-	err := birpc.RegisterName("CacheSv1", new(mockCache))
+	err := rpc.RegisterName("CacheSv1", new(mockCache))
 	if err != nil {
 		t.Error(err)
 	}
@@ -379,7 +425,21 @@ func testLoadItCheckTenantFlag(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go birpc.ServeCodec(jsonrpc.NewServerCodec(conn))
+			go rpc.ServeCodec(jsonrpc.NewServerCodec(conn))
 		}
 	}()
+}
+
+func testLoadItStartLoaderFlushStorDB(t *testing.T) {
+	cmd := exec.Command("cgr-loader", "-config_path="+ldrItCfgPath, "-path="+path.Join(*dataDir, "tariffplans", "dispatchers"), "-caches_address=", "-scheduler_address=", "-to_stordb", "-flush_stordb", "-tpid=TPID")
+	output := bytes.NewBuffer(nil)
+	outerr := bytes.NewBuffer(nil)
+	cmd.Stdout = output
+	cmd.Stderr = outerr
+	if err := cmd.Run(); err != nil {
+		t.Log(cmd.Args)
+		t.Log(output.String())
+		t.Log(outerr.String())
+		t.Fatal(err)
+	}
 }

@@ -25,10 +25,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestFileCsvGetMetrics(t *testing.T) {
@@ -54,7 +53,7 @@ func (nopCloser) Close() error { return nil }
 
 func TestFileCsvComposeHeader(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -63,7 +62,7 @@ func TestFileCsvComposeHeader(t *testing.T) {
 		cfg:       cfg.EEsCfg().Exporters[0],
 		cgrCfg:    cfg,
 		filterS:   filterS,
-		wrtr:      nopCloser{byteBuff},
+		file:      nopCloser{byteBuff},
 		csvWriter: csvNW,
 		dc:        &utils.SafeMapStorage{},
 	}
@@ -117,7 +116,7 @@ func TestFileCsvComposeHeader(t *testing.T) {
 
 func TestFileCsvComposeTrailer(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -126,7 +125,7 @@ func TestFileCsvComposeTrailer(t *testing.T) {
 		cfg:       cfg.EEsCfg().Exporters[0],
 		cgrCfg:    cfg,
 		filterS:   filterS,
-		wrtr:      nopCloser{byteBuff},
+		file:      nopCloser{byteBuff},
 		csvWriter: csvNW,
 		dc:        &utils.SafeMapStorage{},
 	}
@@ -180,7 +179,7 @@ func TestFileCsvComposeTrailer(t *testing.T) {
 
 func TestFileCsvExportEvent(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -196,12 +195,12 @@ func TestFileCsvExportEvent(t *testing.T) {
 		cfg:       cfg.EEsCfg().Exporters[0],
 		cgrCfg:    cfg,
 		filterS:   filterS,
-		wrtr:      nopCloser{byteBuff},
+		file:      nopCloser{byteBuff},
 		csvWriter: csvNW,
 		dc:        dc,
 	}
 
-	if err := fCsv.ExportEvent(context.Background(), []string{"value", "3"}, ""); err != nil {
+	if err := fCsv.ExportEvent([]string{"value", "3"}, ""); err != nil {
 		t.Error(err)
 	}
 	csvNW.Flush()
@@ -213,7 +212,7 @@ func TestFileCsvExportEvent(t *testing.T) {
 
 func TestFileCsvOnEvictedTrailer(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -222,7 +221,7 @@ func TestFileCsvOnEvictedTrailer(t *testing.T) {
 		cfg:       cfg.EEsCfg().Exporters[0],
 		cgrCfg:    cfg,
 		filterS:   filterS,
-		wrtr:      nopCloserWrite{byteBuff},
+		file:      nopCloserWrite{byteBuff},
 		csvWriter: csvNW,
 		dc:        &utils.SafeMapStorage{},
 	}
@@ -247,7 +246,7 @@ func TestFileCsvOnEvictedTrailer(t *testing.T) {
 
 func TestFileCsvOnEvictedClose(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	newIDb := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	newIDb := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	newDM := engine.NewDataManager(newIDb, cfg.CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, newDM)
 	byteBuff := new(bytes.Buffer)
@@ -256,7 +255,7 @@ func TestFileCsvOnEvictedClose(t *testing.T) {
 		cfg:       cfg.EEsCfg().Exporters[0],
 		cgrCfg:    cfg,
 		filterS:   filterS,
-		wrtr:      nopCloserError{byteBuff},
+		file:      nopCloserError{byteBuff},
 		csvWriter: csvNW,
 		dc:        &utils.SafeMapStorage{},
 	}

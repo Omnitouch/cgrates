@@ -20,14 +20,16 @@ package ers
 
 import (
 	"bytes"
+	"log"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestERsProcessPartialEvent(t *testing.T) {
@@ -122,12 +124,14 @@ func TestErsOnEvictedMetaPostCDROK(t *testing.T) {
 }
 
 func TestErsOnEvictedMetaPostCDRMergeErr(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	value := &erEvents{
 		events: []*utils.CGREvent{
@@ -160,7 +164,7 @@ func TestErsOnEvictedMetaPostCDRMergeErr(t *testing.T) {
 		},
 	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -168,21 +172,25 @@ func TestErsOnEvictedMetaPostCDRMergeErr(t *testing.T) {
 		rdrEvents: make(chan *erEvent, 1),
 		filterS:   fltrS,
 	}
-	expLog := `[WARNING] <ERs> failed posting expired parial events <[{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Event":{"Account":"1001","AnswerTime":"2021-06-01T13:00:00Z","Destination":"1003"},"APIOpts":null},{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Event":{"Account":"1001","AnswerTime":"2021-06-01T12:00:00Z","Destination":"1002"},"APIOpts":null}]> due error <unsupported comparison type: string, kind: string>`
+	expLog := `[WARNING] <ERs> failed posting expired parial events <[{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Time":null,"Event":{"Account":"1001","AnswerTime":"2021-06-01T13:00:00Z","Destination":"1003"},"APIOpts":null},{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Time":null,"Event":{"Account":"1001","AnswerTime":"2021-06-01T12:00:00Z","Destination":"1002"},"APIOpts":null}]> due error <unsupported comparison type: string, kind: string>`
 	erS.onEvicted("id", value)
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, expLog) {
 		t.Errorf("expected: <%+v> to be included in <%+v>", expLog, rcvLog)
 	}
+
+	utils.Logger.SetLogLevel(0)
 }
 
 func TestErsOnEvictedMetaDumpToFileSetFieldsErr(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	dirPath := "/tmp/TestErsOnEvictedMetaDumpToFile"
 	value := &erEvents{
@@ -210,7 +218,7 @@ func TestErsOnEvictedMetaDumpToFileSetFieldsErr(t *testing.T) {
 		},
 	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -218,23 +226,27 @@ func TestErsOnEvictedMetaDumpToFileSetFieldsErr(t *testing.T) {
 		rdrEvents: make(chan *erEvent, 1),
 		filterS:   fltrS,
 	}
-	expLog := `[WARNING] <ERs> Converting CDR with originID: <ID> to record , ignoring due to error: <unsupported type: <>>
+	expLog := `[WARNING] <ERs> Converting CDR with CGRID: <ID> to record , ignoring due to error: <unsupported type: <>>
 `
 	erS.onEvicted("ID", value)
 
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, expLog) {
 		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
 	}
+
+	utils.Logger.SetLogLevel(0)
 }
 
 func TestErsOnEvictedMetaDumpToFileMergeErr(t *testing.T) {
-	tmpLogger := utils.Logger
-	defer func() {
-		utils.Logger = tmpLogger
-	}()
+	utils.Logger.SetLogLevel(4)
+	utils.Logger.SetSyslog(nil)
+
 	var buf bytes.Buffer
-	utils.Logger = utils.NewStdLoggerWithWriter(&buf, "", 4)
+	log.SetOutput(&buf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
 
 	dirPath := "/tmp/TestErsOnEvictedMetaDumpToFile"
 	value := &erEvents{
@@ -268,7 +280,7 @@ func TestErsOnEvictedMetaDumpToFileMergeErr(t *testing.T) {
 		},
 	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{
@@ -277,13 +289,16 @@ func TestErsOnEvictedMetaDumpToFileMergeErr(t *testing.T) {
 		filterS:   fltrS,
 	}
 
-	expLog := `[WARNING] <ERs> failed posting expired parial events <[{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Event":{"Account":"1001","AnswerTime":"2021-06-01T13:00:00Z","Destination":"1003"},"APIOpts":null},{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Event":{"Account":"1001","AnswerTime":"2021-06-01T12:00:00Z","Destination":"1002"},"APIOpts":null}]> due error <unsupported comparison type: string, kind: string>`
+	expLog := `[WARNING] <ERs> failed posting expired parial events <[{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Time":null,"Event":{"Account":"1001","AnswerTime":"2021-06-01T13:00:00Z","Destination":"1003"},"APIOpts":null},{"Tenant":"cgrates.org","ID":"EventErsOnEvicted","Time":null,"Event":{"Account":"1001","AnswerTime":"2021-06-01T12:00:00Z","Destination":"1002"},"APIOpts":null}]> due error <unsupported comparison type: string, kind: string>
+`
 	erS.onEvicted("ID", value)
 
-	rcvLog := buf.String()
+	rcvLog := buf.String()[20:]
 	if !strings.Contains(rcvLog, expLog) {
 		t.Errorf("expected <%+v> to be included in: <%+v>", expLog, rcvLog)
 	}
+
+	utils.Logger.SetLogLevel(0)
 }
 
 func TestErsOnEvictedMetaDumpToFileEmptyPath(t *testing.T) {
@@ -306,7 +321,7 @@ func TestErsOnEvictedMetaDumpToFileEmptyPath(t *testing.T) {
 		},
 	}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrS := engine.NewFilterS(cfg, nil, dm)
 	erS := &ERService{

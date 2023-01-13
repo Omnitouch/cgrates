@@ -22,8 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestVirtualEeGetMetrics(t *testing.T) {
@@ -41,7 +40,7 @@ func TestVirtualEeGetMetrics(t *testing.T) {
 }
 func TestVirtualEeExportEvent(t *testing.T) {
 	vEe := &VirtualEE{}
-	if err := vEe.ExportEvent(context.Background(), []byte{}, ""); err != nil {
+	if err := vEe.ExportEvent([]byte{}, ""); err != nil {
 		t.Error(err)
 	}
 	vEe.Close()

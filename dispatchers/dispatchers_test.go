@@ -21,35 +21,37 @@ package dispatchers
 import (
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
 func TestDispatcherServiceDispatcherProfileForEventGetDispatcherProfileNF(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
 	dm := engine.NewDataManager(&engine.DataDBMock{
-		GetKeysForPrefixF: func(*context.Context, string) ([]string, error) {
+		GetKeysForPrefixF: func(string) ([]string, error) {
 			return []string{"dpp_cgrates.org:123"}, nil
 		},
 	}, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "321",
-		FilterIDs:      []string{"filter", "*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "321",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          []string{"filter"},
+		ActivationInterval: &utils.ActivationInterval{},
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err == nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotImplemented, err)
 	}
@@ -57,8 +59,12 @@ func TestDispatcherServiceDispatcherProfileForEventGetDispatcherProfileNF(t *tes
 		Tenant: "cgrates.org",
 		ID:     "filter",
 		Rules:  nil,
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(1999, 2, 3, 4, 5, 6, 700000000, time.UTC),
+			ExpiryTime:     time.Date(2000, 2, 3, 4, 5, 6, 700000000, time.UTC),
+		},
 	}
-	err = dm.SetFilter(context.Background(), fltr, false)
+	err = dm.SetFilter(fltr, false)
 	if err == nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotImplemented, err)
 	}
@@ -78,13 +84,10 @@ func TestDispatcherServiceDispatcherProfileForEventGetDispatcherProfileNF(t *tes
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
+	}, subsys)
 	expected := utils.ErrNotImplemented
 	if err == nil || err != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -94,20 +97,18 @@ func TestDispatcherServiceDispatcherProfileForEventGetDispatcherProfileNF(t *tes
 func TestDispatcherServiceDispatcherProfileForEventMIIDENotFound(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{}
 	tnt := ""
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err := dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err := dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
+	}, subsys)
 	if err == nil || err != utils.ErrNotFound {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotFound, err)
 	}
@@ -118,15 +119,39 @@ func (dS *DispatcherService) DispatcherServicePing(ev *utils.CGREvent, reply *st
 	return nil
 }
 
+func TestDispatcherCall1(t *testing.T) {
+	dS := &DispatcherService{}
+	var reply string
+	if err := dS.Call(utils.DispatcherServicePing, &utils.CGREvent{}, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.Pong {
+		t.Errorf("Expected: %s , received: %s", utils.Pong, reply)
+	}
+}
+
+func TestDispatcherCall2(t *testing.T) {
+	dS := &DispatcherService{}
+	var reply string
+	if err := dS.Call("DispatcherServicePing", &utils.CGREvent{}, &reply); err == nil || err.Error() != rpcclient.ErrUnsupporteServiceMethod.Error() {
+		t.Error(err)
+	}
+	if err := dS.Call("DispatcherService.Pong", &utils.CGREvent{}, &reply); err == nil || err.Error() != rpcclient.ErrUnsupporteServiceMethod.Error() {
+		t.Error(err)
+	}
+	dS.Shutdown()
+}
+
 func TestDispatcherauthorizeEvent(t *testing.T) {
 	dm := &engine.DataManager{}
 	cfg := config.NewDefaultCGRConfig()
 	fltr := &engine.FilterS{}
 	connMgr := &engine.ConnManager{}
 	dsp := NewDispatcherService(dm, cfg, fltr, connMgr)
-	ev := &utils.CGREvent{}
+	ev := &utils.CGREvent{
+		APIOpts: make(map[string]interface{}),
+	}
 	reply := &engine.AttrSProcessEventReply{}
-	err := dsp.authorizeEvent(context.Background(), ev, reply)
+	err := dsp.authorizeEvent(ev, reply)
 	expected := "MANDATORY_IE_MISSING: [connIDs]"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -139,9 +164,11 @@ func TestDispatcherAuthorizeEventErr(t *testing.T) {
 	fltr := &engine.FilterS{}
 	connMgr := &engine.ConnManager{}
 	dsp := NewDispatcherService(dm, cfg, fltr, connMgr)
-	ev := &utils.CGREvent{}
+	ev := &utils.CGREvent{
+		APIOpts: make(map[string]interface{}),
+	}
 	reply := &engine.AttrSProcessEventReply{}
-	err := dsp.authorizeEvent(context.Background(), ev, reply)
+	err := dsp.authorizeEvent(ev, reply)
 	expected := "MANDATORY_IE_MISSING: [connIDs]"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -154,7 +181,7 @@ func TestDispatcherV1GetProfileForEventErr(t *testing.T) {
 	dsp := NewDispatcherService(nil, cfg, nil, nil)
 	ev := &utils.CGREvent{}
 	dPfl := &engine.DispatcherProfiles{}
-	err := dsp.V1GetProfilesForEvent(context.Background(), ev, dPfl)
+	err := dsp.V1GetProfilesForEvent(ev, dPfl)
 	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -167,7 +194,7 @@ func TestDispatcherV1GetProfileForEvent(t *testing.T) {
 	dsp := NewDispatcherService(nil, cfg, nil, nil)
 	ev := &utils.CGREvent{}
 	dPfl := &engine.DispatcherProfiles{}
-	err := dsp.V1GetProfilesForEvent(context.Background(), ev, dPfl)
+	err := dsp.V1GetProfilesForEvent(ev, dPfl)
 	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -179,7 +206,7 @@ func TestDispatcherDispatch(t *testing.T) {
 	cfg.GeneralCfg().DefaultTenant = utils.EmptyString
 	dsp := NewDispatcherService(nil, cfg, nil, nil)
 	ev := &utils.CGREvent{}
-	err := dsp.Dispatch(context.TODO(), ev, "", "", "", "")
+	err := dsp.Dispatch(ev, "", "", "", "")
 	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -201,9 +228,9 @@ func TestDispatcherAuthorizeError(t *testing.T) {
 			},
 		},
 	}
-	connMng := engine.NewConnManager(cfg)
+	connMng := engine.NewConnManager(cfg, nil)
 	dsp := NewDispatcherService(nil, cfg, nil, connMng)
-	err := dsp.authorize(context.Background(), "", "cgrates.org", utils.APIMethods)
+	err := dsp.authorize("", "cgrates.org", utils.APIMethods, nil)
 	expected := "dial tcp: address error: missing port in address"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -225,9 +252,9 @@ func TestDispatcherAuthorizeError2(t *testing.T) {
 			},
 		},
 	}
-	connMng := engine.NewConnManager(cfg)
+	connMng := engine.NewConnManager(cfg, nil)
 	dsp := NewDispatcherService(nil, cfg, nil, connMng)
-	err := dsp.authorize(context.Background(), "", "cgrates.org", utils.APIMethods)
+	err := dsp.authorize("", "cgrates.org", utils.APIMethods, nil)
 	expected := "dial tcp: address error: missing port in address"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -238,17 +265,19 @@ func TestDispatcherServiceAuthorizeEvenError1(t *testing.T) {
 	cacheInit := engine.Cache
 	cfg := config.NewDefaultCGRConfig()
 	dm := engine.NewDataManager(nil, nil, nil)
-	connMgr := engine.NewConnManager(cfg)
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 	fltr := &engine.FilterS{}
+	connMgr := &engine.ConnManager{}
 	dsp := NewDispatcherService(dm, cfg, fltr, connMgr)
 	cfg.DispatcherSCfg().AttributeSConns = []string{"connID"}
-	ev := &utils.CGREvent{}
+	ev := &utils.CGREvent{
+		APIOpts: make(map[string]interface{}),
+	}
 	reply := &engine.AttrSProcessEventReply{}
 	engine.Cache.SetWithoutReplicate(utils.CacheRPCConnections, "connID",
 		nil, nil, true, utils.NonTransactional)
-	err := dsp.authorizeEvent(context.Background(), ev, reply)
+	err := dsp.authorizeEvent(ev, reply)
 	expected := "UNKNOWN_API_KEY"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -260,15 +289,17 @@ func TestDispatcherServiceAuthorizeEventError2(t *testing.T) {
 	cacheInit := engine.Cache
 	cfg := config.NewDefaultCGRConfig()
 	dm := engine.NewDataManager(nil, nil, nil)
-	connMgr := engine.NewConnManager(cfg)
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 	fltr := &engine.FilterS{}
+	connMgr := &engine.ConnManager{}
 	dsp := NewDispatcherService(dm, cfg, fltr, connMgr)
 	cfg.DispatcherSCfg().AttributeSConns = []string{"connID"}
-	ev := &utils.CGREvent{}
+	ev := &utils.CGREvent{
+		APIOpts: make(map[string]interface{}),
+	}
 	reply := &engine.AttrSProcessEventReply{}
-	dh := &engine.DispatcherHost{
+	value := &engine.DispatcherHost{
 		Tenant: "testTenant",
 		RemoteHost: &config.RemoteHost{
 			ID:        "testID",
@@ -277,12 +308,11 @@ func TestDispatcherServiceAuthorizeEventError2(t *testing.T) {
 			TLS:       false,
 		},
 	}
-	value := &lazyDH{dh: dh, cfg: cfg, iPRCCh: nil}
 	engine.Cache.SetWithoutReplicate(utils.CacheRPCConnections, "connID",
 		value, nil, true, utils.NonTransactional)
-
+	err := dsp.authorizeEvent(ev, reply)
 	expected := "dial tcp: missing address"
-	if err := dsp.authorizeEvent(context.Background(), ev, reply); err == nil || err.Error() != expected {
+	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
 	}
 	engine.Cache = cacheInit
@@ -290,7 +320,7 @@ func TestDispatcherServiceAuthorizeEventError2(t *testing.T) {
 
 type mockTypeCon2 struct{}
 
-func (*mockTypeCon2) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) error {
+func (*mockTypeCon2) Call(serviceMethod string, args, reply interface{}) error {
 	return nil
 }
 
@@ -299,19 +329,22 @@ func TestDispatcherServiceAuthorizeEventError3(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
 	dm := engine.NewDataManager(nil, nil, nil)
-	chanRPC := make(chan birpc.ClientConnector, 1)
+	chanRPC := make(chan rpcclient.ClientConnector, 1)
 	chanRPC <- new(mockTypeCon2)
-	connMgr := engine.NewConnManager(cfg)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, chanRPC)
+	rpcInt := map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): chanRPC,
+	}
+	connMgr := engine.NewConnManager(cfg, rpcInt)
 
 	dsp := NewDispatcherService(dm, cfg, nil, connMgr)
 	ev := &utils.CGREvent{
 		Tenant:  "testTenant",
 		ID:      "testID",
+		Time:    nil,
 		Event:   map[string]interface{}{},
-		APIOpts: nil,
+		APIOpts: make(map[string]interface{}),
 	}
-	dh := &engine.DispatcherHost{
+	value := &engine.DispatcherHost{
 		Tenant: "testTenant",
 		RemoteHost: &config.RemoteHost{
 			ID:        "testID",
@@ -320,14 +353,13 @@ func TestDispatcherServiceAuthorizeEventError3(t *testing.T) {
 			TLS:       false,
 		},
 	}
-	value := &lazyDH{dh: dh, cfg: cfg, iPRCCh: chanRPC}
-
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 	engine.Cache.SetWithoutReplicate(utils.CacheRPCConnections, "testID",
 		value, nil, true, utils.NonTransactional)
 	rply := &engine.AttrSProcessEventReply{}
-	if err := dsp.authorizeEvent(context.Background(), ev, rply); err != nil {
+	err := dsp.authorizeEvent(ev, rply)
+	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
 	engine.Cache = cacheInit
@@ -335,11 +367,12 @@ func TestDispatcherServiceAuthorizeEventError3(t *testing.T) {
 
 type mockTypeCon3 struct{}
 
-func (*mockTypeCon3) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) error {
+func (*mockTypeCon3) Call(serviceMethod string, args, reply interface{}) error {
 	eVreply := &engine.AttrSProcessEventReply{
 		CGREvent: &utils.CGREvent{
 			Tenant: "testTenant",
 			ID:     "testID",
+			Time:   nil,
 			Event: map[string]interface{}{
 				utils.APIMethods: "yes",
 			},
@@ -355,13 +388,15 @@ func TestDispatcherServiceAuthorizeError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
 	dm := engine.NewDataManager(nil, nil, nil)
-	chanRPC := make(chan birpc.ClientConnector, 1)
+	chanRPC := make(chan rpcclient.ClientConnector, 1)
 	chanRPC <- new(mockTypeCon3)
-	connMgr := engine.NewConnManager(cfg)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, chanRPC)
+	rpcInt := map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): chanRPC,
+	}
+	connMgr := engine.NewConnManager(cfg, rpcInt)
 
 	dsp := NewDispatcherService(dm, cfg, nil, connMgr)
-	dh := &engine.DispatcherHost{
+	value := &engine.DispatcherHost{
 		Tenant: "testTenant",
 		RemoteHost: &config.RemoteHost{
 			ID:        "testID",
@@ -370,13 +405,13 @@ func TestDispatcherServiceAuthorizeError(t *testing.T) {
 			TLS:       false,
 		},
 	}
-	value := &lazyDH{dh: dh, cfg: cfg, iPRCCh: chanRPC}
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 	engine.Cache.SetWithoutReplicate(utils.CacheRPCConnections, "testID",
 		value, nil, true, utils.NonTransactional)
+	err := dsp.authorize(utils.APIMethods, "testTenant", "apikey", &time.Time{})
 	expected := "UNAUTHORIZED_API"
-	if err := dsp.authorize(context.Background(), utils.APIMethods, "testTenant", "apikey"); err == nil || err.Error() != expected {
+	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
 	}
 	engine.Cache = cacheInit
@@ -384,11 +419,12 @@ func TestDispatcherServiceAuthorizeError(t *testing.T) {
 
 type mockTypeCon4 struct{}
 
-func (*mockTypeCon4) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) error {
+func (*mockTypeCon4) Call(serviceMethod string, args, reply interface{}) error {
 	eVreply := &engine.AttrSProcessEventReply{
 		CGREvent: &utils.CGREvent{
 			Tenant:  "testTenant",
 			ID:      "testID",
+			Time:    nil,
 			Event:   map[string]interface{}{},
 			APIOpts: nil,
 		},
@@ -402,13 +438,15 @@ func TestDispatcherServiceAuthorizeError2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
 	dm := engine.NewDataManager(nil, nil, nil)
-	chanRPC := make(chan birpc.ClientConnector, 1)
+	chanRPC := make(chan rpcclient.ClientConnector, 1)
 	chanRPC <- new(mockTypeCon4)
-	connMgr := engine.NewConnManager(cfg)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, chanRPC)
+	rpcInt := map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): chanRPC,
+	}
+	connMgr := engine.NewConnManager(cfg, rpcInt)
 
 	dsp := NewDispatcherService(dm, cfg, nil, connMgr)
-	dh := &engine.DispatcherHost{
+	value := &engine.DispatcherHost{
 		Tenant: "testTenant",
 		RemoteHost: &config.RemoteHost{
 			ID:        "testID",
@@ -417,14 +455,13 @@ func TestDispatcherServiceAuthorizeError2(t *testing.T) {
 			TLS:       false,
 		},
 	}
-	value := &lazyDH{dh: dh, cfg: cfg, iPRCCh: chanRPC}
-
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 	engine.Cache.SetWithoutReplicate(utils.CacheRPCConnections, "testID",
 		value, nil, true, utils.NonTransactional)
+	err := dsp.authorize(utils.APIMethods, "testTenant", "apikey", &time.Time{})
 	expected := "NOT_FOUND"
-	if err := dsp.authorize(context.Background(), utils.APIMethods, "testTenant", "apikey"); err == nil || err.Error() != expected {
+	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
 	}
 	engine.Cache = cacheInit
@@ -432,11 +469,12 @@ func TestDispatcherServiceAuthorizeError2(t *testing.T) {
 
 type mockTypeCon5 struct{}
 
-func (*mockTypeCon5) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) error {
+func (*mockTypeCon5) Call(serviceMethod string, args, reply interface{}) error {
 	eVreply := &engine.AttrSProcessEventReply{
 		CGREvent: &utils.CGREvent{
 			Tenant: "testTenant",
 			ID:     "testID",
+			Time:   nil,
 			Event: map[string]interface{}{
 				utils.APIMethods: "testMethod",
 			},
@@ -452,13 +490,15 @@ func TestDispatcherServiceAuthorizeError3(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
 	dm := engine.NewDataManager(nil, nil, nil)
-	chanRPC := make(chan birpc.ClientConnector, 1)
+	chanRPC := make(chan rpcclient.ClientConnector, 1)
 	chanRPC <- new(mockTypeCon5)
-	connMgr := engine.NewConnManager(cfg)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, chanRPC)
+	rpcInt := map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): chanRPC,
+	}
+	connMgr := engine.NewConnManager(cfg, rpcInt)
 
 	dsp := NewDispatcherService(dm, cfg, nil, connMgr)
-	dh := &engine.DispatcherHost{
+	value := &engine.DispatcherHost{
 		Tenant: "testTenant",
 		RemoteHost: &config.RemoteHost{
 			ID:        "testID",
@@ -467,41 +507,66 @@ func TestDispatcherServiceAuthorizeError3(t *testing.T) {
 			TLS:       false,
 		},
 	}
-	value := &lazyDH{dh: dh, cfg: cfg, iPRCCh: chanRPC}
-
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 	engine.Cache.SetWithoutReplicate(utils.CacheRPCConnections, "testID",
 		value, nil, true, utils.NonTransactional)
-	if err := dsp.authorize(context.Background(), "testMethod", "testTenant", "apikey"); err != nil {
+	err := dsp.authorize("testMethod", "testTenant", "apikey", &time.Time{})
+	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
 	engine.Cache = cacheInit
 }
 
-func TestDispatcherServiceDispatcherProfileForEventErrNil(t *testing.T) {
+func TestDispatcherServiceCall1(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := engine.NewDataManager(dataDB, nil, connMng)
-	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dm := engine.NewDataManager(nil, nil, nil)
+	dsp := NewDispatcherService(dm, cfg, nil, connMng)
+	reply := "reply"
+	args := &utils.CGREvent{
+		Tenant: "tenantTest",
+		ID:     "tenantID",
+		Time:   nil,
+		Event: map[string]interface{}{
+			"event": "value",
+		},
+		APIOpts: nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dsp.Call(utils.DispatcherServicePing, args, &reply)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+}
+
+func TestDispatcherServiceDispatcherProfileForEventErrNil(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.DispatcherSCfg().IndexedSelects = false
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(dataDB, nil, connMng)
+	dsp := &engine.DispatcherProfile{
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
+	}
+	err := dm.SetDispatcherProfile(dsp, false)
+	if err != nil {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
+	}
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -513,13 +578,10 @@ func TestDispatcherServiceDispatcherProfileForEventErrNil(t *testing.T) {
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
+	}, subsys)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -528,26 +590,30 @@ func TestDispatcherServiceDispatcherProfileForEventErrNil(t *testing.T) {
 func TestDispatcherV1GetProfileForEventReturn(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -559,18 +625,15 @@ func TestDispatcherV1GetProfileForEventReturn(t *testing.T) {
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
+	}, subsys)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
 	dPfl := &engine.DispatcherProfiles{}
-	err = dss.V1GetProfilesForEvent(context.Background(), ev, dPfl)
+	err = dss.V1GetProfilesForEvent(ev, dPfl)
 	expected := "DISPATCHER_ERROR:NO_DATABASE_CONNECTION"
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -580,26 +643,30 @@ func TestDispatcherV1GetProfileForEventReturn(t *testing.T) {
 func TestDispatcherServiceDispatcherProfileForEventErrNotFound(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -611,41 +678,42 @@ func TestDispatcherServiceDispatcherProfileForEventErrNotFound(t *testing.T) {
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
-	if err == nil || err != utils.ErrDSPProfileNotFound {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrDSPProfileNotFound, err)
+	}, subsys)
+	if err == nil || err != utils.ErrNotFound {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotFound, err)
 	}
 }
 
 func TestDispatcherServiceDispatcherProfileForEventErrNotFound2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -657,35 +725,87 @@ func TestDispatcherServiceDispatcherProfileForEventErrNotFound2(t *testing.T) {
 	}
 	tnt := ""
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
-	if err == nil || err != utils.ErrDSPProfileNotFound {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrDSPProfileNotFound, err)
+	}, subsys)
+	if err == nil || err != utils.ErrNotFound {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotFound, err)
 	}
 }
 
-func TestDispatcherServiceDispatcherProfileForEventErrNotFoundFilter(t *testing.T) {
-	engine.Cache.Clear(nil)
+func TestDispatcherServiceDispatcherProfileForEventErrNotFoundTime(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
+	engine.Cache.Clear(nil)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"filter", "*string:~*vars.*subsys:" + utils.MetaAccounts},
+		Tenant:     "cgrates.org",
+		ID:         "123",
+		Subsystems: []string{utils.MetaAccounts},
+		FilterIDs:  nil,
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(1999, 2, 3, 4, 5, 6, 700000000, time.UTC),
+			ExpiryTime:     time.Date(2000, 2, 3, 4, 5, 6, 700000000, time.UTC),
+		},
 		Strategy:       "",
 		StrategyParams: nil,
 		Weight:         0,
 		Hosts:          nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
+	if err != nil {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
+	}
+	fltrs := engine.NewFilterS(cfg, connMng, dm)
+	dss := NewDispatcherService(dm, cfg, fltrs, connMng)
+	ev := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "123",
+		Time:   utils.TimePointer(time.Now()),
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			"Password":         "CGRateS.org",
+			"RunID":            utils.MetaDefault,
+		},
+		APIOpts: map[string]interface{}{
+			utils.MetaSubsys: utils.MetaAccounts,
+		},
+	}
+	tnt := ev.Tenant
+	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
+		utils.MetaReq:  ev.Event,
+		utils.MetaOpts: ev.APIOpts,
+	}, subsys)
+	if err == nil || err != utils.ErrNotFound {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotFound, err)
+	}
+}
+
+func TestDispatcherServiceDispatcherProfileForEventErrNotFoundFilter(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.DispatcherSCfg().IndexedSelects = false
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(dataDB, nil, connMng)
+	engine.Cache.Clear(nil)
+	dsp := &engine.DispatcherProfile{
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          []string{"filter"},
+		ActivationInterval: &utils.ActivationInterval{},
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
+	}
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -705,42 +825,43 @@ func TestDispatcherServiceDispatcherProfileForEventErrNotFoundFilter(t *testing.
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
+	}, subsys)
 	if err == nil || err.Error() != "NOT_FOUND:filter" {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "NOT_FOUND:filter", err)
 	}
 }
 
 func TestDispatcherServiceDispatchDspErr(t *testing.T) {
-	engine.Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	engine.Cache.Clear(nil)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -751,45 +872,49 @@ func TestDispatcherServiceDispatchDspErr(t *testing.T) {
 		},
 	}
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	err = dss.Dispatch(context.TODO(), ev, subsys, "", "", "")
+	err = dss.Dispatch(ev, subsys, "", "", "")
 	expected := "unsupported dispatch strategy: <>"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
 	}
-	dss.Shutdown()
 }
 
 func TestDispatcherServiceDispatchDspErrHostNotFound(t *testing.T) {
-	engine.Cache.Clear(nil)
+	cacheInit := engine.Cache
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		StrategyParams: make(map[string]interface{}),
-		Strategy:       utils.MetaWeight,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		StrategyParams:     make(map[string]interface{}),
+		Strategy:           utils.MetaWeight,
+		Weight:             0,
+		Hosts:              nil,
 	}
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	value, errDsp := newDispatcher(dsp)
 	if errDsp != nil {
 		t.Fatal(errDsp)
 	}
-	ctx := &context.Context{}
-	engine.Cache.Set(ctx, utils.CacheDispatchers, dsp.TenantID(), value, nil, true, utils.EmptyString)
+	engine.Cache = newCache
+	engine.Cache.Set(utils.CacheDispatchers, dsp.TenantID(), value, nil, true, utils.EmptyString)
 
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -800,30 +925,47 @@ func TestDispatcherServiceDispatchDspErrHostNotFound(t *testing.T) {
 		},
 	}
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	err = dss.Dispatch(context.TODO(), ev, subsys, "", "", "")
+	err = dss.Dispatch(ev, subsys, "", "", "")
 	expected := "DSP_HOST_NOT_FOUND"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
 	}
+	engine.Cache = cacheInit
 }
 
 func TestDispatcherServiceDispatcherProfileForEventFoundFilter(t *testing.T) {
-	engine.Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
+	engine.Cache.Clear(nil)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*req.RunID:1", "*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          []string{"filter"},
+		ActivationInterval: &utils.ActivationInterval{},
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
+	if err != nil {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
+	}
+	fltr := &engine.Filter{
+		Tenant: "cgrates.org",
+		ID:     "filter",
+		Rules:  nil,
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(1999, 2, 3, 4, 5, 6, 700000000, time.UTC),
+			ExpiryTime:     time.Date(2000, 2, 3, 4, 5, 6, 700000000, time.UTC),
+		},
+	}
+	err = dm.SetFilter(fltr, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -843,31 +985,28 @@ func TestDispatcherServiceDispatcherProfileForEventFoundFilter(t *testing.T) {
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
-	if err == nil || err.Error() != "DSP_PROFILE_NOT_FOUND" {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "DSP_PROFILE_NOT_FOUND:filter", err)
+	}, subsys)
+	if err == nil || err.Error() != "NOT_FOUND" {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "NOT_FOUND:filter", err)
 	}
 }
 
 func TestDispatcherServiceDispatcherProfileForEventNotNotFound(t *testing.T) {
-	engine.Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = true
-	connMng := engine.NewConnManager(cfg)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
 	var cnt int
 
 	dm := engine.NewDataManager(&engine.DataDBMock{
-		GetIndexesDrvF: func(ctx *context.Context, idxItmType, tntCtx, idxKey, transactionID string) (indexes map[string]utils.StringSet, err error) {
+		GetIndexesDrvF: func(idxItmType, tntCtx, idxKey string) (indexes map[string]utils.StringSet, err error) {
 			if cnt == 0 {
 				cnt++
 				return map[string]utils.StringSet{
-					idxKey: {"cgrates.org:dsp1": {}},
+					idxKey: utils.StringSet{"cgrates.org:dsp1": {}},
 				}, nil
 			}
 			return nil, utils.ErrNotImplemented
@@ -889,13 +1028,10 @@ func TestDispatcherServiceDispatcherProfileForEventNotNotFound(t *testing.T) {
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err := dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err := dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
+	}, subsys)
 	expected := utils.ErrNotImplemented
 	if err == nil || err != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -903,22 +1039,38 @@ func TestDispatcherServiceDispatcherProfileForEventNotNotFound(t *testing.T) {
 }
 
 func TestDispatcherServiceDispatcherProfileForEventGetDispatcherError(t *testing.T) {
-	engine.Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
+	engine.Cache.Clear(nil)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*req.RunID:1", "*string:~*vars.*subsys:" + utils.MetaAccounts},
-		Strategy:       "",
-		StrategyParams: nil,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          []string{"filter"},
+		ActivationInterval: &utils.ActivationInterval{},
+		Strategy:           "",
+		StrategyParams:     nil,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
+	if err != nil {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
+	}
+	fltr := &engine.Filter{
+		Tenant: "cgrates.org",
+		ID:     "filter",
+		Rules:  nil,
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(1999, 2, 3, 4, 5, 6, 700000000, time.UTC),
+			ExpiryTime:     time.Date(2000, 2, 3, 4, 5, 6, 700000000, time.UTC),
+		},
+	}
+	err = dm.SetFilter(fltr, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -938,15 +1090,12 @@ func TestDispatcherServiceDispatcherProfileForEventGetDispatcherError(t *testing
 	}
 	tnt := ev.Tenant
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	_, err = dss.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	_, err = dss.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	})
-	if err == nil || err.Error() != "DSP_PROFILE_NOT_FOUND" {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "DSP_PROFILE_NOT_FOUND:filter", err)
+	}, subsys)
+	if err == nil || err.Error() != "NOT_FOUND" {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "NOT_FOUND:filter", err)
 	}
 }
 
@@ -954,35 +1103,38 @@ func TestDispatcherServiceDispatchDspErrHostNotFound2(t *testing.T) {
 	cacheInit := engine.Cache
 	cfg := config.NewDefaultCGRConfig()
 	cfg.DispatcherSCfg().IndexedSelects = false
-	connMng := engine.NewConnManager(cfg)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMng)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		StrategyParams: make(map[string]interface{}),
-		Strategy:       utils.MetaWeight,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		StrategyParams:     make(map[string]interface{}),
+		Strategy:           utils.MetaWeight,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	newCache := engine.NewCacheS(cfg, dm, connMng, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	value, errDsp := newDispatcher(dsp)
 	if errDsp != nil {
 		t.Fatal(errDsp)
 	}
-	ctx := &context.Context{}
 	engine.Cache = newCache
-	engine.Cache.Set(ctx, utils.CacheDispatchers, dsp.TenantID(), value, nil, true, utils.EmptyString)
+	engine.Cache.Set(utils.CacheDispatchers, dsp.TenantID(), value, nil, true, utils.EmptyString)
 
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMng, dm), connMng)
+	dss := NewDispatcherService(dm, cfg, nil, connMng)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -993,7 +1145,7 @@ func TestDispatcherServiceDispatchDspErrHostNotFound2(t *testing.T) {
 		},
 	}
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	err = dss.Dispatch(context.TODO(), ev, subsys, "", "", "")
+	err = dss.Dispatch(ev, subsys, "", "", "")
 	expected := "DSP_HOST_NOT_FOUND"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -1003,7 +1155,7 @@ func TestDispatcherServiceDispatchDspErrHostNotFound2(t *testing.T) {
 
 type mockTypeConSetCache struct{}
 
-func (*mockTypeConSetCache) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) error {
+func (*mockTypeConSetCache) Call(serviceMethod string, args, reply interface{}) error {
 	return utils.ErrNotImplemented
 }
 
@@ -1015,32 +1167,37 @@ func TestDispatcherServiceDispatchDspErrHostNotFound3(t *testing.T) {
 		Replicate: true,
 	}
 	cfg.DispatcherSCfg().IndexedSelects = false
-	chanRPC := make(chan birpc.ClientConnector, 1)
+	chanRPC := make(chan rpcclient.ClientConnector, 1)
 	chanRPC <- new(mockTypeConSetCache)
-	connMgr := engine.NewConnManager(cfg)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaReplicator), utils.ReplicatorSv1, chanRPC)
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	rpcInt := map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaReplicator): chanRPC,
+	}
+	connMgr := engine.NewConnManager(cfg, rpcInt)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, nil, connMgr)
 	dsp := &engine.DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "123",
-		FilterIDs:      []string{"*string:~*vars.*subsys:" + utils.MetaAccounts},
-		StrategyParams: make(map[string]interface{}),
-		Strategy:       utils.MetaWeight,
-		Weight:         0,
-		Hosts:          nil,
+		Tenant:             "cgrates.org",
+		ID:                 "123",
+		Subsystems:         []string{utils.MetaAccounts},
+		FilterIDs:          nil,
+		ActivationInterval: nil,
+		StrategyParams:     make(map[string]interface{}),
+		Strategy:           utils.MetaWeight,
+		Weight:             0,
+		Hosts:              nil,
 	}
-	newCache := engine.NewCacheS(cfg, dm, connMgr, nil)
+	newCache := engine.NewCacheS(cfg, dm, nil)
 	engine.Cache = newCache
 
-	err := dm.SetDispatcherProfile(context.TODO(), dsp, false)
+	err := dm.SetDispatcherProfile(dsp, false)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
-	dss := NewDispatcherService(dm, cfg, engine.NewFilterS(cfg, connMgr, dm), connMgr)
+	dss := NewDispatcherService(dm, cfg, nil, connMgr)
 	ev := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "123",
+		Time:   nil,
 		Event: map[string]interface{}{
 			utils.AccountField: "1001",
 			"Password":         "CGRateS.org",
@@ -1051,7 +1208,7 @@ func TestDispatcherServiceDispatchDspErrHostNotFound3(t *testing.T) {
 		},
 	}
 	subsys := utils.IfaceAsString(ev.APIOpts[utils.MetaSubsys])
-	err = dss.Dispatch(context.TODO(), ev, subsys, "", "", "")
+	err = dss.Dispatch(ev, subsys, "", "", "")
 	expected := "NOT_IMPLEMENTED"
 	if err == nil || err.Error() != expected {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
@@ -1059,44 +1216,142 @@ func TestDispatcherServiceDispatchDspErrHostNotFound3(t *testing.T) {
 	engine.Cache = cacheInit
 }
 
-func TestDispatchersdispatcherProfileForEventAnySSfalseFirstNotFound(t *testing.T) {
+func (dS *DispatcherService) DispatcherServiceTest(ev *utils.CGREvent, reply *string) (error, interface{}) {
+	*reply = utils.Pong
+	return nil, nil
+}
+
+func TestDispatcherServiceCall2(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dm := engine.NewDataManager(nil, nil, nil)
+	dsp := NewDispatcherService(dm, cfg, nil, connMng)
+	reply := "reply"
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "123",
+		Time:   nil,
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			"Password":         "CGRateS.org",
+			"RunID":            utils.MetaDefault,
+		},
+		APIOpts: map[string]interface{}{
+			utils.MetaSubsys: utils.MetaDispatchers,
+		},
+	}
+	err := dsp.Call("DispatcherService.Test", args, &reply)
+	expected := "SERVER_ERROR"
+	if err == nil || err.Error() != expected {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
+	}
+}
+
+func (dS *DispatcherService) DispatcherServiceTest2(ev *utils.CGREvent, reply *string) interface{} {
+	*reply = utils.Pong
+	return utils.ErrNotImplemented
+}
+
+func TestDispatcherServiceCall3(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dm := engine.NewDataManager(nil, nil, nil)
+	dsp := NewDispatcherService(dm, cfg, nil, connMng)
+	reply := "reply"
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "123",
+		Time:   nil,
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			"Password":         "CGRateS.org",
+			"RunID":            utils.MetaDefault,
+		},
+		APIOpts: map[string]interface{}{
+			utils.MetaSubsys: utils.MetaDispatchers,
+		},
+	}
+	err := dsp.Call("DispatcherService.Test2", args, &reply)
+	expected := utils.ErrNotImplemented
+	if err == nil || err != expected {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
+	}
+}
+
+func (dS *DispatcherService) DispatcherServiceTest3(ev *utils.CGREvent, reply *string) int {
+	*reply = utils.Pong
+	return 1
+}
+
+func TestDispatcherServiceCall4(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	rpcCl := map[string]chan rpcclient.ClientConnector{}
+	connMng := engine.NewConnManager(cfg, rpcCl)
+	dm := engine.NewDataManager(nil, nil, nil)
+	dsp := NewDispatcherService(dm, cfg, nil, connMng)
+	reply := "reply"
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "123",
+		Time:   nil,
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			"Password":         "CGRateS.org",
+			"RunID":            utils.MetaDefault,
+		},
+		APIOpts: map[string]interface{}{
+			utils.MetaSubsys: utils.MetaDispatchers,
+		},
+	}
+	err := dsp.Call("DispatcherService.Test3", args, &reply)
+	expected := "SERVER_ERROR"
+	if err == nil || err.Error() != expected {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, err)
+	}
+}
+
+func TestDispatchersdispatcherProfileForEventAnySSfalses(t *testing.T) {
 	tmp := engine.Cache
 	defer func() {
 		engine.Cache = tmp
 	}()
 
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, cfg.CacheCfg(), nil)
-	connMgr := engine.NewConnManager(cfg)
-	engine.Cache = engine.NewCacheS(cfg, dm, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
 
 	dS := &DispatcherService{
 		cfg:   cfg,
 		dm:    dm,
 		fltrS: engine.NewFilterS(cfg, nil, dm),
 	}
+	dS.cfg.DispatcherSCfg().AnySubsystem = false
 
 	dsp1 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1002", "*string:~*vars.*subsys:" + utils.MetaSessionS},
-		ID:        "DSP_1",
-		Strategy:  "*weight",
-		Weight:    10,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1002"},
+		Subsystems: []string{utils.MetaSessionS},
+		ID:         "DSP_1",
+		Strategy:   "*weight",
+		Weight:     10,
 	}
-	err := dS.dm.SetDispatcherProfile(context.TODO(), dsp1, true)
+	err := dS.dm.SetDispatcherProfile(dsp1, true)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dsp2 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1001"},
-		ID:        "DSP_2",
-		Strategy:  "*weight",
-		Weight:    20,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1001"},
+		Subsystems: []string{utils.MetaAny},
+		ID:         "DSP_2",
+		Strategy:   "*weight",
+		Weight:     20,
 	}
-	err = dS.dm.SetDispatcherProfile(context.TODO(), dsp2, true)
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1113,13 +1368,101 @@ func TestDispatchersdispatcherProfileForEventAnySSfalseFirstNotFound(t *testing.
 	}
 	subsys := utils.MetaSessionS
 
-	if rcv, err := dS.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
+	}, subsys); err != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	} else if len(rcv) != 1 {
+		t.Errorf("Unexpected number of profiles:%v", len(rcv))
+	} else if !reflect.DeepEqual(rcv[0], dsp2) {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", dsp2, rcv)
+	}
+
+	dataDB.Flush("")
+	engine.Cache.Clear(nil)
+	dsp1.FilterIDs = []string{"*string:~*req.Account:1001"}
+	err = dS.dm.SetDispatcherProfile(dsp1, true)
+	if err != nil {
+		t.Error(err)
+	}
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
+		utils.MetaReq:  ev.Event,
+		utils.MetaOpts: ev.APIOpts,
+	}, subsys); err != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	} else if len(rcv) != 1 {
+		t.Errorf("Unexpected number of profiles:%v", len(rcv))
+	} else if !reflect.DeepEqual(rcv[0], dsp1) {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", utils.ToJSON(dsp1), utils.ToJSON(rcv[0]))
+	}
+}
+
+func TestDispatchersdispatcherProfileForEventAnySSfalseFirstNotFound(t *testing.T) {
+	tmp := engine.Cache
+	defer func() {
+		engine.Cache = tmp
+	}()
+
+	cfg := config.NewDefaultCGRConfig()
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(dataDB, cfg.CacheCfg(), nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
+
+	dS := &DispatcherService{
+		cfg:   cfg,
+		dm:    dm,
+		fltrS: engine.NewFilterS(cfg, nil, dm),
+	}
+	dS.cfg.DispatcherSCfg().AnySubsystem = false
+
+	dsp1 := &engine.DispatcherProfile{
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1002"},
+		Subsystems: []string{utils.MetaSessionS},
+		ID:         "DSP_1",
+		Strategy:   "*weight",
+		Weight:     10,
+	}
+	err := dS.dm.SetDispatcherProfile(dsp1, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	dsp2 := &engine.DispatcherProfile{
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1001"},
+		Subsystems: []string{utils.MetaAny},
+		ID:         "DSP_2",
+		Strategy:   "*weight",
+		Weight:     20,
+	}
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
+	if err != nil {
+		t.Error(err)
+	}
+
+	tnt := "cgrates.org"
+	ev := &utils.CGREvent{
+		Tenant: tnt,
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
 		},
-	}); err != nil {
+		APIOpts: map[string]interface{}{
+			utils.OptsDispatchersProfilesCount: 1,
+		},
+	}
+	subsys := utils.MetaSessionS
+
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
+		utils.MetaReq:  ev.Event,
+		utils.MetaOpts: ev.APIOpts,
+	}, subsys); err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	} else if len(rcv) != 1 {
 		t.Errorf("Unexpected number of profiles:%v", len(rcv))
@@ -1135,37 +1478,39 @@ func TestDispatchersdispatcherProfileForEventAnySSfalseFound(t *testing.T) {
 	}()
 
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMgr := engine.NewConnManager(cfg)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, cfg.CacheCfg(), nil)
-	engine.Cache = engine.NewCacheS(cfg, dm, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
 
 	dS := &DispatcherService{
 		cfg:   cfg,
 		dm:    dm,
 		fltrS: engine.NewFilterS(cfg, nil, dm),
 	}
+	dS.cfg.DispatcherSCfg().AnySubsystem = false
 
 	dsp1 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*vars.*subsys:" + utils.MetaSessionS},
-		ID:        "DSP_1",
-		Strategy:  "*weight",
-		Weight:    20,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1001"},
+		Subsystems: []string{utils.MetaSessionS},
+		ID:         "DSP_1",
+		Strategy:   "*weight",
+		Weight:     20,
 	}
-	err := dS.dm.SetDispatcherProfile(context.TODO(), dsp1, true)
+	err := dS.dm.SetDispatcherProfile(dsp1, true)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dsp2 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1001"},
-		ID:        "DSP_2",
-		Strategy:  "*weight",
-		Weight:    10,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1001"},
+		Subsystems: []string{utils.MetaAny},
+		ID:         "DSP_2",
+		Strategy:   "*weight",
+		Weight:     10,
 	}
-	err = dS.dm.SetDispatcherProfile(context.TODO(), dsp2, true)
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1182,13 +1527,10 @@ func TestDispatchersdispatcherProfileForEventAnySSfalseFound(t *testing.T) {
 	}
 	subsys := utils.MetaSessionS
 
-	if rcv, err := dS.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	}); err != nil {
+	}, subsys); err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	} else if len(rcv) != 1 {
 		t.Errorf("Unexpected number of profiles:%v", len(rcv))
@@ -1204,37 +1546,39 @@ func TestDispatchersdispatcherProfileForEventAnySSfalseNotFound(t *testing.T) {
 	}()
 
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMgr := engine.NewConnManager(cfg)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, cfg.CacheCfg(), nil)
-	engine.Cache = engine.NewCacheS(cfg, dm, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
 
 	dS := &DispatcherService{
 		cfg:   cfg,
 		dm:    dm,
 		fltrS: engine.NewFilterS(cfg, nil, dm),
 	}
+	dS.cfg.DispatcherSCfg().AnySubsystem = false
 
 	dsp1 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1002", "*string:~*vars.*subsys:" + utils.MetaSessionS},
-		ID:        "DSP_1",
-		Strategy:  "*weight",
-		Weight:    20,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1002"},
+		Subsystems: []string{utils.MetaSessionS},
+		ID:         "DSP_1",
+		Strategy:   "*weight",
+		Weight:     20,
 	}
-	err := dS.dm.SetDispatcherProfile(context.TODO(), dsp1, true)
+	err := dS.dm.SetDispatcherProfile(dsp1, true)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dsp2 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1002"},
-		ID:        "DSP_2",
-		Strategy:  "*weight",
-		Weight:    10,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1002"},
+		Subsystems: []string{utils.MetaAny},
+		ID:         "DSP_2",
+		Strategy:   "*weight",
+		Weight:     10,
 	}
-	err = dS.dm.SetDispatcherProfile(context.TODO(), dsp2, true)
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1251,14 +1595,11 @@ func TestDispatchersdispatcherProfileForEventAnySSfalseNotFound(t *testing.T) {
 	}
 	subsys := utils.MetaSessionS
 
-	if rcv, err := dS.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	}); err == nil || err != utils.ErrDSPProfileNotFound {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", utils.ErrDSPProfileNotFound, err)
+	}, subsys); err == nil || err != utils.ErrNotFound {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", utils.ErrNotFound, err)
 	} else if rcv != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, rcv)
 	}
@@ -1271,10 +1612,9 @@ func TestDispatchersdispatcherProfileForEventAnySStrueNotFound(t *testing.T) {
 	}()
 
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMgr := engine.NewConnManager(cfg)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, cfg.CacheCfg(), nil)
-	engine.Cache = engine.NewCacheS(cfg, dm, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
 
 	dS := &DispatcherService{
 		cfg:   cfg,
@@ -1283,25 +1623,27 @@ func TestDispatchersdispatcherProfileForEventAnySStrueNotFound(t *testing.T) {
 	}
 
 	dsp1 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1002", "*string:~*vars.*subsys:" + utils.MetaSessionS},
-		ID:        "DSP_1",
-		Strategy:  "*weight",
-		Weight:    20,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1002"},
+		Subsystems: []string{utils.MetaSessionS},
+		ID:         "DSP_1",
+		Strategy:   "*weight",
+		Weight:     20,
 	}
-	err := dS.dm.SetDispatcherProfile(context.TODO(), dsp1, true)
+	err := dS.dm.SetDispatcherProfile(dsp1, true)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dsp2 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1002"},
-		ID:        "DSP_2",
-		Strategy:  "*weight",
-		Weight:    10,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1002"},
+		Subsystems: []string{utils.MetaAny},
+		ID:         "DSP_2",
+		Strategy:   "*weight",
+		Weight:     10,
 	}
-	err = dS.dm.SetDispatcherProfile(context.TODO(), dsp2, true)
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1318,14 +1660,11 @@ func TestDispatchersdispatcherProfileForEventAnySStrueNotFound(t *testing.T) {
 	}
 	subsys := utils.MetaSessionS
 
-	if rcv, err := dS.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	}); err == nil || err != utils.ErrDSPProfileNotFound {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", utils.ErrDSPProfileNotFound, err)
+	}, subsys); err == nil || err != utils.ErrNotFound {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", utils.ErrNotFound, err)
 	} else if rcv != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, rcv)
 	}
@@ -1338,10 +1677,9 @@ func TestDispatchersdispatcherProfileForEventAnySStrueBothFound(t *testing.T) {
 	}()
 
 	cfg := config.NewDefaultCGRConfig()
-	dataDB := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMgr := engine.NewConnManager(cfg)
+	dataDB := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(dataDB, cfg.CacheCfg(), nil)
-	engine.Cache = engine.NewCacheS(cfg, dm, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, dm, nil)
 
 	dS := &DispatcherService{
 		cfg:   cfg,
@@ -1350,25 +1688,27 @@ func TestDispatchersdispatcherProfileForEventAnySStrueBothFound(t *testing.T) {
 	}
 
 	dsp1 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*vars.*subsys:" + utils.MetaSessionS},
-		ID:        "DSP_1",
-		Strategy:  "*weight",
-		Weight:    10,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1001"},
+		Subsystems: []string{utils.MetaSessionS},
+		ID:         "DSP_1",
+		Strategy:   "*weight",
+		Weight:     10,
 	}
-	err := dS.dm.SetDispatcherProfile(context.TODO(), dsp1, true)
+	err := dS.dm.SetDispatcherProfile(dsp1, true)
 	if err != nil {
 		t.Error(err)
 	}
 
 	dsp2 := &engine.DispatcherProfile{
-		Tenant:    "cgrates.org",
-		FilterIDs: []string{"*string:~*req.Account:1001"},
-		ID:        "DSP_2",
-		Strategy:  "*weight",
-		Weight:    20,
+		Tenant:     "cgrates.org",
+		FilterIDs:  []string{"*string:~*req.Account:1001"},
+		Subsystems: []string{utils.MetaAny},
+		ID:         "DSP_2",
+		Strategy:   "*weight",
+		Weight:     20,
 	}
-	err = dS.dm.SetDispatcherProfile(context.TODO(), dsp2, true)
+	err = dS.dm.SetDispatcherProfile(dsp2, true)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1385,13 +1725,10 @@ func TestDispatchersdispatcherProfileForEventAnySStrueBothFound(t *testing.T) {
 	}
 	subsys := utils.MetaSessionS
 
-	if rcv, err := dS.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	}); err != nil {
+	}, subsys); err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	} else if len(rcv) != 1 {
 		t.Errorf("Unexpected number of profiles:%v", len(rcv))
@@ -1400,18 +1737,15 @@ func TestDispatchersdispatcherProfileForEventAnySStrueBothFound(t *testing.T) {
 	}
 
 	dsp1.Weight = 30
-	err = dS.dm.SetDispatcherProfile(context.TODO(), dsp1, true)
+	err = dS.dm.SetDispatcherProfile(dsp1, true)
 	if err != nil {
 		t.Error(err)
 	}
 
-	if rcv, err := dS.dispatcherProfilesForEvent(context.Background(), tnt, ev, utils.MapStorage{
+	if rcv, err := dS.dispatcherProfilesForEvent(tnt, ev, utils.MapStorage{
 		utils.MetaReq:  ev.Event,
 		utils.MetaOpts: ev.APIOpts,
-		utils.MetaVars: utils.MapStorage{
-			utils.MetaSubsys: subsys,
-		},
-	}); err != nil {
+	}, subsys); err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	} else if len(rcv) != 1 {
 		t.Errorf("Unexpected number of profiles:%v", len(rcv))

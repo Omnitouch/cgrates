@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/streadway/amqp"
 )
 
@@ -41,7 +41,7 @@ func TestAMQPER(t *testing.T) {
 	"readers": [
 		{
 			"id": "amqp",										// identifier of the EventReader profile
-			"type": "*amqpJSONMap",							// reader type <*fileCSV>
+			"type": "*amqp_json_map",							// reader type <*file_csv>
 			"run_delay":  "-1",									// sleep interval in seconds between consecutive runs, -1 to use automation via inotify or 0 to disable running all together
 			"concurrent_requests": 1024,						// maximum simultaneous requests/files to process, 0 for unlimited
 			"source_path": "amqp://guest:guest@localhost:5672/",// read data from this path
@@ -57,7 +57,7 @@ func TestAMQPER(t *testing.T) {
 			"filters": [],										// limit parsing based on the filters
 			"flags": [],										// flags to influence the event processing
 			"fields":[									// import fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
-				{"tag": "OriginID", "type": "*composed", "value": "~*req.OriginID", "path": "*cgreq.OriginID"},
+				{"tag": "CGRID", "type": "*composed", "value": "~*req.CGRID", "path": "*cgreq.CGRID"},
 			],
 		},
 	],
@@ -69,13 +69,15 @@ func TestAMQPER(t *testing.T) {
 	if err := cfg.CheckConfigSanity(); err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 
 	rdrEvents = make(chan *erEvent, 1)
 	rdrErr = make(chan error, 1)
 	rdrExit = make(chan struct{}, 1)
 
 	if rdr, err = NewAMQPER(cfg, 1, rdrEvents, make(chan *erEvent, 1),
-		rdrErr, new(engine.FilterS), rdrExit, nil); err != nil {
+		rdrErr, new(engine.FilterS), rdrExit); err != nil {
 		t.Fatal(err)
 	}
 	connection, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
@@ -90,7 +92,7 @@ func TestAMQPER(t *testing.T) {
 	}
 
 	rdr.Serve()
-	randomOriginID := utils.UUIDSha1Prefix()
+	randomCGRID := utils.UUIDSha1Prefix()
 	if err = channel.Publish(
 		"test-exchange", // publish to an exchange
 		"test-key",      // routing to 0 or more queues
@@ -98,7 +100,7 @@ func TestAMQPER(t *testing.T) {
 		false,           // immediate
 		amqp.Publishing{
 			ContentType:  utils.ContentJSON,
-			Body:         []byte(fmt.Sprintf(`{"OriginID": "%s"}`, randomOriginID)),
+			Body:         []byte(fmt.Sprintf(`{"CGRID": "%s"}`, randomCGRID)),
 			DeliveryMode: amqp.Persistent, // 1=non-persistent, 2=persistent
 		},
 	); err != nil {
@@ -114,8 +116,9 @@ func TestAMQPER(t *testing.T) {
 		expected := &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     ev.cgrEvent.ID,
+			Time:   ev.cgrEvent.Time,
 			Event: map[string]interface{}{
-				"OriginID": randomOriginID,
+				"CGRID": randomCGRID,
 			},
 			APIOpts: map[string]interface{}{},
 		}
@@ -136,7 +139,7 @@ func TestAMQPERServeError(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfgIdx := 0
 	expected := "AMQP scheme must be either 'amqp://' or 'amqps://'"
-	rdr, err := NewAMQPER(cfg, cfgIdx, nil, nil, nil, nil, nil, nil)
+	rdr, err := NewAMQPER(cfg, cfgIdx, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}

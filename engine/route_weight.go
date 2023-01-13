@@ -19,48 +19,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
-func NewWeightSorter(cfg *config.CGRConfig) *WeightSorter {
-	return &WeightSorter{cfg: cfg}
+func NewWeightSorter(rS *RouteService) *WeightSorter {
+	return &WeightSorter{rS: rS,
+		sorting: utils.MetaWeight}
 }
 
 // WeightSorter orders routes based on their weight, no cost involved
 type WeightSorter struct {
-	cfg *config.CGRConfig
+	sorting string
+	rS      *RouteService
 }
 
-func (ws *WeightSorter) SortRoutes(ctx *context.Context, prflID string,
-	routes map[string]*RouteWithWeight, ev *utils.CGREvent, _ *optsGetRoutes) (sortedRoutes *SortedRoutes, err error) {
-	sortedRoutes = &SortedRoutes{
-		ProfileID: prflID,
-		Sorting:   utils.MetaWeight,
-		Routes:    make([]*SortedRoute, 0, len(routes)),
-	}
+func (ws *WeightSorter) SortRoutes(prflID string,
+	routes map[string]*Route, suplEv *utils.CGREvent, extraOpts *optsGetRoutes) (sortedRoutes *SortedRoutes, err error) {
+	sortedRoutes = &SortedRoutes{ProfileID: prflID,
+		Sorting: ws.sorting,
+		Routes:  make([]*SortedRoute, 0)}
 	for _, route := range routes {
-		srtRoute := &SortedRoute{
-			RouteID: route.ID,
-			SortingData: map[string]interface{}{
-				utils.Weight: route.Weight,
-			},
-			sortingDataDecimal: map[string]*utils.Decimal{
-				utils.Weight: utils.NewDecimalFromFloat64(route.Weight),
-			},
-			RouteParameters: route.RouteParameters,
-		}
-		if route.blocker {
-			srtRoute.SortingData[utils.Blocker] = true
-		}
-		var pass bool
-		if pass, err = routeLazyPass(ctx, route.lazyCheckRules, ev, srtRoute.SortingData,
-			ws.cfg.FilterSCfg().ResourceSConns,
-			ws.cfg.FilterSCfg().StatSConns,
-			ws.cfg.FilterSCfg().AccountSConns); err != nil {
-			return
-		} else if pass {
+		if srtRoute, pass, err := ws.rS.populateSortingData(suplEv, route, extraOpts); err != nil {
+			return nil, err
+		} else if pass && srtRoute != nil {
 			sortedRoutes.Routes = append(sortedRoutes.Routes, srtRoute)
 		}
 	}

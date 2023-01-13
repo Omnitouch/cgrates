@@ -19,15 +19,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"bytes"
+	"encoding/gob"
+	"encoding/json"
+	"fmt"
+	"reflect"
+
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/ugocodec/codec"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type Storage interface {
 	Close()
 	Flush(string) error
-	GetKeysForPrefix(ctx *context.Context, prefix string) ([]string, error)
+	GetKeysForPrefix(string) ([]string, error)
+	RemoveKeysForPrefix(string) error
 	GetVersions(itm string) (vrs Versions, err error)
 	SetVersions(vrs Versions, overwrite bool) (err error)
 	RemoveVersions(vrs Versions) (err error)
@@ -39,71 +46,104 @@ type Storage interface {
 // OnlineStorage contains methods to use for administering online data
 type DataDB interface {
 	Storage
-	HasDataDrv(*context.Context, string, string, string) (bool, error)
-	GetResourceProfileDrv(*context.Context, string, string) (*ResourceProfile, error)
-	SetResourceProfileDrv(*context.Context, *ResourceProfile) error
-	RemoveResourceProfileDrv(*context.Context, string, string) error
-	GetResourceDrv(*context.Context, string, string) (*Resource, error)
-	SetResourceDrv(*context.Context, *Resource) error
-	RemoveResourceDrv(*context.Context, string, string) error
+	HasDataDrv(string, string, string) (bool, error)
+	GetRatingPlanDrv(string) (*RatingPlan, error)
+	SetRatingPlanDrv(*RatingPlan) error
+	RemoveRatingPlanDrv(key string) (err error)
+	GetRatingProfileDrv(string) (*RatingProfile, error)
+	SetRatingProfileDrv(*RatingProfile) error
+	RemoveRatingProfileDrv(string) error
+	GetDestinationDrv(string, string) (*Destination, error)
+	SetDestinationDrv(*Destination, string) error
+	RemoveDestinationDrv(string, string) error
+	RemoveReverseDestinationDrv(string, string, string) error
+	SetReverseDestinationDrv(string, []string, string) error
+	GetReverseDestinationDrv(string, string) ([]string, error)
+	GetActionsDrv(string) (Actions, error)
+	SetActionsDrv(string, Actions) error
+	RemoveActionsDrv(string) error
+	GetSharedGroupDrv(string) (*SharedGroup, error)
+	SetSharedGroupDrv(*SharedGroup) error
+	RemoveSharedGroupDrv(id string) (err error)
+	GetActionTriggersDrv(string) (ActionTriggers, error)
+	SetActionTriggersDrv(string, ActionTriggers) error
+	RemoveActionTriggersDrv(string) error
+	GetActionPlanDrv(string) (*ActionPlan, error)
+	SetActionPlanDrv(string, *ActionPlan) error
+	RemoveActionPlanDrv(key string) error
+	GetAllActionPlansDrv() (map[string]*ActionPlan, error)
+	GetAccountActionPlansDrv(acntID string) (apIDs []string, err error)
+	SetAccountActionPlansDrv(acntID string, apIDs []string) (err error)
+	RemAccountActionPlansDrv(acntID string) (err error)
+	PushTask(*Task) error
+	PopTask() (*Task, error)
+	GetAccountDrv(string) (*Account, error)
+	SetAccountDrv(*Account) error
+	RemoveAccountDrv(string) error
+	GetResourceProfileDrv(string, string) (*ResourceProfile, error)
+	SetResourceProfileDrv(*ResourceProfile) error
+	RemoveResourceProfileDrv(string, string) error
+	GetResourceDrv(string, string) (*Resource, error)
+	SetResourceDrv(*Resource) error
+	RemoveResourceDrv(string, string) error
+	GetTimingDrv(string) (*utils.TPTiming, error)
+	SetTimingDrv(*utils.TPTiming) error
+	RemoveTimingDrv(string) error
 	GetLoadHistory(int, bool, string) ([]*utils.LoadInstance, error)
 	AddLoadHistory(*utils.LoadInstance, int, string) error
-	GetIndexesDrv(ctx *context.Context, idxItmType, tntCtx, idxKey, transactionID string) (indexes map[string]utils.StringSet, err error)
-	SetIndexesDrv(ctx *context.Context, idxItmType, tntCtx string,
+	GetIndexesDrv(idxItmType, tntCtx, idxKey string) (indexes map[string]utils.StringSet, err error)
+	SetIndexesDrv(idxItmType, tntCtx string,
 		indexes map[string]utils.StringSet, commit bool, transactionID string) (err error)
-	RemoveIndexesDrv(ctx *context.Context, idxItmType, tntCtx, idxKey string) (err error)
-	GetStatQueueProfileDrv(ctx *context.Context, tenant string, ID string) (sq *StatQueueProfile, err error)
-	SetStatQueueProfileDrv(ctx *context.Context, sq *StatQueueProfile) (err error)
-	RemStatQueueProfileDrv(ctx *context.Context, tenant, id string) (err error)
-	GetStatQueueDrv(ctx *context.Context, tenant, id string) (sq *StatQueue, err error)
-	SetStatQueueDrv(ctx *context.Context, ssq *StoredStatQueue, sq *StatQueue) (err error)
-	RemStatQueueDrv(ctx *context.Context, tenant, id string) (err error)
-	GetThresholdProfileDrv(ctx *context.Context, tenant string, ID string) (tp *ThresholdProfile, err error)
-	SetThresholdProfileDrv(ctx *context.Context, tp *ThresholdProfile) (err error)
-	RemThresholdProfileDrv(ctx *context.Context, tenant, id string) (err error)
-	GetThresholdDrv(*context.Context, string, string) (*Threshold, error)
-	SetThresholdDrv(*context.Context, *Threshold) error
-	RemoveThresholdDrv(*context.Context, string, string) error
-	GetFilterDrv(ctx *context.Context, tnt string, id string) (*Filter, error)
-	SetFilterDrv(ctx *context.Context, f *Filter) error
-	RemoveFilterDrv(ctx *context.Context, tnt string, id string) error
-	GetRouteProfileDrv(*context.Context, string, string) (*RouteProfile, error)
-	SetRouteProfileDrv(*context.Context, *RouteProfile) error
-	RemoveRouteProfileDrv(*context.Context, string, string) error
-	GetAttributeProfileDrv(ctx *context.Context, tnt string, id string) (*AttributeProfile, error)
-	SetAttributeProfileDrv(ctx *context.Context, attr *AttributeProfile) error
-	RemoveAttributeProfileDrv(*context.Context, string, string) error
-	GetChargerProfileDrv(*context.Context, string, string) (*ChargerProfile, error)
-	SetChargerProfileDrv(*context.Context, *ChargerProfile) error
-	RemoveChargerProfileDrv(*context.Context, string, string) error
-	GetDispatcherProfileDrv(*context.Context, string, string) (*DispatcherProfile, error)
-	SetDispatcherProfileDrv(*context.Context, *DispatcherProfile) error
-	RemoveDispatcherProfileDrv(*context.Context, string, string) error
-	GetItemLoadIDsDrv(ctx *context.Context, itemIDPrefix string) (loadIDs map[string]int64, err error)
-	SetLoadIDsDrv(ctx *context.Context, loadIDs map[string]int64) error
+	RemoveIndexesDrv(idxItmType, tntCtx, idxKey string) (err error)
+	GetStatQueueProfileDrv(tenant string, ID string) (sq *StatQueueProfile, err error)
+	SetStatQueueProfileDrv(sq *StatQueueProfile) (err error)
+	RemStatQueueProfileDrv(tenant, id string) (err error)
+	GetStatQueueDrv(tenant, id string) (sq *StatQueue, err error)
+	SetStatQueueDrv(ssq *StoredStatQueue, sq *StatQueue) (err error)
+	RemStatQueueDrv(tenant, id string) (err error)
+	GetThresholdProfileDrv(tenant string, ID string) (tp *ThresholdProfile, err error)
+	SetThresholdProfileDrv(tp *ThresholdProfile) (err error)
+	RemThresholdProfileDrv(tenant, id string) (err error)
+	GetThresholdDrv(string, string) (*Threshold, error)
+	SetThresholdDrv(*Threshold) error
+	RemoveThresholdDrv(string, string) error
+	GetFilterDrv(string, string) (*Filter, error)
+	SetFilterDrv(*Filter) error
+	RemoveFilterDrv(string, string) error
+	GetRouteProfileDrv(string, string) (*RouteProfile, error)
+	SetRouteProfileDrv(*RouteProfile) error
+	RemoveRouteProfileDrv(string, string) error
+	GetAttributeProfileDrv(string, string) (*AttributeProfile, error)
+	SetAttributeProfileDrv(*AttributeProfile) error
+	RemoveAttributeProfileDrv(string, string) error
+	GetChargerProfileDrv(string, string) (*ChargerProfile, error)
+	SetChargerProfileDrv(*ChargerProfile) error
+	RemoveChargerProfileDrv(string, string) error
+	GetDispatcherProfileDrv(string, string) (*DispatcherProfile, error)
+	SetDispatcherProfileDrv(*DispatcherProfile) error
+	RemoveDispatcherProfileDrv(string, string) error
+	GetItemLoadIDsDrv(itemIDPrefix string) (loadIDs map[string]int64, err error)
+	SetLoadIDsDrv(loadIDs map[string]int64) error
 	RemoveLoadIDsDrv() error
-	GetDispatcherHostDrv(*context.Context, string, string) (*DispatcherHost, error)
-	SetDispatcherHostDrv(*context.Context, *DispatcherHost) error
-	RemoveDispatcherHostDrv(*context.Context, string, string) error
-	GetRateProfileDrv(*context.Context, string, string) (*utils.RateProfile, error)
-	GetRateProfileRatesDrv(*context.Context, string, string, string, bool) ([]string, []*utils.Rate, error)
-	SetRateProfileDrv(*context.Context, *utils.RateProfile, bool) error
-	RemoveRateProfileDrv(*context.Context, string, string, *[]string) error
-	GetActionProfileDrv(*context.Context, string, string) (*ActionProfile, error)
-	SetActionProfileDrv(*context.Context, *ActionProfile) error
-	RemoveActionProfileDrv(*context.Context, string, string) error
-	GetAccountDrv(*context.Context, string, string) (*utils.Account, error)
-	SetAccountDrv(ctx *context.Context, profile *utils.Account) error
-	RemoveAccountDrv(*context.Context, string, string) error
-	GetConfigSectionsDrv(*context.Context, string, []string) (map[string][]byte, error)
-	SetConfigSectionsDrv(*context.Context, string, map[string][]byte) error
-	RemoveConfigSectionsDrv(*context.Context, string, []string) error
+	GetDispatcherHostDrv(string, string) (*DispatcherHost, error)
+	SetDispatcherHostDrv(*DispatcherHost) error
+	RemoveDispatcherHostDrv(string, string) error
 }
 
-// DataDBDriver used as a DataDB but also as a ConfigProvider
-type DataDBDriver interface {
-	DataDB
-	config.ConfigDB
+type StorDB interface {
+	CdrStorage
+	LoadReader
+	LoadWriter
+}
+
+type CdrStorage interface {
+	Storage
+	SetCDR(*CDR, bool) error
+	SetSMCost(smc *SMCost) error
+	GetSMCosts(cgrid, runid, originHost, originIDPrfx string) ([]*SMCost, error)
+	RemoveSMCost(*SMCost) error
+	RemoveSMCosts(qryFltr *utils.SMCostFilter) error
+	GetCDRs(*utils.CDRsFilter, bool) ([]*CDR, int64, error)
 }
 
 type LoadStorage interface {
@@ -115,8 +155,19 @@ type LoadStorage interface {
 // LoadReader reads from .csv or TP tables and provides the data ready for the tp_db or data_db.
 type LoadReader interface {
 	GetTpIds(string) ([]string, error)
-	GetTpTableIds(string, string, []string,
+	GetTpTableIds(string, string, utils.TPDistinctIds,
 		map[string]string, *utils.PaginatorWithSearch) ([]string, error)
+	GetTPTimings(string, string) ([]*utils.ApierTPTiming, error)
+	GetTPDestinations(string, string) ([]*utils.TPDestination, error)
+	GetTPRates(string, string) ([]*utils.TPRateRALs, error)
+	GetTPDestinationRates(string, string, *utils.Paginator) ([]*utils.TPDestinationRate, error)
+	GetTPRatingPlans(string, string, *utils.Paginator) ([]*utils.TPRatingPlan, error)
+	GetTPRatingProfiles(*utils.TPRatingProfile) ([]*utils.TPRatingProfile, error)
+	GetTPSharedGroups(string, string) ([]*utils.TPSharedGroups, error)
+	GetTPActions(string, string) ([]*utils.TPActions, error)
+	GetTPActionPlans(string, string) ([]*utils.TPActionPlan, error)
+	GetTPActionTriggers(string, string) ([]*utils.TPActionTriggers, error)
+	GetTPAccountActions(*utils.TPAccountActions) ([]*utils.TPAccountActions, error)
 	GetTPResources(string, string, string) ([]*utils.TPResourceProfile, error)
 	GetTPStats(string, string, string) ([]*utils.TPStatProfile, error)
 	GetTPThresholds(string, string, string) ([]*utils.TPThresholdProfile, error)
@@ -126,13 +177,21 @@ type LoadReader interface {
 	GetTPChargers(string, string, string) ([]*utils.TPChargerProfile, error)
 	GetTPDispatcherProfiles(string, string, string) ([]*utils.TPDispatcherProfile, error)
 	GetTPDispatcherHosts(string, string, string) ([]*utils.TPDispatcherHost, error)
-	GetTPRateProfiles(string, string, string) ([]*utils.TPRateProfile, error)
-	GetTPActionProfiles(string, string, string) ([]*utils.TPActionProfile, error)
-	GetTPAccounts(string, string, string) ([]*utils.TPAccount, error)
 }
 
 type LoadWriter interface {
 	RemTpData(string, string, map[string]string) error
+	SetTPTimings([]*utils.ApierTPTiming) error
+	SetTPDestinations([]*utils.TPDestination) error
+	SetTPRates([]*utils.TPRateRALs) error
+	SetTPDestinationRates([]*utils.TPDestinationRate) error
+	SetTPRatingPlans([]*utils.TPRatingPlan) error
+	SetTPRatingProfiles([]*utils.TPRatingProfile) error
+	SetTPSharedGroups([]*utils.TPSharedGroups) error
+	SetTPActions([]*utils.TPActions) error
+	SetTPActionPlans([]*utils.TPActionPlan) error
+	SetTPActionTriggers([]*utils.TPActionTriggers) error
+	SetTPAccountActions([]*utils.TPAccountActions) error
 	SetTPResources([]*utils.TPResourceProfile) error
 	SetTPStats([]*utils.TPStatProfile) error
 	SetTPThresholds([]*utils.TPThresholdProfile) error
@@ -142,9 +201,112 @@ type LoadWriter interface {
 	SetTPChargers([]*utils.TPChargerProfile) error
 	SetTPDispatcherProfiles([]*utils.TPDispatcherProfile) error
 	SetTPDispatcherHosts([]*utils.TPDispatcherHost) error
-	SetTPRateProfiles([]*utils.TPRateProfile) error
-	SetTPActionProfiles([]*utils.TPActionProfile) error
-	SetTPAccounts([]*utils.TPAccount) error
+}
+
+// NewMarshaler returns the marshaler type selected by mrshlerStr
+func NewMarshaler(mrshlerStr string) (ms Marshaler, err error) {
+	switch mrshlerStr {
+	case utils.MsgPack:
+		ms = NewCodecMsgpackMarshaler()
+	case utils.JSON:
+		ms = new(JSONMarshaler)
+	default:
+		err = fmt.Errorf("Unsupported marshaler: %v", mrshlerStr)
+	}
+	return
+}
+
+type Marshaler interface {
+	Marshal(v interface{}) ([]byte, error)
+	Unmarshal(data []byte, v interface{}) error
+}
+
+type JSONMarshaler struct{}
+
+func (jm *JSONMarshaler) Marshal(v interface{}) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func (jm *JSONMarshaler) Unmarshal(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
+}
+
+type BSONMarshaler struct{}
+
+func (jm *BSONMarshaler) Marshal(v interface{}) ([]byte, error) {
+	return bson.Marshal(v)
+}
+
+func (jm *BSONMarshaler) Unmarshal(data []byte, v interface{}) error {
+	return bson.Unmarshal(data, v)
+}
+
+type JSONBufMarshaler struct{}
+
+func (jbm *JSONBufMarshaler) Marshal(v interface{}) (data []byte, err error) {
+	buf := new(bytes.Buffer)
+	err = json.NewEncoder(buf).Encode(v)
+	data = buf.Bytes()
+	return
+}
+
+func (jbm *JSONBufMarshaler) Unmarshal(data []byte, v interface{}) error {
+	return json.NewDecoder(bytes.NewBuffer(data)).Decode(v)
+}
+
+type CodecMsgpackMarshaler struct {
+	mh *codec.MsgpackHandle
+}
+
+func NewCodecMsgpackMarshaler() *CodecMsgpackMarshaler {
+	cmm := &CodecMsgpackMarshaler{new(codec.MsgpackHandle)}
+	mh := cmm.mh
+	mh.MapType = reflect.TypeOf(map[string]interface{}(nil))
+	mh.RawToString = true
+	return cmm
+}
+
+func (cmm *CodecMsgpackMarshaler) Marshal(v interface{}) (b []byte, err error) {
+	enc := codec.NewEncoderBytes(&b, cmm.mh)
+	err = enc.Encode(v)
+	return
+}
+
+func (cmm *CodecMsgpackMarshaler) Unmarshal(data []byte, v interface{}) error {
+	dec := codec.NewDecoderBytes(data, cmm.mh)
+	return dec.Decode(&v)
+}
+
+type BincMarshaler struct {
+	bh *codec.BincHandle
+}
+
+func NewBincMarshaler() *BincMarshaler {
+	return &BincMarshaler{new(codec.BincHandle)}
+}
+
+func (bm *BincMarshaler) Marshal(v interface{}) (b []byte, err error) {
+	enc := codec.NewEncoderBytes(&b, bm.bh)
+	err = enc.Encode(v)
+	return
+}
+
+func (bm *BincMarshaler) Unmarshal(data []byte, v interface{}) error {
+	dec := codec.NewDecoderBytes(data, bm.bh)
+	return dec.Decode(&v)
+}
+
+type GOBMarshaler struct{}
+
+func (gm *GOBMarshaler) Marshal(v interface{}) (data []byte, err error) {
+	buf := new(bytes.Buffer)
+	err = gob.NewEncoder(buf).Encode(v)
+	data = buf.Bytes()
+	return
+}
+
+func (gm *GOBMarshaler) Unmarshal(data []byte, v interface{}) error {
+	return gob.NewDecoder(bytes.NewBuffer(data)).Decode(v)
 }
 
 // Decide the value of cacheCommit parameter based on transactionID

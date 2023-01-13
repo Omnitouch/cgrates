@@ -36,12 +36,10 @@ import (
 
 	"github.com/cenkalti/rpc2"
 	jsonrpc2 "github.com/cenkalti/rpc2/jsonrpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/loaders"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -53,7 +51,7 @@ var (
 	sTestsAlsPrf = []func(t *testing.T){
 		testAnalyzerSInitCfg,
 		testAnalyzerSInitDataDb,
-
+		testAnalyzerSResetStorDb,
 		testAnalyzerSStartEngine,
 		testAnalyzerSRPCConn,
 		testAnalyzerSLoadTarrifPlans,
@@ -62,7 +60,6 @@ var (
 		testAnalyzerSV1Search2,
 		testAnalyzerSV1SearchWithContentFilters,
 		testAnalyzerSV1BirPCSession,
-		testAnalyzerSv1MultipleQuery,
 		testAnalyzerSKillEngine,
 	}
 )
@@ -70,7 +67,7 @@ var (
 var (
 	dataDir   = flag.String("data_dir", "/usr/share/cgrates", "CGR data dir path here")
 	waitRater = flag.Int("wait_rater", 100, "Number of miliseconds to wait for rater to start and cache")
-	encoding  = flag.String("rpc", utils.MetaJSON, "what encoding whould be used for rpc comunication")
+	encoding  = flag.String("rpc", utils.MetaJSON, "what encoding whould be uused for rpc comunication")
 )
 
 func newRPCClient(cfg *config.ListenCfg) (c *rpc.Client, err error) {
@@ -100,14 +97,21 @@ func testAnalyzerSInitCfg(t *testing.T) {
 		t.Fatal(err)
 	}
 	anzCfgPath = path.Join(*dataDir, "conf", "samples", "analyzers")
-	anzCfg, err = config.NewCGRConfigFromPath(context.Background(), anzCfgPath)
+	anzCfg, err = config.NewCGRConfigFromPath(anzCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
 }
 
 func testAnalyzerSInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(anzCfg); err != nil {
+	if err := engine.InitDataDb(anzCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testAnalyzerSResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(anzCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -118,8 +122,6 @@ func testAnalyzerSStartEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-//make loader in confi
 
 // Connect rpc client to rater
 func testAnalyzerSRPCConn(t *testing.T) {
@@ -139,10 +141,8 @@ func testAnalyzerSRPCConn(t *testing.T) {
 
 func testAnalyzerSLoadTarrifPlans(t *testing.T) {
 	var reply string
-	time.Sleep(100 * time.Millisecond)
-	if err := anzRPC.Call(utils.LoaderSv1Run, &loaders.ArgsProcessFolder{
-		APIOpts: map[string]interface{}{utils.MetaCache: utils.MetaReload},
-	}, &reply); err != nil {
+	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "tutorial")}
+	if err := anzRPC.Call(utils.APIerSv1LoadTariffPlanFromFolder, attrs, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Error("Unexpected reply returned", reply)
@@ -165,39 +165,23 @@ func testAnalyzerSChargerSv1ProcessEvent(t *testing.T) {
 	processedEv := []*engine.ChrgSProcessEventReply{
 		{
 			ChargerSProfile: "DEFAULT",
-			AlteredFields: []*engine.FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-			},
+			AlteredFields:   []string{"*req.RunID"},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     "event1",
 				Event: map[string]interface{}{
 					"Account":     "1010",
 					"Destination": "999",
+					"RunID":       "*default",
 					"Subject":     "Something_inter",
 				},
-				APIOpts: map[string]interface{}{
-					"*chargeID": "51d52496c3d63ffd60ba91e69aa532d89cc5bd79",
-					"*subsys":   "*chargers",
-					"*runID":    "*default",
-				},
+				APIOpts: map[string]interface{}{"*subsys": "*chargers"},
 			},
 		},
 		{
-			ChargerSProfile: "Raw",
-			AlteredFields: []*engine.FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-				{
-					MatchedProfileID: "*constant:*req.RequestType:*none",
-					Fields:           []string{"*req.RequestType"},
-				},
-			},
+			ChargerSProfile:    "Raw",
+			AttributeSProfiles: []string{"*constant:*req.RequestType:*none"},
+			AlteredFields:      []string{"*req.RunID", "*req.RequestType"},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     "event1",
@@ -205,14 +189,12 @@ func testAnalyzerSChargerSv1ProcessEvent(t *testing.T) {
 					"Account":     "1010",
 					"Destination": "999",
 					"RequestType": "*none",
+					"RunID":       "*raw",
 					"Subject":     "Something_inter",
 				},
 				APIOpts: map[string]interface{}{
-					"*chargeID":       "94e6cdc358e52bd7061f224a4bcf5faa57735989",
-					"*runID":          "*raw",
-					"*attrProfileIDs": []interface{}{"*constant:*req.RequestType:*none"},
-					"*context":        "*chargers",
-					"*subsys":         "*chargers",
+					"*subsys":                      "*chargers",
+					utils.OptsAttributesProfileIDs: []interface{}{"*constant:*req.RequestType:*none"},
 				},
 			},
 		},
@@ -232,7 +214,7 @@ func testAnalyzerSChargerSv1ProcessEvent(t *testing.T) {
 
 func testAnalyzerSV1Search(t *testing.T) {
 	// need to wait in order for the log gorutine to execute
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	var result []map[string]interface{}
 	if err := anzRPC.Call(utils.AnalyzerSv1StringQuery, &QueryArgs{HeaderFilters: `+RequestEncoding:\*internal +RequestMethod:AttributeSv1\.ProcessEvent`}, &result); err != nil {
 		t.Error(err)
@@ -270,7 +252,7 @@ func testAnalyzerSV1BirPCSession(t *testing.T) {
 		err.Error() != utils.ErrPartiallyExecuted.Error() {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Second)
 	var result []map[string]interface{}
 	if err := anzRPC.Call(utils.AnalyzerSv1StringQuery, &QueryArgs{HeaderFilters: `+RequestEncoding:\*birpc_json +RequestMethod:"SessionSv1.DisconnectPeer"`}, &result); err != nil {
 		t.Error(err)
@@ -278,122 +260,6 @@ func testAnalyzerSV1BirPCSession(t *testing.T) {
 		t.Errorf("Unexpected result: %s", utils.ToJSON(result))
 	}
 }
-
-func testAnalyzerSv1MultipleQuery(t *testing.T) {
-	filterProfiles := []*engine.FilterWithAPIOpts{
-		{
-			Filter: &engine.Filter{
-				ID:     "TestA_FILTER1",
-				Tenant: "cgrates.org",
-				Rules: []*engine.FilterRule{
-					{
-						Type:    utils.MetaString,
-						Element: "~*req.Account",
-						Values:  []string{"1001"},
-					},
-					{
-						Type:    utils.MetaPrefix,
-						Element: "~*req.Destination",
-						Values:  []string{"10"},
-					},
-				},
-			},
-		},
-		{
-			Filter: &engine.Filter{
-				ID:     "TestA_FILTER2",
-				Tenant: "cgrates.org",
-				Rules: []*engine.FilterRule{
-					{
-						Type:    utils.MetaString,
-						Element: "~*req.Account",
-						Values:  []string{"1002"},
-					},
-					{
-						Type:    utils.MetaPrefix,
-						Element: "~*req.Destination",
-						Values:  []string{"10"},
-					},
-				},
-			},
-		},
-		{
-			Filter: &engine.Filter{
-				ID:     "TestA_FILTER3",
-				Tenant: "cgrates.org",
-				Rules: []*engine.FilterRule{
-					{
-						Type:    utils.MetaString,
-						Element: "~*req.Account",
-						Values:  []string{"1003"},
-					},
-					{
-						Type:    utils.MetaPrefix,
-						Element: "~*req.Destination",
-						Values:  []string{"10"},
-					},
-				},
-			},
-		},
-		{
-			Filter: &engine.Filter{
-				ID:     "TestB_FILTER1",
-				Tenant: "cgrates.org",
-				Rules: []*engine.FilterRule{
-					{
-						Type:    utils.MetaString,
-						Element: "~*req.Account",
-						Values:  []string{"2001"},
-					},
-					{
-						Type:    utils.MetaPrefix,
-						Element: "~*req.Destination",
-						Values:  []string{"20"},
-					},
-				},
-			},
-		},
-		{
-			Filter: &engine.Filter{
-				ID:     "TestB_FILTER2",
-				Tenant: "cgrates.org",
-				Rules: []*engine.FilterRule{
-					{
-						Type:    utils.MetaString,
-						Element: "~*req.Account",
-						Values:  []string{"2002"},
-					},
-					{
-						Type:    utils.MetaPrefix,
-						Element: "~*req.Destination",
-						Values:  []string{"20"},
-					},
-				},
-			},
-		},
-	}
-
-	var reply string
-	for _, filterProfile := range filterProfiles {
-		if err := anzRPC.Call(utils.AdminSv1SetFilter,
-			filterProfile, &reply); err != nil {
-			t.Error(err)
-		} else if reply != utils.OK {
-			t.Error(err)
-		}
-	}
-	time.Sleep(50 * time.Millisecond)
-	var result []map[string]interface{}
-	if err := anzRPC.Call(utils.AnalyzerSv1StringQuery, &QueryArgs{
-		HeaderFilters:  `+RequestMethod:"AdminSv1.SetFilter"`,
-		ContentFilters: []string{"*prefix:~*req.ID:TestA"},
-	}, &result); err != nil {
-		t.Error(err)
-	} else if len(result) != 3 {
-		t.Errorf("Unexpected result: %s", utils.ToJSON(result))
-	}
-}
-
 func testAnalyzerSKillEngine(t *testing.T) {
 	if err := engine.KillEngine(100); err != nil {
 		t.Error(err)

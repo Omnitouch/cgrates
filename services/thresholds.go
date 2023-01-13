@@ -22,20 +22,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewThresholdService returns the Threshold Service
 func NewThresholdService(cfg *config.CGRConfig, dm *DataDBService,
-	cacheS *CacheService, filterSChan chan *engine.FilterS,
-	connMgr *engine.ConnManager,
-	server *cores.Server, internalThresholdSChan chan birpc.ClientConnector,
+	cacheS *engine.CacheS, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalThresholdSChan chan rpcclient.ClientConnector,
 	anz *AnalyzerService, srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &ThresholdService{
 		connChan:    internalThresholdSChan,
@@ -46,7 +45,6 @@ func NewThresholdService(cfg *config.CGRConfig, dm *DataDBService,
 		server:      server,
 		anz:         anz,
 		srvDep:      srvDep,
-		connMgr:     connMgr,
 	}
 }
 
@@ -55,74 +53,65 @@ type ThresholdService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	dm          *DataDBService
-	cacheS      *CacheService
+	cacheS      *engine.CacheS
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
-	connMgr     *engine.ConnManager
 
-	thrs     *engine.ThresholdS
-	connChan chan birpc.ClientConnector
+	thrs     *engine.ThresholdService
+	rpc      *v1.ThresholdSv1
+	connChan chan rpcclient.ClientConnector
 	anz      *AnalyzerService
 	srvDep   map[string]*sync.WaitGroup
 }
 
 // Start should handle the sercive start
-func (thrs *ThresholdService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (thrs *ThresholdService) Start() (err error) {
 	if thrs.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 	thrs.srvDep[utils.DataDB].Add(1)
-	if err = thrs.cacheS.WaitToPrecache(ctx,
-		utils.CacheThresholdProfiles,
-		utils.CacheThresholds,
-		utils.CacheThresholdFilterIndexes); err != nil {
-		return
-	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, thrs.filterSChan); err != nil {
-		return
-	}
+	<-thrs.cacheS.GetPrecacheChannel(utils.CacheThresholdProfiles)
+	<-thrs.cacheS.GetPrecacheChannel(utils.CacheThresholds)
+	<-thrs.cacheS.GetPrecacheChannel(utils.CacheThresholdFilterIndexes)
 
-	var datadb *engine.DataManager
-	if datadb, err = thrs.dm.WaitForDM(ctx); err != nil {
-		return
-	}
+	filterS := <-thrs.filterSChan
+	thrs.filterSChan <- filterS
+	dbchan := thrs.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
 	thrs.Lock()
 	defer thrs.Unlock()
-	thrs.thrs = engine.NewThresholdService(datadb, thrs.cfg, filterS, thrs.connMgr)
+	thrs.thrs = engine.NewThresholdService(datadb, thrs.cfg, filterS)
 
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.ThresholdS))
-	thrs.thrs.StartLoop(ctx)
-	srv, _ := engine.NewService(thrs.thrs)
-	// srv, _ := birpc.NewService(apis.NewThresholdSv1(thrs.thrs), "", false)
+	thrs.thrs.StartLoop()
+	thrs.rpc = v1.NewThresholdSv1(thrs.thrs)
 	if !thrs.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			thrs.server.RpcRegister(s)
-		}
+		thrs.server.RpcRegister(thrs.rpc)
 	}
-	thrs.connChan <- thrs.anz.GetInternalCodec(srv, utils.ThresholdS)
+	thrs.connChan <- thrs.anz.GetInternalCodec(thrs.rpc, utils.ThresholdS)
 	return
 }
 
 // Reload handles the change of config
-func (thrs *ThresholdService) Reload(ctx *context.Context, _ context.CancelFunc) (_ error) {
+func (thrs *ThresholdService) Reload() (err error) {
 	thrs.Lock()
-	thrs.thrs.Reload(ctx)
+	thrs.thrs.Reload()
 	thrs.Unlock()
 	return
 }
 
 // Shutdown stops the service
-func (thrs *ThresholdService) Shutdown() (_ error) {
+func (thrs *ThresholdService) Shutdown() (err error) {
 	defer thrs.srvDep[utils.DataDB].Done()
 	thrs.Lock()
 	defer thrs.Unlock()
-	thrs.thrs.Shutdown(context.TODO())
+	thrs.thrs.Shutdown()
 	thrs.thrs = nil
+	thrs.rpc = nil
 	<-thrs.connChan
-	thrs.server.RpcUnregisterName(utils.ThresholdSv1)
 	return
 }
 

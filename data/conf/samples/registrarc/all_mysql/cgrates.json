@@ -21,7 +21,9 @@
 	"db_name": "11", 						// data_db database name to connect to
 },
 
-
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
 
 
 "rpc_conns": {
@@ -44,6 +46,14 @@
 	"enabled": true
 },
 
+"rals": {
+	"enabled": true,
+},
+
+"schedulers": {
+	"enabled": true,				
+},
+
 "chargers": {
 	"enabled": true,
 	"attributes_conns": ["*internal"],
@@ -55,7 +65,7 @@
 
 "routes": {
 	"enabled": true,
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 "stats": {
@@ -67,15 +77,10 @@
 },
 
 
-"rates": {
-	"enabled": true,
-},
-
-
 "cdrs": {
 	"enabled": true,	
 	"chargers_conns":["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 "sessions": {
@@ -84,14 +89,15 @@
 	"routes_conns": ["*internal"],
 	"resources_conns": ["*internal"],
 	"attributes_conns": ["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"caches_conns":["conn1"],
+	"scheduler_conns": ["*internal"],
 },
 
     

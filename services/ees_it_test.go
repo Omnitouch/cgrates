@@ -27,13 +27,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/rpcclient"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestEventExporterSReload(t *testing.T) {
@@ -48,30 +48,31 @@ func TestEventExporterSReload(t *testing.T) {
 	}
 	cfg := config.NewDefaultCGRConfig()
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	cfg.AttributeSCfg().Enabled = true
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	chS := engine.NewCacheS(cfg, nil, nil, nil)
+	chS := engine.NewCacheS(cfg, nil, nil)
 	close(chS.GetPrecacheChannel(utils.CacheAttributeProfiles))
 	close(chS.GetPrecacheChannel(utils.CacheAttributeFilterIndexes))
-	chSCh := make(chan *engine.CacheS, 1)
-	chSCh <- chS
-	css := &CacheService{cacheCh: chSCh}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	attrS := NewAttributeService(cfg, db,
-		css, filterSChan, server, make(chan birpc.ClientConnector, 1),
-		anz, &DispatcherService{srvsReload: make(map[string]chan struct{})}, srvDep)
-	ees := NewEventExporterService(cfg, filterSChan, engine.NewConnManager(cfg),
-		server, make(chan birpc.ClientConnector, 2), anz, srvDep)
+		chS, filterSChan, server, make(chan rpcclient.ClientConnector, 1),
+		anz, srvDep)
+	ees := NewEventExporterService(cfg, filterSChan, engine.NewConnManager(cfg, nil),
+		server, make(chan rpcclient.ClientConnector, 2), anz, srvDep)
 	srvMngr.AddServices(ees, attrS,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	ctx, cancel := context.WithCancel(context.TODO())
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Fatal(err)
+	}
 	if ees.IsRunning() {
 		t.Fatalf("Expected service to be down")
 	}
@@ -85,9 +86,9 @@ func TestEventExporterSReload(t *testing.T) {
 	fcTmp.ComputePath()
 	cfg.TemplatesCfg()["requiredFields"] = []*config.FCTemplate{fcTmp}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "ees")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.EEsJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "ees"),
+		Section: config.EEsJson,
 	}, &reply); err != nil {
 		t.Fatal(err)
 	} else if reply != utils.OK {
@@ -97,21 +98,21 @@ func TestEventExporterSReload(t *testing.T) {
 	if !ees.IsRunning() {
 		t.Fatalf("Expected service to be running")
 	}
-	err := ees.Start(ctx, cancel)
+	err := ees.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Fatalf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
-	err = ees.Reload(ctx, cancel)
+	err = ees.Reload()
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
 	cfg.EEsCfg().Enabled = false
-	cfg.GetReloadChan() <- config.SectionToService[config.EEsJSON]
+	cfg.GetReloadChan(config.EEsJson) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 	if ees.IsRunning() {
 		t.Fatalf("Expected service to be down")
 	}
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 
@@ -127,14 +128,17 @@ func TestEventExporterSReload2(t *testing.T) {
 	}
 	cfg := config.NewDefaultCGRConfig()
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	cfg.AttributeSCfg().Enabled = true
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	ees := NewEventExporterService(cfg, filterSChan, engine.NewConnManager(cfg),
-		server, make(chan birpc.ClientConnector, 2), anz, srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	ees := NewEventExporterService(cfg, filterSChan, engine.NewConnManager(cfg, nil),
+		server, make(chan rpcclient.ClientConnector, 2), anz, srvDep)
 	if ees.IsRunning() {
 		t.Fatalf("Expected service to be down")
 	}

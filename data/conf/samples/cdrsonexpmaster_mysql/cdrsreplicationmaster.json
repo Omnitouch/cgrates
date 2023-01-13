@@ -16,10 +16,20 @@
 	"db_name": "10", 						
 },
 
+"stor_db": {								// database used to store offline tariff plans and CDRs
+	"db_password": "CGRateS.org",			// password to use when connecting to stordb
+},
+
+
+"rals": {
+	"enabled": true,						// enable Rater service: <true|false>
+},
+
 "cdrs": {
 	"enabled": true,			// start the CDR Server service:  <true|false>
+	"store_cdrs": false,		// store cdrs in storDb
 	"chargers_conns":["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"online_cdr_exports": ["http_localhost", "amqp_localhost", "http_test_file", "kafka_localhost", "eventcost_filter"],
 	"ees_conns": ["*localhost"]
 },
@@ -38,13 +48,13 @@
 	"exporters": [
 		{
 			"id": "http_localhost",
-			"type": "*httpPost",
+			"type": "*http_post",
 			"export_path": "http://127.0.0.1:12080/cdr_http",
 			"synchronous": true,
 			"attempts": 1,
 			"filters":["*string:~*opts.ExporterID:http_localhost"],
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -62,7 +72,7 @@
 		},
 		{
 			"id": "amqp_localhost",
-			"type": "*amqpJSONMap",
+			"type": "*amqp_json_map",
 			"export_path": "amqp://guest:guest@localhost:5672/",
 			"opts": {
 				"amqpQueueID": "cgrates_cdrs",
@@ -72,7 +82,7 @@
 			},
 			"attempts": 3,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -90,7 +100,7 @@
 		},
 		{
 			"id": "http_test_file",
-			"type": "*httpPost",
+			"type": "*http_post",
 			"export_path": "http://127.0.0.1:12080/invalid",
 			"synchronous": true,
 			"attempts": 1,
@@ -100,7 +110,7 @@
 		},
 		{
 			"id": "kafka_localhost",
-			"type": "*kafkaJSONMap",
+			"type": "*kafka_json_map",
 			"export_path": "localhost:9092",
 			"opts": {
 				"kafkaTopic": "cgrates_cdrs",
@@ -108,12 +118,12 @@
 			"synchronous": true,
 			"attempts": 1,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"}
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"}
 			],
 		},
 		{
 			"id": "eventcost_filter",
-			"type": "*amqpJSONMap",
+			"type": "*amqp_json_map",
 			"export_path": "amqp://guest:guest@wrongurl:25672/",
 			"opts": {
 				"amqpQueueID": "cgrates_cdrs",
@@ -122,18 +132,14 @@
 			"synchronous": true,
 			"attempts": 1,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"}
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"}
 			],
 		}
 	],
 },
 
-"rates": {
-	"enabled": true,
-},
 
-
-"admins": {
+"apiers": {
 	"enabled": true,
 },
 

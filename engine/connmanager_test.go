@@ -23,20 +23,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 	"github.com/cgrates/rpcclient"
 )
 
 func TestCMgetConnNotFound(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -45,13 +38,11 @@ func TestCMgetConnNotFound(t *testing.T) {
 		cfg: cfg,
 	}
 
-	db := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(db, cfg.CacheCfg(), cM)
-	Cache = NewCacheS(cfg, dm, nil, nil)
+	Cache.Clear(nil)
 	Cache.SetWithoutReplicate(utils.CacheRPCConnections, connID, nil, nil, true, utils.NonTransactional)
 
 	experr := utils.ErrNotFound
-	rcv, err := cM.getConn(context.Background(), connID)
+	rcv, err := cM.getConn(connID, nil)
 
 	if err == nil || err != experr {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -64,33 +55,28 @@ func TestCMgetConnNotFound(t *testing.T) {
 }
 
 func TestCMgetConnUnsupportedBiRPC(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := rpcclient.BiRPCInternal + "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			connID: cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
 	}
 
 	experr := rpcclient.ErrUnsupportedBiRPC
-	exp, err := NewRPCPool(context.Background(), utils.MetaFirst, "", "", "", cfg.GeneralCfg().ConnectAttempts,
-		cfg.GeneralCfg().Reconnects, cfg.GeneralCfg().MaxReconnectInterval, cfg.GeneralCfg().ConnectTimeout,
+	exp, err := NewRPCPool("*first", "", "", "", cfg.GeneralCfg().ConnectAttempts,
+		cfg.GeneralCfg().Reconnects, cfg.GeneralCfg().ConnectTimeout,
 		cfg.GeneralCfg().ReplyTimeout, nil, cc, true, nil, "", cM.connCache)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcv, err := cM.getConn(context.Background(), connID)
+	rcv, err := cM.getConn(connID, nil)
 
 	if err == nil || err != experr {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -102,12 +88,8 @@ func TestCMgetConnUnsupportedBiRPC(t *testing.T) {
 }
 
 func TestCMgetConnNotInternalRPC(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
+	Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
 	cfg.RPCConns()[connID].Conns = []*config.RemoteHost{
@@ -117,11 +99,11 @@ func TestCMgetConnNotInternalRPC(t *testing.T) {
 		},
 	}
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			"testString": cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
@@ -129,15 +111,15 @@ func TestCMgetConnNotInternalRPC(t *testing.T) {
 
 	cM.connCache.Set(connID, nil, nil)
 
-	exp, err := NewRPCPool(context.Background(), utils.MetaFirst, cfg.TLSCfg().ClientKey, cfg.TLSCfg().ClientCerificate,
+	exp, err := NewRPCPool("*first", cfg.TLSCfg().ClientKey, cfg.TLSCfg().ClientCerificate,
 		cfg.TLSCfg().CaCertificate, cfg.GeneralCfg().ConnectAttempts,
-		cfg.GeneralCfg().Reconnects, cfg.GeneralCfg().MaxReconnectInterval,
-		cfg.GeneralCfg().ConnectTimeout, cfg.GeneralCfg().ReplyTimeout,
-		cfg.RPCConns()[connID].Conns, cc, true, nil, connID, cM.connCache)
+		cfg.GeneralCfg().Reconnects, cfg.GeneralCfg().ConnectTimeout,
+		cfg.GeneralCfg().ReplyTimeout, cfg.RPCConns()[connID].Conns, cc,
+		true, nil, connID, cM.connCache)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcv, err := cM.getConn(context.Background(), connID)
+	rcv, err := cM.getConn(connID, nil)
 
 	if err != nil {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -149,11 +131,6 @@ func TestCMgetConnNotInternalRPC(t *testing.T) {
 }
 
 func TestCMgetConnWithConfigUnsupportedTransport(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -165,18 +142,18 @@ func TestCMgetConnWithConfigUnsupportedTransport(t *testing.T) {
 		},
 	}
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			connID: cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
 	}
 
 	experr := fmt.Sprintf("Unsupported transport: <%+s>", "invalid")
-	rcv, err := cM.getConnWithConfig(context.Background(), connID, cfg.RPCConns()[connID], cc, true)
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], nil, cc, true)
 
 	if err == nil || err.Error() != experr {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -188,11 +165,6 @@ func TestCMgetConnWithConfigUnsupportedTransport(t *testing.T) {
 }
 
 func TestCMgetConnWithConfigUnsupportedCodec(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -204,11 +176,11 @@ func TestCMgetConnWithConfigUnsupportedCodec(t *testing.T) {
 		},
 	}
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			connID: cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
@@ -216,7 +188,7 @@ func TestCMgetConnWithConfigUnsupportedCodec(t *testing.T) {
 
 	experr := rpcclient.ErrUnsupportedCodec
 	var exp *rpcclient.RPCParallelClientPool
-	rcv, err := cM.getConnWithConfig(context.Background(), connID, cfg.RPCConns()[connID], cc, true)
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], nil, cc, true)
 
 	if err == nil || err != experr {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -228,11 +200,6 @@ func TestCMgetConnWithConfigUnsupportedCodec(t *testing.T) {
 }
 
 func TestCMgetConnWithConfigEmptyTransport(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -244,11 +211,11 @@ func TestCMgetConnWithConfigEmptyTransport(t *testing.T) {
 		},
 	}
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			connID: cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
@@ -256,7 +223,7 @@ func TestCMgetConnWithConfigEmptyTransport(t *testing.T) {
 
 	cM.connCache.Set(connID, nil, nil)
 
-	rcv, err := cM.getConnWithConfig(context.Background(), connID, cfg.RPCConns()[connID], cc, true)
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], nil, cc, true)
 
 	if err != nil {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -267,12 +234,126 @@ func TestCMgetConnWithConfigEmptyTransport(t *testing.T) {
 	}
 }
 
-func TestCMgetConnWithConfigInternalRPCCodec(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
+type BiRPCConnectorMock struct {
+	calls map[string]func(rpcclient.ClientConnector, string, interface{}, interface{}) error
+}
 
+func (bRCM *BiRPCConnectorMock) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	return nil
+}
+
+func (bRCM *BiRPCConnectorMock) CallBiRPC(cc rpcclient.ClientConnector, method string, args interface{}, reply interface{}) error {
+	if call, has := bRCM.calls[method]; !has {
+		return rpcclient.ErrUnsupporteServiceMethod
+	} else {
+		return call(cc, method, args, reply)
+	}
+}
+
+func (bRCM *BiRPCConnectorMock) Handlers() map[string]interface{} {
+	return nil
+}
+
+func TestCMgetConnWithConfigCallBiRPCNilErr(t *testing.T) {
+	connID := "connID"
+	cfg := config.NewDefaultCGRConfig()
+	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
+	cfg.RPCConns()[connID].Conns = []*config.RemoteHost{
+		{
+			ID:        connID,
+			Address:   rpcclient.BiRPCInternal,
+			Transport: rpcclient.BiRPCJSON,
+		},
+	}
+
+	cc := make(chan rpcclient.ClientConnector, 1)
+	birpc := &BiRPCConnectorMock{
+		calls: map[string]func(rpcclient.ClientConnector, string, interface{}, interface{}) error{
+			utils.SessionSv1RegisterInternalBiJSONConn: func(cc rpcclient.ClientConnector, s string, i1, i2 interface{}) error {
+				return nil
+			},
+		},
+	}
+	cc <- birpc
+
+	cM := &ConnManager{
+		cfg: cfg,
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
+			connID: cc,
+		},
+		connCache: ltcache.NewCache(-1, 0, true, nil),
+	}
+
+	exp, err := NewRPCPool("*first", cfg.TLSCfg().ClientKey, cfg.TLSCfg().ClientCerificate,
+		cfg.TLSCfg().CaCertificate, cfg.GeneralCfg().ConnectAttempts,
+		cfg.GeneralCfg().Reconnects, cfg.GeneralCfg().ConnectTimeout,
+		cfg.GeneralCfg().ReplyTimeout, cfg.RPCConns()[connID].Conns, cc,
+		false, birpc, connID, cM.connCache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], birpc, cc, true)
+
+	if err != nil {
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+
+	if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", exp, rcv)
+	}
+}
+
+func TestCMgetConnWithConfigCallBiRPCErr(t *testing.T) {
+	connID := "connID"
+	cfg := config.NewDefaultCGRConfig()
+	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
+	cfg.RPCConns()[connID].Conns = []*config.RemoteHost{
+		{
+			ID:        connID,
+			Address:   rpcclient.BiRPCInternal,
+			Transport: rpcclient.BiRPCJSON,
+		},
+	}
+
+	cc := make(chan rpcclient.ClientConnector, 1)
+	birpc := &BiRPCConnectorMock{
+		calls: map[string]func(rpcclient.ClientConnector, string, interface{}, interface{}) error{
+			"wrong method": func(cc rpcclient.ClientConnector, s string, i1, i2 interface{}) error {
+				return nil
+			},
+		},
+	}
+	cc <- birpc
+
+	cM := &ConnManager{
+		cfg: cfg,
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
+			connID: cc,
+		},
+		connCache: ltcache.NewCache(-1, 0, true, nil),
+	}
+
+	exp, err := NewRPCPool("*first", cfg.TLSCfg().ClientKey, cfg.TLSCfg().ClientCerificate,
+		cfg.TLSCfg().CaCertificate, cfg.GeneralCfg().ConnectAttempts,
+		cfg.GeneralCfg().Reconnects, cfg.GeneralCfg().ConnectTimeout,
+		cfg.GeneralCfg().ReplyTimeout, cfg.RPCConns()[connID].Conns, cc,
+		false, birpc, connID, cM.connCache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	experr := rpcclient.ErrUnsupporteServiceMethod
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], birpc, cc, true)
+
+	if err == nil || err != experr {
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+
+	if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", exp, rcv)
+	}
+}
+
+func TestCMgetConnWithConfigInternalRPCCodec(t *testing.T) {
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -283,17 +364,17 @@ func TestCMgetConnWithConfigInternalRPCCodec(t *testing.T) {
 		},
 	}
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			connID: cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
 	}
 
-	rcv, err := cM.getConnWithConfig(context.Background(), connID, cfg.RPCConns()[connID], cc, true)
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], nil, cc, true)
 
 	if err != nil {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -305,11 +386,6 @@ func TestCMgetConnWithConfigInternalRPCCodec(t *testing.T) {
 }
 
 func TestCMgetConnWithConfigInternalBiRPCCodecUnsupported(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -320,18 +396,18 @@ func TestCMgetConnWithConfigInternalBiRPCCodecUnsupported(t *testing.T) {
 		},
 	}
 
-	cc := make(chan birpc.ClientConnector, 1)
+	cc := make(chan rpcclient.ClientConnector, 1)
 
 	cM := &ConnManager{
 		cfg: cfg,
-		rpcInternal: map[string]chan birpc.ClientConnector{
+		rpcInternal: map[string]chan rpcclient.ClientConnector{
 			connID: cc,
 		},
 		connCache: ltcache.NewCache(-1, 0, true, nil),
 	}
 
 	experr := rpcclient.ErrUnsupportedCodec
-	rcv, err := cM.getConnWithConfig(context.Background(), connID, cfg.RPCConns()[connID], cc, true)
+	rcv, err := cM.getConnWithConfig(connID, cfg.RPCConns()[connID], nil, cc, true)
 
 	if err == nil || err != experr {
 		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -343,11 +419,6 @@ func TestCMgetConnWithConfigInternalBiRPCCodecUnsupported(t *testing.T) {
 }
 
 func TestCMCallErrgetConn(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -356,13 +427,11 @@ func TestCMCallErrgetConn(t *testing.T) {
 		cfg: cfg,
 	}
 
-	db := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(db, cfg.CacheCfg(), cM)
-	Cache = NewCacheS(cfg, dm, nil, nil)
+	Cache.Clear(nil)
 	Cache.SetWithoutReplicate(utils.CacheRPCConnections, connID, nil, nil, true, utils.NonTransactional)
 
 	experr := utils.ErrNotFound
-	err := cM.Call(context.Background(), []string{connID}, "", "", "")
+	err := cM.Call([]string{connID}, nil, "", "", "")
 
 	if err == nil || err != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -370,11 +439,6 @@ func TestCMCallErrgetConn(t *testing.T) {
 }
 
 func TestCMCallWithConnIDsNoSubsHostIDs(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -384,7 +448,7 @@ func TestCMCallWithConnIDsNoSubsHostIDs(t *testing.T) {
 	}
 	subsHostIDs := utils.StringSet{}
 
-	err := cM.CallWithConnIDs([]string{connID}, context.Background(), subsHostIDs, "", "", "")
+	err := cM.CallWithConnIDs([]string{connID}, subsHostIDs, "", "", "")
 
 	if err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -392,11 +456,6 @@ func TestCMCallWithConnIDsNoSubsHostIDs(t *testing.T) {
 }
 
 func TestCMCallWithConnIDsNoConnIDs(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -409,7 +468,7 @@ func TestCMCallWithConnIDsNoConnIDs(t *testing.T) {
 	}
 
 	experr := fmt.Sprintf("MANDATORY_IE_MISSING: [%s]", "connIDs")
-	err := cM.CallWithConnIDs([]string{}, context.Background(), subsHostIDs, "", "", "")
+	err := cM.CallWithConnIDs([]string{}, subsHostIDs, "", "", "")
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -417,11 +476,6 @@ func TestCMCallWithConnIDsNoConnIDs(t *testing.T) {
 }
 
 func TestCMCallWithConnIDsNoConns(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -439,7 +493,7 @@ func TestCMCallWithConnIDsNoConns(t *testing.T) {
 		"random": struct{}{},
 	}
 
-	err := cM.CallWithConnIDs([]string{connID}, context.Background(), subsHostIDs, "", "", "")
+	err := cM.CallWithConnIDs([]string{connID}, subsHostIDs, "", "", "")
 
 	if err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -447,11 +501,6 @@ func TestCMCallWithConnIDsNoConns(t *testing.T) {
 }
 
 func TestCMCallWithConnIDsInternallyDCed(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
 	cfg.RPCConns()[connID] = config.NewDfltRPCConn()
@@ -471,19 +520,14 @@ func TestCMCallWithConnIDsInternallyDCed(t *testing.T) {
 	}
 
 	experr := rpcclient.ErrInternallyDisconnected
-	err := cM.CallWithConnIDs([]string{connID}, context.Background(), subsHostIDs, "", "", "")
+	err := cM.CallWithConnIDs([]string{connID}, subsHostIDs, "", "", "")
 
 	if err == nil || err != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	}
 }
 
-func TestCMCallWithConnIDsErrNotNetwork(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
+func TestCMCallWithConnIDs2(t *testing.T) {
 	poolID := "poolID"
 	connID := "connID"
 	cfg := config.NewDefaultCGRConfig()
@@ -496,8 +540,8 @@ func TestCMCallWithConnIDsErrNotNetwork(t *testing.T) {
 	}
 
 	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			"testMethod": func(ctx *context.Context, args, reply interface{}) error {
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			"testMethod": func(args, reply interface{}) error {
 				return utils.ErrExists
 			},
 		},
@@ -515,7 +559,7 @@ func TestCMCallWithConnIDsErrNotNetwork(t *testing.T) {
 	}
 
 	experr := utils.ErrExists
-	err := cM.CallWithConnIDs([]string{poolID}, context.Background(), subsHostIDs, "testMethod", "", "")
+	err := cM.CallWithConnIDs([]string{poolID}, subsHostIDs, "testMethod", "", "")
 
 	if err == nil || err != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -523,11 +567,6 @@ func TestCMCallWithConnIDsErrNotNetwork(t *testing.T) {
 }
 
 func TestCMReload(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-
 	cfg := config.NewDefaultCGRConfig()
 
 	cM := &ConnManager{
@@ -536,9 +575,7 @@ func TestCMReload(t *testing.T) {
 	}
 	cM.connCache.Set("itmID1", "value of first item", nil)
 
-	db := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(db, cfg.CacheCfg(), cM)
-	Cache = NewCacheS(cfg, dm, nil, nil)
+	Cache.Clear(nil)
 	Cache.SetWithoutReplicate(utils.CacheRPCConnections, "itmID2",
 		"value of 2nd item", nil, true, utils.NonTransactional)
 
@@ -589,139 +626,3 @@ func TestCMDeadLock(t *testing.T) {
 	}
 }
 */
-
-func TestCMEnableDispatcher(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-	Cache.Clear(nil)
-	cfg := config.NewDefaultCGRConfig()
-	cM := NewConnManager(cfg)
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, nil)
-
-	srvcNames := []string{utils.AccountS, utils.ActionS, utils.AttributeS,
-		utils.CacheS, utils.ChargerS, utils.ConfigS, utils.DispatcherS,
-		utils.GuardianS, utils.RateS, utils.ResourceS, utils.RouteS,
-		utils.SessionS, utils.StatS, utils.ThresholdS, utils.CDRs,
-		utils.ReplicatorS, utils.EeS, utils.CoreS, utils.AnalyzerS,
-		utils.AdminS, utils.LoaderS, utils.ServiceManager}
-
-	for _, name := range srvcNames {
-
-		newSrvcWName, err := NewServiceWithName(newCDRSrv, name, true)
-		if err != nil {
-			t.Error(err)
-		}
-		cM.EnableDispatcher(newSrvcWName)
-
-	}
-}
-
-func TestCMGetInternalChan(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-	cM := NewConnManager(cfg)
-	cM.dispIntCh = cM.rpcInternal
-
-	exp := make(chan context.ClientConnector, 1)
-	rcv := cM.GetInternalChan()
-	rcvType := reflect.TypeOf(rcv)
-	expType := reflect.TypeOf(exp)
-	if rcvType != expType {
-		t.Errorf("Unexpected return type, expected %+v, received %+v", rcvType, expType)
-	}
-
-}
-
-func TestCMGetDispInternalChan(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-	cM := NewConnManager(cfg)
-	cM.dispIntCh = cM.rpcInternal
-
-	exp := make(chan context.ClientConnector, 1)
-	rcv := cM.GetDispInternalChan()
-	rcvType := reflect.TypeOf(rcv)
-	expType := reflect.TypeOf(exp)
-	if rcvType != expType {
-		t.Errorf("Unexpected return type, expected %+v, received %+v", rcvType, expType)
-	}
-
-}
-
-func TestCMDisableDispatcher(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-	Cache.Clear(nil)
-	cfg := config.NewDefaultCGRConfig()
-
-	cM := &ConnManager{
-		cfg:       cfg,
-		connCache: ltcache.NewCache(-1, 0, true, nil),
-	}
-	cM.connCache.Set("itmID1", "value of first item", nil)
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, nil)
-	newSrvcWName, err := NewServiceWithName(newCDRSrv, utils.AccountS, true)
-	if err != nil {
-		t.Error(err)
-	}
-	cM.EnableDispatcher(newSrvcWName)
-
-	Cache = NewCacheS(cfg, dm, cM, nil)
-	Cache.SetWithoutReplicate(utils.CacheRPCConnections, "itmID2",
-		"value of 2nd item", nil, true, utils.NonTransactional)
-
-	var exp []string
-
-	cM.DisableDispatcher()
-	rcv1 := cM.connCache.GetItemIDs("itmID1")
-	rcv2 := Cache.GetItemIDs(utils.CacheRPCConnections, utils.EmptyString)
-
-	if !reflect.DeepEqual(rcv1, exp) {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", exp, rcv1)
-	} else if !reflect.DeepEqual(rcv2, exp) {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", exp, rcv2)
-	} else if cM.disp != nil || cM.dispIntCh != nil {
-		t.Errorf("\nexpected nil cM.disp and cM.dispIntCh, \nreceived cM.disp: <%+v>, \n cM.dispIntCh: <%+v>", cM.disp, cM.dispIntCh)
-	}
-
-}
-
-func TestCMgetInternalConnChanFromDisp(t *testing.T) {
-	tmp := Cache
-	defer func() {
-		Cache = tmp
-	}()
-	Cache.Clear(nil)
-	cfg := config.NewDefaultCGRConfig()
-
-	cM := &ConnManager{
-		cfg:       cfg,
-		connCache: ltcache.NewCache(-1, 0, true, nil),
-	}
-	cM.connCache.Set("itmID1", "value of first item", nil)
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, nil)
-	newSrvcWName, err := NewServiceWithName(newCDRSrv, utils.AccountS, true)
-	if err != nil {
-		t.Error(err)
-	}
-	cM.EnableDispatcher(newSrvcWName)
-
-	if rcv, ok := cM.getInternalConnChan(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAccounts)); !ok {
-		t.Errorf("Unexpected error getting internalConnChan, Received <%+v>", rcv)
-	}
-
-}

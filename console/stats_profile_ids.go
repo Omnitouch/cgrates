@@ -19,47 +19,47 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
-	c := &CmdGetStatQueueProfileIDs{
+	c := &CmdGetStatQueueIDs{
 		name:      "stats_profile_ids",
-		rpcMethod: utils.AdminSv1GetStatQueueProfileIDs,
-		rpcParams: &utils.ArgsItemIDs{},
+		rpcMethod: utils.APIerSv1GetStatQueueProfileIDs,
+		rpcParams: &utils.PaginatorWithTenant{},
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
 }
 
 // Commander implementation
-type CmdGetStatQueueProfileIDs struct {
+type CmdGetStatQueueIDs struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.ArgsItemIDs
+	rpcParams *utils.PaginatorWithTenant
 	*CommandExecuter
 }
 
-func (self *CmdGetStatQueueProfileIDs) Name() string {
+func (self *CmdGetStatQueueIDs) Name() string {
 	return self.name
 }
 
-func (self *CmdGetStatQueueProfileIDs) RpcMethod() string {
+func (self *CmdGetStatQueueIDs) RpcMethod() string {
 	return self.rpcMethod
 }
 
-func (self *CmdGetStatQueueProfileIDs) RpcParams(reset bool) interface{} {
+func (self *CmdGetStatQueueIDs) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = &utils.ArgsItemIDs{}
+		self.rpcParams = &utils.PaginatorWithTenant{}
 	}
 	return self.rpcParams
 }
 
-func (self *CmdGetStatQueueProfileIDs) PostprocessRpcParams() error {
+func (self *CmdGetStatQueueIDs) PostprocessRpcParams() error {
 	return nil
 }
 
-func (self *CmdGetStatQueueProfileIDs) RpcResult() interface{} {
+func (self *CmdGetStatQueueIDs) RpcResult() interface{} {
 	var atr []string
 	return &atr
 }

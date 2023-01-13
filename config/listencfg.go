@@ -18,10 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package config
 
-import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
-)
+import "github.com/cgrates/cgrates/utils"
 
 // ListenCfg is the listen config section
 type ListenCfg struct {
@@ -31,15 +28,6 @@ type ListenCfg struct {
 	RPCJSONTLSListen string // RPC JSON TLS listening address
 	RPCGOBTLSListen  string // RPC GOB TLS listening address
 	HTTPTLSListen    string // HTTP TLS listening address
-}
-
-// loadListenCfg loads the Listen section of the configuration
-func (lstcfg *ListenCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnListenCfg := new(ListenJsonCfg)
-	if err = jsnCfg.GetSection(ctx, ListenJSON, jsnListenCfg); err != nil {
-		return
-	}
-	return lstcfg.loadFromJSONCfg(jsnListenCfg)
 }
 
 // loadFromJSONCfg loads Database config from JsonCfg
@@ -69,7 +57,7 @@ func (lstcfg *ListenCfg) loadFromJSONCfg(jsnListenCfg *ListenJsonCfg) (err error
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (lstcfg ListenCfg) AsMapInterface(string) interface{} {
+func (lstcfg *ListenCfg) AsMapInterface() map[string]interface{} {
 	return map[string]interface{}{
 		utils.RPCJSONListenCfg:    lstcfg.RPCJSONListen,
 		utils.RPCGOBListenCfg:     lstcfg.RPCGOBListen,
@@ -79,9 +67,6 @@ func (lstcfg ListenCfg) AsMapInterface(string) interface{} {
 		utils.HTTPTLSListenCfg:    lstcfg.HTTPTLSListen,
 	}
 }
-
-func (ListenCfg) SName() string                { return ListenJSON }
-func (lstcfg ListenCfg) CloneSection() Section { return lstcfg.Clone() }
 
 // Clone returns a deep copy of ListenCfg
 func (lstcfg ListenCfg) Clone() *ListenCfg {
@@ -93,39 +78,4 @@ func (lstcfg ListenCfg) Clone() *ListenCfg {
 		RPCGOBTLSListen:  lstcfg.RPCGOBTLSListen,
 		HTTPTLSListen:    lstcfg.HTTPTLSListen,
 	}
-}
-
-// Listen config section
-type ListenJsonCfg struct {
-	Rpc_json     *string
-	Rpc_gob      *string
-	Http         *string
-	Rpc_json_tls *string
-	Rpc_gob_tls  *string
-	Http_tls     *string
-}
-
-func diffListenJsonCfg(d *ListenJsonCfg, v1, v2 *ListenCfg) *ListenJsonCfg {
-	if d == nil {
-		d = new(ListenJsonCfg)
-	}
-	if v1.RPCJSONListen != v2.RPCJSONListen {
-		d.Rpc_json = utils.StringPointer(v2.RPCJSONListen)
-	}
-	if v1.RPCGOBListen != v2.RPCGOBListen {
-		d.Rpc_gob = utils.StringPointer(v2.RPCGOBListen)
-	}
-	if v1.HTTPListen != v2.HTTPListen {
-		d.Http = utils.StringPointer(v2.HTTPListen)
-	}
-	if v1.RPCJSONTLSListen != v2.RPCJSONTLSListen {
-		d.Rpc_json_tls = utils.StringPointer(v2.RPCJSONTLSListen)
-	}
-	if v1.RPCGOBTLSListen != v2.RPCGOBTLSListen {
-		d.Rpc_gob_tls = utils.StringPointer(v2.RPCGOBTLSListen)
-	}
-	if v1.HTTPTLSListen != v2.HTTPTLSListen {
-		d.Http_tls = utils.StringPointer(v2.HTTPTLSListen)
-	}
-	return d
 }

@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -55,7 +55,7 @@ func TestDispatcherHostsService(t *testing.T) {
 	cfg.RegistrarCCfg().Dispatchers.RefreshInterval = 100 * time.Millisecond
 	cfg.RegistrarCCfg().Dispatchers.RegistrarSConns = []string{"conn1"}
 
-	ds := NewRegistrarCService(cfg, engine.NewConnManager(cfg))
+	ds := NewRegistrarCService(cfg, engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{}))
 
 	ds.registerDispHosts()
 
@@ -115,7 +115,7 @@ func TestDispatcherHostsService(t *testing.T) {
 	cfg.ListenCfg().RPCJSONListen = "2012"
 	ds.registerDispHosts()
 
-	ds = NewRegistrarCService(cfg, engine.NewConnManager(cfg))
+	ds = NewRegistrarCService(cfg, engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{}))
 	ds.Shutdown()
 	stopChan := make(chan struct{})
 	close(stopChan)
@@ -173,11 +173,11 @@ func TestRegisterRPCHosts(t *testing.T) {
 	}
 	regist := &RegistrarCService{
 		cfg:     cfg,
-		connMgr: engine.NewConnManager(cfg),
+		connMgr: engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{}),
 	}
 	registCmp := &RegistrarCService{
 		cfg:     cfg,
-		connMgr: engine.NewConnManager(cfg),
+		connMgr: engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{}),
 	}
 	regist.registerRPCHosts()
 	if !reflect.DeepEqual(regist, registCmp) {

@@ -23,14 +23,11 @@ import (
 	"net"
 	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
-	"github.com/cgrates/cron"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewFilterS initializtes the filter service
@@ -51,18 +48,18 @@ type FilterS struct {
 	connMgr *ConnManager
 }
 
-// Pass will check all filters wihin filterIDs and require them passing for dataProvider
+// Pass will check all filters within filterIDs and require them passing for dataProvider
 // there should be at least one filter passing, ie: if filters are not active event will fail to pass
 // receives the event as DataProvider so we can accept undecoded data (ie: HttpRequest)
-func (fS *FilterS) Pass(ctx *context.Context, tenant string, filterIDs []string,
+func (fS *FilterS) Pass(tenant string, filterIDs []string,
 	ev utils.DataProvider) (pass bool, err error) {
 	if len(filterIDs) == 0 {
 		return true, nil
 	}
-	dDP := newDynamicDP(ctx, fS.cfg.FilterSCfg().ResourceSConns, fS.cfg.FilterSCfg().StatSConns,
-		fS.cfg.FilterSCfg().AccountSConns, tenant, ev)
+	dDP := newDynamicDP(fS.cfg.FilterSCfg().ResourceSConns, fS.cfg.FilterSCfg().StatSConns,
+		fS.cfg.FilterSCfg().ApierSConns, tenant, ev)
 	for _, fltrID := range filterIDs {
-		f, err := fS.dm.GetFilter(ctx, tenant, fltrID,
+		f, err := fS.dm.GetFilter(tenant, fltrID,
 			true, true, utils.NonTransactional)
 		if err != nil {
 			if err == utils.ErrNotFound {
@@ -70,8 +67,12 @@ func (fS *FilterS) Pass(ctx *context.Context, tenant string, filterIDs []string,
 			}
 			return false, err
 		}
+		if f.ActivationInterval != nil &&
+			!f.ActivationInterval.IsActiveAtTime(time.Now()) { // not active
+			continue
+		}
 		for _, fltr := range f.Rules {
-			if pass, err = fltr.Pass(ctx, dDP); err != nil || !pass {
+			if pass, err = fltr.Pass(dDP); err != nil || !pass {
 				return pass, err
 			}
 		}
@@ -114,17 +115,17 @@ func verifyPrefixes(rule *FilterRule, prefixes []string) (hasPrefix bool) {
 
 // LazyPass is almost the same as Pass except that it verify if the
 // Element of the Values from FilterRules has as prefix one of the pathPrfxs
-func (fS *FilterS) LazyPass(ctx *context.Context, tenant string, filterIDs []string,
+func (fS *FilterS) LazyPass(tenant string, filterIDs []string,
 	ev utils.DataProvider, pathPrfxs []string) (pass bool, lazyCheckRules []*FilterRule, err error) {
 	if len(filterIDs) == 0 {
 		return true, nil, nil
 	}
 	pass = true
-	dDP := newDynamicDP(ctx, fS.cfg.FilterSCfg().ResourceSConns, fS.cfg.FilterSCfg().StatSConns,
-		fS.cfg.FilterSCfg().AccountSConns, tenant, ev)
+	dDP := newDynamicDP(fS.cfg.FilterSCfg().ResourceSConns, fS.cfg.FilterSCfg().StatSConns,
+		fS.cfg.FilterSCfg().ApierSConns, tenant, ev)
 	for _, fltrID := range filterIDs {
 		var f *Filter
-		f, err = fS.dm.GetFilter(ctx, tenant, fltrID,
+		f, err = fS.dm.GetFilter(tenant, fltrID,
 			true, true, utils.NonTransactional)
 		if err != nil {
 			if err == utils.ErrNotFound {
@@ -132,12 +133,17 @@ func (fS *FilterS) LazyPass(ctx *context.Context, tenant string, filterIDs []str
 			}
 			return
 		}
+		if f.ActivationInterval != nil &&
+			!f.ActivationInterval.IsActiveAtTime(time.Now()) { // not active
+			continue
+		}
+
 		for _, rule := range f.Rules {
 			if !verifyPrefixes(rule, pathPrfxs) {
 				lazyCheckRules = append(lazyCheckRules, rule)
 				continue
 			}
-			if pass, err = rule.Pass(ctx, dDP); err != nil || !pass {
+			if pass, err = rule.Pass(dDP); err != nil || !pass {
 				return
 			}
 		}
@@ -188,16 +194,12 @@ func NewFilterFromInline(tenant, inlnRule string) (f *Filter, err error) {
 	return
 }
 
-type ArgsFiltersMatch struct {
-	*utils.CGREvent
-	FilterIDs []string
-}
-
 // Filter structure to define a basic filter
 type Filter struct {
-	Tenant string
-	ID     string
-	Rules  []*FilterRule
+	Tenant             string
+	ID                 string
+	Rules              []*FilterRule
+	ActivationInterval *utils.ActivationInterval
 }
 
 // FilterWithOpts the arguments for the replication
@@ -223,19 +225,20 @@ func (fltr *Filter) Compile() (err error) {
 
 var supportedFiltersType utils.StringSet = utils.NewStringSet([]string{
 	utils.MetaString, utils.MetaPrefix, utils.MetaSuffix,
-	utils.MetaCronExp, utils.MetaRSR, utils.MetaEmpty,
-	utils.MetaExists, utils.MetaLessThan, utils.MetaLessOrEqual,
+	utils.MetaTimings, utils.MetaRSR, utils.MetaDestinations,
+	utils.MetaEmpty, utils.MetaExists, utils.MetaLessThan, utils.MetaLessOrEqual,
 	utils.MetaGreaterThan, utils.MetaGreaterOrEqual, utils.MetaEqual,
 	utils.MetaIPNet, utils.MetaAPIBan, utils.MetaActivationInterval,
-	utils.MetaRegex, utils.MetaNever})
+	utils.MetaRegex})
 var needsFieldName utils.StringSet = utils.NewStringSet([]string{
 	utils.MetaString, utils.MetaPrefix, utils.MetaSuffix,
-	utils.MetaCronExp, utils.MetaRSR, utils.MetaLessThan,
+	utils.MetaTimings, utils.MetaRSR, utils.MetaDestinations, utils.MetaLessThan,
 	utils.MetaEmpty, utils.MetaExists, utils.MetaLessOrEqual, utils.MetaGreaterThan,
 	utils.MetaGreaterOrEqual, utils.MetaEqual, utils.MetaIPNet, utils.MetaAPIBan,
-	utils.MetaActivationInterval, utils.MetaRegex})
-var needsValues utils.StringSet = utils.NewStringSet([]string{
-	utils.MetaString, utils.MetaPrefix, utils.MetaSuffix, utils.MetaCronExp, utils.MetaRSR,
+	utils.MetaActivationInterval,
+	utils.MetaRegex})
+var needsValues utils.StringSet = utils.NewStringSet([]string{utils.MetaString, utils.MetaPrefix,
+	utils.MetaSuffix, utils.MetaTimings, utils.MetaRSR, utils.MetaDestinations,
 	utils.MetaLessThan, utils.MetaLessOrEqual, utils.MetaGreaterThan, utils.MetaGreaterOrEqual,
 	utils.MetaEqual, utils.MetaIPNet, utils.MetaAPIBan, utils.MetaActivationInterval,
 	utils.MetaRegex})
@@ -282,23 +285,6 @@ type FilterRule struct {
 	negative    *bool
 }
 
-// IsValid checks whether a filter rule is valid or not
-func (fltr *FilterRule) IsValid() bool {
-	// Type must be specified
-	if fltr.Type == utils.EmptyString {
-		return false
-	}
-	// Element must be specified only when the type is different from *never
-	if fltr.Element == utils.EmptyString {
-		return fltr.Type == utils.MetaNever
-	}
-	if len(fltr.Values) == 0 && !utils.IsSliceMember([]string{utils.MetaExists, utils.MetaNotExists,
-		utils.MetaEmpty, utils.MetaNotEmpty}, fltr.Type) {
-		return false
-	}
-	return true
-}
-
 // CompileValues compiles RSR fields
 func (fltr *FilterRule) CompileValues() (err error) {
 	switch fltr.Type {
@@ -313,7 +299,7 @@ func (fltr *FilterRule) CompileValues() (err error) {
 		if fltr.rsrFilters, err = utils.ParseRSRFiltersFromSlice(fltr.Values); err != nil {
 			return
 		}
-	case utils.MetaExists, utils.MetaNotExists, utils.MetaEmpty, utils.MetaNotEmpty: // only the element is built
+	case utils.MetaExists, utils.MetaNotExists, utils.MetaEmpty, utils.MetaNotEmpty: // only the element is builded
 	case utils.MetaActivationInterval, utils.MetaNotActivationInterval:
 		fltr.rsrValues = make(config.RSRParsers, len(fltr.Values))
 		for i, strVal := range fltr.Values {
@@ -321,8 +307,6 @@ func (fltr *FilterRule) CompileValues() (err error) {
 				return
 			}
 		}
-	case utils.MetaNever: //return since there is not need for the values to be compiled in this case
-		return
 	default:
 		if fltr.rsrValues, err = config.NewRSRParsersFromSlice(fltr.Values); err != nil {
 			return
@@ -337,7 +321,7 @@ func (fltr *FilterRule) CompileValues() (err error) {
 }
 
 // Pass is the method which should be used from outside.
-func (fltr *FilterRule) Pass(ctx *context.Context, dDP utils.DataProvider) (result bool, err error) {
+func (fltr *FilterRule) Pass(dDP utils.DataProvider) (result bool, err error) {
 	if fltr.negative == nil {
 		fltr.negative = utils.BoolPointer(strings.HasPrefix(fltr.Type, utils.MetaNot))
 	}
@@ -353,8 +337,10 @@ func (fltr *FilterRule) Pass(ctx *context.Context, dDP utils.DataProvider) (resu
 		result, err = fltr.passStringPrefix(dDP)
 	case utils.MetaSuffix, utils.MetaNotSuffix:
 		result, err = fltr.passStringSuffix(dDP)
-	case utils.MetaCronExp, utils.MetaNotCronExp:
-		result, err = fltr.passCronExp(ctx, dDP)
+	case utils.MetaTimings, utils.MetaNotTimings:
+		result, err = fltr.passTimings(dDP)
+	case utils.MetaDestinations, utils.MetaNotDestinations:
+		result, err = fltr.passDestinations(dDP)
 	case utils.MetaRSR, utils.MetaNotRSR:
 		result, err = fltr.passRSR(dDP)
 	case utils.MetaLessThan, utils.MetaLessOrEqual, utils.MetaGreaterThan, utils.MetaGreaterOrEqual:
@@ -364,13 +350,11 @@ func (fltr *FilterRule) Pass(ctx *context.Context, dDP utils.DataProvider) (resu
 	case utils.MetaIPNet, utils.MetaNotIPNet:
 		result, err = fltr.passIPNet(dDP)
 	case utils.MetaAPIBan, utils.MetaNotAPIBan:
-		result, err = fltr.passAPIBan(ctx, dDP)
+		result, err = fltr.passAPIBan(dDP)
 	case utils.MetaActivationInterval, utils.MetaNotActivationInterval:
 		result, err = fltr.passActivationInterval(dDP)
 	case utils.MetaRegex, utils.MetaNotRegex:
 		result, err = fltr.passRegex(dDP)
-	case utils.MetaNever:
-		result, err = fltr.passNever(dDP)
 	default:
 		err = utils.ErrPrefixNotErrNotImplemented(fltr.Type)
 	}
@@ -437,12 +421,14 @@ func (fltr *FilterRule) passEmpty(dDP utils.DataProvider) (bool, error) {
 		rval = rval.Elem()
 	}
 	switch rval.Type().Kind() {
+	case reflect.String:
+		return rval.Interface() == "", nil
 	case reflect.Slice:
 		return rval.Len() == 0, nil
 	case reflect.Map:
 		return len(rval.MapKeys()) == 0, nil
 	default:
-		return rval.IsZero(), nil
+		return false, nil
 	}
 }
 
@@ -486,37 +472,70 @@ func (fltr *FilterRule) passStringSuffix(dDP utils.DataProvider) (bool, error) {
 	return false, nil
 }
 
-func (fltr *FilterRule) passCronExp(ctx *context.Context, dDP utils.DataProvider) (bool, error) {
-	tm, err := fltr.rsrElement.ParseDataProvider(dDP)
+func (fltr *FilterRule) passTimings(dDP utils.DataProvider) (bool, error) {
+	tmVal, err := fltr.rsrElement.ParseDataProviderWithInterfaces(dDP)
 	if err != nil {
 		if err == utils.ErrNotFound {
 			return false, nil
 		}
 		return false, err
 	}
-	tmTime, err := utils.IfaceAsTime(tm, config.CgrConfig().GeneralCfg().DefaultTimezone)
+
+	tmTime, err := utils.IfaceAsTime(tmVal, config.CgrConfig().GeneralCfg().DefaultTimezone)
 	if err != nil {
 		return false, err
 	}
 
-	// tmTime = tmTime.Truncate(time.Second)
-	tmTime = tmTime.Truncate(time.Minute)
-	tmBefore := tmTime.Add(-time.Second)
-
-	for _, valCronIDVal := range fltr.rsrValues {
-		valTmID, err := valCronIDVal.ParseDataProvider(dDP)
+	for _, valTmIDVal := range fltr.rsrValues {
+		valTmID, err := valTmIDVal.ParseDataProvider(dDP)
 		if err != nil {
+			return false, err
+		}
+		var tm utils.TPTiming
+		if err = connMgr.Call(config.CgrConfig().FilterSCfg().ApierSConns, nil, utils.APIerSv1GetTiming, &utils.ArgsGetTimingID{ID: valTmID}, &tm); err != nil {
 			continue
 		}
-		exp, err := cron.ParseStandard(valTmID)
-		if err != nil {
-			continue
+		ritm := &RITiming{
+			ID:        tm.ID,
+			Years:     tm.Years,
+			Months:    tm.Months,
+			MonthDays: tm.MonthDays,
+			WeekDays:  tm.WeekDays,
+			StartTime: tm.StartTime,
+			EndTime:   tm.EndTime,
 		}
-		if exp.Next(tmBefore) == tmTime {
+		if ritm.IsActiveAt(tmTime) {
 			return true, nil
 		}
 	}
+	return false, nil
+}
 
+func (fltr *FilterRule) passDestinations(dDP utils.DataProvider) (bool, error) {
+	dst, err := fltr.rsrElement.ParseDataProvider(dDP)
+	if err != nil {
+		if err == utils.ErrNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, p := range utils.SplitPrefix(dst, MIN_PREFIX_MATCH) {
+		var destIDs []string
+		if err = connMgr.Call(config.CgrConfig().FilterSCfg().ApierSConns, nil, utils.APIerSv1GetReverseDestination, &p, &destIDs); err != nil {
+			continue
+		}
+		for _, dID := range destIDs {
+			for _, valDstIDVal := range fltr.rsrValues {
+				valDstID, err := valDstIDVal.ParseDataProvider(dDP)
+				if err != nil {
+					continue
+				}
+				if valDstID == dID {
+					return true, nil
+				}
+			}
+		}
+	}
 	return false, nil
 }
 
@@ -612,7 +631,7 @@ func (fltr *FilterRule) passIPNet(dDP utils.DataProvider) (bool, error) {
 	return false, nil
 }
 
-func (fltr *FilterRule) passAPIBan(ctx *context.Context, dDP utils.DataProvider) (bool, error) {
+func (fltr *FilterRule) passAPIBan(dDP utils.DataProvider) (bool, error) {
 	strVal, err := fltr.rsrElement.ParseDataProvider(dDP)
 	if err != nil {
 		if err == utils.ErrNotFound {
@@ -624,7 +643,7 @@ func (fltr *FilterRule) passAPIBan(ctx *context.Context, dDP utils.DataProvider)
 		fltr.Values[0] != utils.MetaSingle { // force only valid values
 		return false, fmt.Errorf("invalid value for apiban filter: <%s>", fltr.Values[0])
 	}
-	return GetAPIBan(ctx, strVal, config.CgrConfig().APIBanCfg().Keys, fltr.Values[0] != utils.MetaAll, true, true)
+	return dm.GetAPIBan(strVal, config.CgrConfig().APIBanCfg().Keys, fltr.Values[0] != utils.MetaAll, true, true)
 }
 
 func parseTime(rsr *config.RSRParser, dDp utils.DataProvider) (_ time.Time, err error) {
@@ -708,142 +727,4 @@ func (fltr *FilterRule) passRegex(dDP utils.DataProvider) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-func (fltr *FilterRule) passNever(dDP utils.DataProvider) (bool, error) {
-	return false, nil
-}
-
-func (fltr *Filter) Set(path []string, val interface{}, newBranch bool, _ string) (err error) {
-	switch len(path) {
-	default:
-		return utils.ErrWrongPath
-	case 1:
-		switch path[0] {
-		default:
-			return utils.ErrWrongPath
-		case utils.Tenant:
-			fltr.Tenant = utils.IfaceAsString(val)
-		case utils.ID:
-			fltr.ID = utils.IfaceAsString(val)
-		}
-	case 2:
-		if path[0] != utils.Rules {
-			return utils.ErrWrongPath
-		}
-		if len(fltr.Rules) == 0 || newBranch {
-			fltr.Rules = append(fltr.Rules, new(FilterRule))
-		}
-		switch path[1] {
-		case utils.Type:
-			fltr.Rules[len(fltr.Rules)-1].Type = utils.IfaceAsString(val)
-		case utils.Element:
-			fltr.Rules[len(fltr.Rules)-1].Element = utils.IfaceAsString(val)
-		case utils.Values:
-			fltr.Rules[len(fltr.Rules)-1].Values, err = utils.IfaceAsStringSlice(val)
-		default:
-			return utils.ErrWrongPath
-		}
-	}
-	return
-}
-
-func (fltr *Filter) Compress() {
-	newRules := make([]*FilterRule, 0, len(fltr.Rules))
-	for i, flt := range fltr.Rules {
-		if i == 0 ||
-			newRules[len(newRules)-1].Type != flt.Type ||
-			newRules[len(newRules)-1].Element != flt.Element {
-			newRules = append(newRules, flt)
-			continue
-		}
-		newRules[len(newRules)-1].Values = append(newRules[len(newRules)-1].Values, flt.Values...)
-	}
-	fltr.Rules = newRules
-}
-
-func (fltr *Filter) Merge(v2 interface{}) {
-	vi := v2.(*Filter)
-	if len(vi.Tenant) != 0 {
-		fltr.Tenant = vi.Tenant
-	}
-	if len(vi.ID) != 0 {
-		fltr.ID = vi.ID
-	}
-	for _, rule := range vi.Rules {
-		if rule.Type != utils.EmptyString {
-			fltr.Rules = append(fltr.Rules, rule)
-		}
-	}
-}
-
-func (fltr *Filter) String() string { return utils.ToJSON(fltr) }
-func (fltr *Filter) FieldAsString(fldPath []string) (_ string, err error) {
-	var val interface{}
-	if val, err = fltr.FieldAsInterface(fldPath); err != nil {
-		return
-	}
-	return utils.IfaceAsString(val), nil
-}
-func (fltr *Filter) FieldAsInterface(fldPath []string) (_ interface{}, err error) {
-	if len(fldPath) == 1 {
-		switch fldPath[0] {
-		default:
-			fld, idx := utils.GetPathIndex(fldPath[0])
-			if fld == utils.Rules &&
-				idx != nil &&
-				*idx < len(fltr.Rules) {
-				return fltr.Rules[*idx], nil
-			}
-			return nil, utils.ErrNotFound
-		case utils.Tenant:
-			return fltr.Tenant, nil
-		case utils.ID:
-			return fltr.ID, nil
-		}
-	}
-	if len(fldPath) == 0 ||
-		!strings.HasPrefix(fldPath[0], utils.Rules) ||
-		fldPath[0][5] != '[' ||
-		fldPath[0][len(fldPath[0])-1] != ']' {
-		return nil, utils.ErrNotFound
-	}
-	var idx int
-	if idx, err = strconv.Atoi(fldPath[0][6 : len(fldPath[0])-1]); err != nil {
-		return
-	}
-	if idx >= len(fltr.Rules) {
-		return nil, utils.ErrNotFound
-	}
-	return fltr.Rules[idx].FieldAsInterface(fldPath[1:])
-}
-
-func (fltr *FilterRule) String() string { return utils.ToJSON(fltr) }
-func (fltr *FilterRule) FieldAsString(fldPath []string) (_ string, err error) {
-	var val interface{}
-	if val, err = fltr.FieldAsInterface(fldPath); err != nil {
-		return
-	}
-	return utils.IfaceAsString(val), nil
-}
-func (fltr *FilterRule) FieldAsInterface(fldPath []string) (_ interface{}, err error) {
-	if len(fldPath) != 1 {
-		return nil, utils.ErrNotFound
-	}
-	switch fldPath[0] {
-	default:
-		fld, idx := utils.GetPathIndex(fldPath[0])
-		if fld == utils.Values &&
-			idx != nil &&
-			*idx < len(fltr.Values) {
-			return fltr.Values[*idx], nil
-		}
-		return nil, utils.ErrNotFound
-	case utils.Type:
-		return fltr.Type, nil
-	case utils.Element:
-		return fltr.Element, nil
-	case utils.Values:
-		return fltr.Values, nil
-	}
 }

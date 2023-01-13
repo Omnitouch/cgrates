@@ -13,6 +13,10 @@
 	"http": ":2080",
 },
 
+"stor_db": {
+	"db_type": "*internal",
+},
+
 
 "caches":{
 	"partitions": {
@@ -20,7 +24,6 @@
 		"*dispatcher_loads": {"limit": -1, "replicate": true}
 	},
 	"replication_conns": ["cacheReplication"],
-	"remote_conns": ["cacheReplication"],	
 },
 
 
@@ -30,15 +33,20 @@
 	},
 },
 
+
+"schedulers": {
+	"enabled": true,
+},
+	
 	
 "dispatchers":{
 	 "enabled": true,
 },
 	
 	
-"admins": {
+"apiers": {
 	"enabled": true,
-
+	"scheduler_conns": ["*internal"],
 },
 
 	

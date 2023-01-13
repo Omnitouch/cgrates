@@ -23,14 +23,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func (m *Migrator) migrateCurrentDispatcher() (err error) {
 	var ids []string
-	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(context.TODO(), utils.DispatcherProfilePrefix)
+	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(utils.DispatcherProfilePrefix)
 	if err != nil {
 		return
 	}
@@ -39,17 +38,17 @@ func (m *Migrator) migrateCurrentDispatcher() (err error) {
 		if len(tntID) < 2 {
 			return fmt.Errorf("Invalid key <%s> when migrating dispatcher profiles", id)
 		}
-		dpp, err := m.dmIN.DataManager().GetDispatcherProfile(context.TODO(), tntID[0], tntID[1], false, false, utils.NonTransactional)
+		dpp, err := m.dmIN.DataManager().GetDispatcherProfile(tntID[0], tntID[1], false, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
 		if dpp == nil || m.dryRun {
 			continue
 		}
-		if err := m.dmOut.DataManager().SetDispatcherProfile(context.TODO(), dpp, true); err != nil {
+		if err := m.dmOut.DataManager().SetDispatcherProfile(dpp, true); err != nil {
 			return err
 		}
-		if err := m.dmIN.DataManager().RemoveDispatcherProfile(context.TODO(), tntID[0],
+		if err := m.dmIN.DataManager().RemoveDispatcherProfile(tntID[0],
 			tntID[1], false); err != nil {
 			return err
 		}
@@ -60,7 +59,7 @@ func (m *Migrator) migrateCurrentDispatcher() (err error) {
 
 func (m *Migrator) migrateCurrentDispatcherHost() (err error) {
 	var ids []string
-	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(context.TODO(), utils.DispatcherHostPrefix)
+	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(utils.DispatcherHostPrefix)
 	if err != nil {
 		return err
 	}
@@ -69,17 +68,17 @@ func (m *Migrator) migrateCurrentDispatcherHost() (err error) {
 		if len(tntID) < 2 {
 			return fmt.Errorf("Invalid key <%s> when migrating dispatcher hosts", id)
 		}
-		dpp, err := m.dmIN.DataManager().GetDispatcherHost(context.TODO(), tntID[0], tntID[1], false, false, utils.NonTransactional)
+		dpp, err := m.dmIN.DataManager().GetDispatcherHost(tntID[0], tntID[1], false, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
 		if dpp == nil || m.dryRun {
 			continue
 		}
-		if err := m.dmOut.DataManager().SetDispatcherHost(context.TODO(), dpp); err != nil {
+		if err := m.dmOut.DataManager().SetDispatcherHost(dpp); err != nil {
 			return err
 		}
-		if err := m.dmIN.DataManager().RemoveDispatcherHost(context.TODO(), tntID[0],
+		if err := m.dmIN.DataManager().RemoveDispatcherHost(tntID[0],
 			tntID[1]); err != nil {
 			return err
 		}
@@ -130,7 +129,7 @@ func (m *Migrator) migrateDispatchers() (err error) {
 
 		if !m.dryRun {
 			//set action plan
-			if err = m.dmOut.DataManager().SetDispatcherProfile(context.TODO(), v2, true); err != nil {
+			if err = m.dmOut.DataManager().SetDispatcherProfile(v2, true); err != nil {
 				return
 			}
 		}

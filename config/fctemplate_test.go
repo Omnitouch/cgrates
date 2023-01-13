@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewFCTemplateFromFCTemplateJsonCfg(t *testing.T) {
@@ -270,8 +270,7 @@ func TestFCTemplateInflate2(t *testing.T) {
 			},
 		},
 	}
-	expected := "no template with id: <TmpMap3>"
-	if _, err := InflateTemplates(fcTmp1, fcTmpMp); err == nil || err.Error() != expected {
+	if _, err := InflateTemplates(fcTmp1, fcTmpMp); err.Error() != "no template with id: <TmpMap3>" {
 		t.Error(err)
 	}
 }
@@ -415,7 +414,7 @@ func TestFCTemplateAsMapInterface(t *testing.T) {
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.templates.AsMapInterface(cgrCfg.generalCfg.RSRSep).(map[string][]map[string]interface{}); !reflect.DeepEqual(eMap["custom_template"], rcv["custom_template"]) {
+	} else if rcv := cgrCfg.templates.AsMapInterface(cgrCfg.generalCfg.RSRSep); !reflect.DeepEqual(eMap["custom_template"], rcv["custom_template"]) {
 		t.Errorf("Expected %+v \n, recieved %+v", utils.ToJSON(eMap["custom_template"]), utils.ToJSON(rcv["custom_template"]))
 	}
 }
@@ -474,7 +473,7 @@ func TestFCTemplateAsMapInterface1(t *testing.T) {
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
 	} else {
-		rcv := cgrCfg.templates.AsMapInterface(cgrCfg.generalCfg.RSRSep).(map[string][]map[string]interface{})
+		rcv := cgrCfg.templates.AsMapInterface(cgrCfg.generalCfg.RSRSep)
 		if !reflect.DeepEqual(eMap[utils.MetaErr], rcv[utils.MetaErr]) {
 			t.Errorf("Expected %+v \n, recieved %+v", utils.ToJSON(eMap[utils.MetaErr]), utils.ToJSON(rcv[utils.MetaErr]))
 		} else if !reflect.DeepEqual(eMap[utils.MetaASR], rcv[utils.MetaASR]) {
@@ -484,7 +483,7 @@ func TestFCTemplateAsMapInterface1(t *testing.T) {
 }
 
 func TestFCTemplatesClone(t *testing.T) {
-	smpl := FCTemplates{
+	smpl := FcTemplates{
 		utils.MetaErr: {{
 			Tag:              "Tenant",
 			Type:             "*composed",
@@ -499,7 +498,7 @@ func TestFCTemplatesClone(t *testing.T) {
 	if !reflect.DeepEqual(cloned, smpl) {
 		t.Errorf("expected: %s ,received: %s", utils.ToJSON(smpl), utils.ToJSON(cloned))
 	}
-	initialSmpl := FCTemplates{
+	initialSmpl := FcTemplates{
 		utils.MetaErr: {{
 			Tag:              "Tenant",
 			Type:             "*composed",
@@ -514,319 +513,10 @@ func TestFCTemplatesClone(t *testing.T) {
 	if !reflect.DeepEqual(cloned, initialSmpl) {
 		t.Errorf("expected: %s ,received: %s", utils.ToJSON(initialSmpl), utils.ToJSON(cloned))
 	}
-}
 
-func TestFcTemplatesEqual(t *testing.T) {
-	v1 := []*FCTemplate{
-		{
-			Tag:  "TenantID",
-			Type: utils.MetaVariable,
-			Path: utils.Tenant,
-			Value: RSRParsers{
-				{
-					Rules: "*req.0",
-				},
-			},
-			Filters:          []string{"*string:~*req.Account:1001"},
-			Width:            2,
-			Strip:            "strip",
-			Padding:          "padding",
-			Mandatory:        true,
-			AttributeID:      "ATTR_PRF_1001",
-			NewBranch:        true,
-			Timezone:         "UTC",
-			Blocker:          true,
-			Layout:           "string",
-			CostShiftDigits:  2,
-			RoundingDecimals: utils.IntPointer(3),
-			MaskDestID:       "MK_ID",
-			MaskLen:          2,
-		},
-	}
-
-	v2 := []*FCTemplate{
-		{
-			Tag:  "TenantID",
-			Type: utils.MetaVariable,
-			Path: utils.Tenant,
-			Value: RSRParsers{
-				{
-					Rules: "*req.0",
-				},
-			},
-			Filters:          []string{"*string:~*req.Account:1001"},
-			Width:            2,
-			Strip:            "strip",
-			Padding:          "padding",
-			Mandatory:        true,
-			AttributeID:      "ATTR_PRF_1001",
-			NewBranch:        true,
-			Timezone:         "UTC",
-			Blocker:          true,
-			Layout:           "string",
-			CostShiftDigits:  2,
-			RoundingDecimals: utils.IntPointer(3),
-			MaskDestID:       "MK_ID",
-			MaskLen:          2,
-		},
-	}
-
-	if !fcTemplatesEqual(v1, v2) {
-		t.Error("Templates should match")
-	}
-
-	v1[0].Tag = "TenantTag"
-	if fcTemplatesEqual(v1, v2) {
-		t.Error("Templates should not match")
-	}
-
-	newTemplate := &FCTemplate{
-		Tag:  "TenantID",
-		Type: utils.MetaVariable,
-		Path: utils.Tenant,
-		Value: RSRParsers{
-			{
-				Rules: "*req.0",
-			},
-		},
-		Filters:          []string{"*string:~*req.Account:1001"},
-		Width:            2,
-		Strip:            "strip",
-		Padding:          "padding",
-		Mandatory:        true,
-		AttributeID:      "ATTR_PRF_1001",
-		NewBranch:        true,
-		Timezone:         "UTC",
-		Blocker:          true,
-		Layout:           "string",
-		CostShiftDigits:  2,
-		RoundingDecimals: utils.IntPointer(3),
-		MaskDestID:       "MK_ID",
-		MaskLen:          2,
-	}
-	v2 = append(v2, newTemplate)
-	if fcTemplatesEqual(v1, v2) {
-		t.Error("Templates should not match")
-	}
-}
-
-func TestDiffFcTemplateJsonCfg(t *testing.T) {
-	var d []*FcTemplateJsonCfg
-
-	v1 := []*FCTemplate{
-		{
-			Tag: "TenantID2",
-		},
-	}
-
-	v2 := []*FCTemplate{
-		{
-			Tag:  "TenantID",
-			Type: utils.MetaVariable,
-			Path: utils.Tenant,
-			Value: RSRParsers{
-				{
-					Rules: "*req.0",
-				},
-			},
-			Filters:          []string{"*string:~*req.Account:1001"},
-			Width:            2,
-			Strip:            "strip",
-			Padding:          "padding",
-			Mandatory:        true,
-			AttributeID:      "ATTR_PRF_1001",
-			NewBranch:        true,
-			Timezone:         "UTC",
-			Blocker:          true,
-			Layout:           "string",
-			CostShiftDigits:  2,
-			RoundingDecimals: utils.IntPointer(3),
-			MaskDestID:       "MK_ID",
-			MaskLen:          2,
-		},
-	}
-
-	expected := []*FcTemplateJsonCfg{
-		{
-			Tag:                  utils.StringPointer("TenantID"),
-			Type:                 utils.StringPointer(utils.MetaVariable),
-			Path:                 utils.StringPointer(utils.Tenant),
-			Value:                utils.StringPointer("*req.0"),
-			Filters:              &[]string{"*string:~*req.Account:1001"},
-			Width:                utils.IntPointer(2),
-			Strip:                utils.StringPointer("strip"),
-			Padding:              utils.StringPointer("padding"),
-			Mandatory:            utils.BoolPointer(true),
-			Attribute_id:         utils.StringPointer("ATTR_PRF_1001"),
-			New_branch:           utils.BoolPointer(true),
-			Timezone:             utils.StringPointer("UTC"),
-			Blocker:              utils.BoolPointer(true),
-			Layout:               utils.StringPointer("string"),
-			Cost_shift_digits:    utils.IntPointer(2),
-			Rounding_decimals:    utils.IntPointer(3),
-			Mask_destinationd_id: utils.StringPointer("MK_ID"),
-			Mask_length:          utils.IntPointer(2),
-		},
-	}
-
-	rcv := diffFcTemplateJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = []*FcTemplateJsonCfg{
-		{
-			Tag: utils.StringPointer("Tag"),
-		},
-	}
-
-	v1 = v2
-	expected = []*FcTemplateJsonCfg{
-		{
-			Tag: utils.StringPointer("Tag"),
-		},
-	}
-	rcv = diffFcTemplateJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffFcTemplatesJsonCfg(t *testing.T) {
-	var d FcTemplatesJsonCfg
-
-	v1 := map[string][]*FCTemplate{}
-
-	v2 := FCTemplates{
-		"T1": {
-			{
-				Tag:  "TenantID",
-				Type: utils.MetaVariable,
-				Path: utils.Tenant,
-				Value: RSRParsers{
-					{
-						Rules: "*req.0",
-					},
-				},
-				Filters:          []string{"*string:~*req.Account:1001"},
-				Width:            2,
-				Strip:            "strip",
-				Padding:          "padding",
-				Mandatory:        true,
-				AttributeID:      "ATTR_PRF_1001",
-				NewBranch:        true,
-				Timezone:         "UTC",
-				Blocker:          true,
-				Layout:           "string",
-				CostShiftDigits:  2,
-				RoundingDecimals: utils.IntPointer(3),
-				MaskDestID:       "MK_ID",
-				MaskLen:          2,
-			},
-		},
-	}
-
-	expected := FcTemplatesJsonCfg{
-		"T1": {
-			{
-				Tag:                  utils.StringPointer("TenantID"),
-				Type:                 utils.StringPointer(utils.MetaVariable),
-				Path:                 utils.StringPointer(utils.Tenant),
-				Value:                utils.StringPointer("*req.0"),
-				Filters:              &[]string{"*string:~*req.Account:1001"},
-				Width:                utils.IntPointer(2),
-				Strip:                utils.StringPointer("strip"),
-				Padding:              utils.StringPointer("padding"),
-				Mandatory:            utils.BoolPointer(true),
-				Attribute_id:         utils.StringPointer("ATTR_PRF_1001"),
-				New_branch:           utils.BoolPointer(true),
-				Timezone:             utils.StringPointer("UTC"),
-				Blocker:              utils.BoolPointer(true),
-				Layout:               utils.StringPointer("string"),
-				Cost_shift_digits:    utils.IntPointer(2),
-				Rounding_decimals:    utils.IntPointer(3),
-				Mask_destinationd_id: utils.StringPointer("MK_ID"),
-				Mask_length:          utils.IntPointer(2),
-			},
-		},
-	}
-
-	rcv := diffFcTemplatesJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = FcTemplatesJsonCfg{
-		"T1": nil,
-	}
-	rcv = diffFcTemplatesJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestFCTemplatecloneSection(t *testing.T) {
-	fctCfg := FCTemplates{
-		"T1": {
-			{
-				Tag:  "TenantID",
-				Type: utils.MetaVariable,
-				Path: utils.Tenant,
-				Value: RSRParsers{
-					{
-						Rules: "*req.0",
-					},
-				},
-				Filters:          []string{"*string:~*req.Account:1001"},
-				Width:            2,
-				Strip:            "strip",
-				Padding:          "padding",
-				Mandatory:        true,
-				AttributeID:      "ATTR_PRF_1001",
-				NewBranch:        true,
-				Timezone:         "UTC",
-				Blocker:          true,
-				Layout:           "string",
-				CostShiftDigits:  2,
-				RoundingDecimals: utils.IntPointer(3),
-				MaskDestID:       "MK_ID",
-				MaskLen:          2,
-			},
-		},
-	}
-
-	exp := FCTemplates{
-		"T1": {
-			{
-				Tag:  "TenantID",
-				Type: utils.MetaVariable,
-				Path: utils.Tenant,
-				Value: RSRParsers{
-					{
-						Rules: "*req.0",
-					},
-				},
-				Filters:          []string{"*string:~*req.Account:1001"},
-				Width:            2,
-				Strip:            "strip",
-				Padding:          "padding",
-				Mandatory:        true,
-				AttributeID:      "ATTR_PRF_1001",
-				NewBranch:        true,
-				Timezone:         "UTC",
-				Blocker:          true,
-				Layout:           "string",
-				CostShiftDigits:  2,
-				RoundingDecimals: utils.IntPointer(3),
-				MaskDestID:       "MK_ID",
-				MaskLen:          2,
-			},
-		},
-	}
-
-	rcv := fctCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	smpl = nil
+	cloned = smpl.Clone()
+	if !reflect.DeepEqual(cloned, smpl) {
+		t.Errorf("expected: %s ,received: %s", utils.ToJSON(smpl), utils.ToJSON(cloned))
 	}
 }

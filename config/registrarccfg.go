@@ -21,23 +21,13 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // RegistrarCCfgs is the configuration of registrarc rpc and dispatcher
 type RegistrarCCfgs struct {
 	RPC         *RegistrarCCfg
 	Dispatchers *RegistrarCCfg
-}
-
-// loadRegistrarCCfg loads the RegistrarC section of the configuration
-func (dps *RegistrarCCfgs) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnRegistrarCCfg := new(RegistrarCJsonCfgs)
-	if err = jsnCfg.GetSection(ctx, RegistrarCJSON, jsnRegistrarCCfg); err != nil {
-		return
-	}
-	return dps.loadFromJSONCfg(jsnRegistrarCCfg)
 }
 
 func (dps *RegistrarCCfgs) loadFromJSONCfg(jsnCfg *RegistrarCJsonCfgs) (err error) {
@@ -51,15 +41,12 @@ func (dps *RegistrarCCfgs) loadFromJSONCfg(jsnCfg *RegistrarCJsonCfgs) (err erro
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (dps RegistrarCCfgs) AsMapInterface(string) interface{} {
+func (dps *RegistrarCCfgs) AsMapInterface() (initialMP map[string]interface{}) {
 	return map[string]interface{}{
 		utils.RPCCfg:        dps.RPC.AsMapInterface(),
 		utils.DispatcherCfg: dps.Dispatchers.AsMapInterface(),
 	}
 }
-
-func (RegistrarCCfgs) SName() string             { return RegistrarCJSON }
-func (dps RegistrarCCfgs) CloneSection() Section { return dps.Clone() }
 
 // Clone returns a deep copy of DispatcherHCfg
 func (dps RegistrarCCfgs) Clone() (cln *RegistrarCCfgs) {
@@ -86,7 +73,8 @@ func (dps *RegistrarCCfg) loadFromJSONCfg(jsnCfg *RegistrarCJsonCfg) (err error)
 		return nil
 	}
 	if jsnCfg.Registrars_conns != nil {
-		dps.RegistrarSConns = utils.CloneStringSlice(*jsnCfg.Registrars_conns)
+		dps.RegistrarSConns = make([]string, len(*jsnCfg.Registrars_conns))
+		copy(dps.RegistrarSConns, *jsnCfg.Registrars_conns)
 	}
 	if jsnCfg.Hosts != nil {
 		for _, hostJSON := range jsnCfg.Hosts {
@@ -110,7 +98,7 @@ func (dps *RegistrarCCfg) loadFromJSONCfg(jsnCfg *RegistrarCJsonCfg) (err error)
 // AsMapInterface returns the config as a map[string]interface{}
 func (dps *RegistrarCCfg) AsMapInterface() (initialMP map[string]interface{}) {
 	initialMP = map[string]interface{}{
-		utils.RegistrarsConnsCfg: utils.CloneStringSlice(dps.RegistrarSConns),
+		utils.RegistrarsConnsCfg: dps.RegistrarSConns,
 		utils.RefreshIntervalCfg: dps.RefreshInterval.String(),
 	}
 	if dps.RefreshInterval == 0 {
@@ -138,7 +126,10 @@ func (dps RegistrarCCfg) Clone() (cln *RegistrarCCfg) {
 		Hosts:           make(map[string][]*RemoteHost),
 	}
 	if dps.RegistrarSConns != nil {
-		cln.RegistrarSConns = utils.CloneStringSlice(dps.RegistrarSConns)
+		cln.RegistrarSConns = make([]string, len(dps.RegistrarSConns))
+		for i, k := range dps.RegistrarSConns {
+			cln.RegistrarSConns[i] = k
+		}
 	}
 	for tnt, hosts := range dps.Hosts {
 		clnH := make([]*RemoteHost, len(hosts))
@@ -148,64 +139,4 @@ func (dps RegistrarCCfg) Clone() (cln *RegistrarCCfg) {
 		cln.Hosts[tnt] = clnH
 	}
 	return
-}
-
-type RegistrarCJsonCfg struct {
-	Registrars_conns *[]string
-	Hosts            []*RemoteHostJsonWithTenant
-	Refresh_interval *string
-}
-
-func diffRegistrarCJsonCfg(d *RegistrarCJsonCfg, v1, v2 *RegistrarCCfg) *RegistrarCJsonCfg {
-	if d == nil {
-		d = new(RegistrarCJsonCfg)
-	}
-	if !utils.SliceStringEqual(v1.RegistrarSConns, v2.RegistrarSConns) {
-		d.Registrars_conns = utils.SliceStringPointer(utils.CloneStringSlice(v2.RegistrarSConns))
-	}
-	if d.Hosts == nil {
-		d.Hosts = []*RemoteHostJsonWithTenant{}
-	}
-	for k, host := range v2.Hosts {
-		for _, conn := range host {
-			dConn := &RemoteHostJsonWithTenant{
-				RemoteHostJson: new(RemoteHostJson),
-			}
-			if conn.ID != utils.EmptyString {
-				dConn.Id = utils.StringPointer(conn.ID)
-			}
-			if conn.Transport != utils.EmptyString {
-				dConn.Transport = utils.StringPointer(conn.Transport)
-			}
-			if conn.Address != utils.EmptyString {
-				dConn.Address = utils.StringPointer(conn.Address)
-			}
-			if conn.TLS {
-				dConn.Tls = utils.BoolPointer(conn.TLS)
-			}
-			if k != utils.MetaDefault {
-				dConn.Tenant = utils.StringPointer(k)
-			}
-			d.Hosts = append(d.Hosts, dConn)
-
-		}
-	}
-	if v1.RefreshInterval != v2.RefreshInterval {
-		d.Refresh_interval = utils.StringPointer(v2.RefreshInterval.String())
-	}
-	return d
-}
-
-type RegistrarCJsonCfgs struct {
-	RPC         *RegistrarCJsonCfg
-	Dispatchers *RegistrarCJsonCfg
-}
-
-func diffRegistrarCJsonCfgs(d *RegistrarCJsonCfgs, v1, v2 *RegistrarCCfgs) *RegistrarCJsonCfgs {
-	if d == nil {
-		d = new(RegistrarCJsonCfgs)
-	}
-	d.RPC = diffRegistrarCJsonCfg(d.RPC, v1.RPC, v2.RPC)
-	d.Dispatchers = diffRegistrarCJsonCfg(d.Dispatchers, v1.Dispatchers, v2.Dispatchers)
-	return d
 }

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/Omnitouch/go-diameter/v4/diam"
 	"github.com/Omnitouch/go-diameter/v4/diam/avp"
 	"github.com/Omnitouch/go-diameter/v4/diam/datatype"

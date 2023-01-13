@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestAnalyzerSCfgloadFromJsonCfg(t *testing.T) {
@@ -34,21 +34,13 @@ func TestAnalyzerSCfgloadFromJsonCfg(t *testing.T) {
 		CleanupInterval: time.Hour,
 		DBPath:          "/var/spool/cgrates/analyzers",
 		IndexType:       utils.MetaScorch,
-		EEsConns:        []string{},
 		TTL:             24 * time.Hour,
-		Opts: &AnalyzerSOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
 	}
 	jsnCfg := NewDefaultCGRConfig()
 	if err = jsnCfg.analyzerSCfg.loadFromJSONCfg(jsonCfg); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(jsnCfg.analyzerSCfg, expected) {
 		t.Errorf("Expected %+v \n, received %+v", expected, jsnCfg.analyzerSCfg)
-	}
-	jsonCfg = nil
-	if err = jsnCfg.analyzerSCfg.loadFromJSONCfg(jsonCfg); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -62,16 +54,12 @@ func TestAnalyzerSCfgAsMapInterface(t *testing.T) {
 		utils.CleanupIntervalCfg: "1h0m0s",
 		utils.DBPathCfg:          "/var/spool/cgrates/analyzers",
 		utils.IndexTypeCfg:       utils.MetaScorch,
-		utils.EEsConnsCfg:        []string{},
 		utils.TTLCfg:             "24h0m0s",
-		utils.OptsCfg: map[string]interface{}{
-			utils.MetaExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.analyzerSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
-		t.Errorf("Expected: %+v , received: %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
+	} else if rcv := cgrCfg.analyzerSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
+		t.Errorf("Expected: %+v , received: %+v", eMap, rcv)
 	}
 }
 
@@ -79,7 +67,6 @@ func TestAnalyzerSCfgAsMapInterface1(t *testing.T) {
 	cfgJSONStr := `{
 		"analyzers":{
             "enabled": true,  
-			"ees_conns": ["*localhost"],
         },
     }
 }`
@@ -88,16 +75,12 @@ func TestAnalyzerSCfgAsMapInterface1(t *testing.T) {
 		utils.CleanupIntervalCfg: "1h0m0s",
 		utils.DBPathCfg:          "/var/spool/cgrates/analyzers",
 		utils.IndexTypeCfg:       utils.MetaScorch,
-		utils.EEsConnsCfg:        []string{"*localhost"},
 		utils.TTLCfg:             "24h0m0s",
-		utils.OptsCfg: map[string]interface{}{
-			utils.MetaExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.analyzerSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
-		t.Errorf("Expected: %+v , received: %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
+	} else if rcv := cgrCfg.analyzerSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
+		t.Errorf("Expected: %+v , received: %+v", eMap, rcv)
 	}
 }
 
@@ -124,7 +107,6 @@ func TestAnalyzerSCfgClone(t *testing.T) {
 		CleanupInterval: time.Hour,
 		DBPath:          "/var/spool/cgrates/analyzers",
 		IndexType:       utils.MetaScorch,
-		EEsConns:        []string{"*internal"},
 		TTL:             24 * time.Hour,
 	}
 	rcv := cS.Clone()
@@ -133,115 +115,5 @@ func TestAnalyzerSCfgClone(t *testing.T) {
 	}
 	if rcv.DBPath = ""; cS.DBPath != "/var/spool/cgrates/analyzers" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffAnalyzerSJsonCfg(t *testing.T) {
-	var d *AnalyzerSJsonCfg
-
-	v1 := &AnalyzerSCfg{
-		Enabled:         false,
-		DBPath:          "",
-		IndexType:       utils.MetaPrefix,
-		TTL:             2 * time.Minute,
-		CleanupInterval: time.Hour,
-		Opts:            &AnalyzerSOpts{},
-	}
-
-	v2 := &AnalyzerSCfg{
-		Enabled:         true,
-		DBPath:          "/var/spool/cgrates/analyzers",
-		IndexType:       utils.MetaString,
-		TTL:             3 * time.Minute,
-		EEsConns:        []string{"*internal"},
-		CleanupInterval: 30 * time.Minute,
-		Opts:            &AnalyzerSOpts{},
-	}
-
-	expected := &AnalyzerSJsonCfg{
-		Enabled:          utils.BoolPointer(true),
-		Db_path:          utils.StringPointer("/var/spool/cgrates/analyzers"),
-		Index_type:       utils.StringPointer(utils.MetaString),
-		Ttl:              utils.StringPointer("3m0s"),
-		Ees_conns:        &[]string{"*internal"},
-		Cleanup_interval: utils.StringPointer("30m0s"),
-		Opts:             &AnalyzerSOptsJson{},
-	}
-
-	rcv := diffAnalyzerSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v2 = v1
-	expected2 := &AnalyzerSJsonCfg{
-		Opts: &AnalyzerSOptsJson{},
-	}
-	rcv = diffAnalyzerSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected2) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
-	}
-}
-
-func TestAnalyzerSCloneSection(t *testing.T) {
-	anlCfg := &AnalyzerSCfg{
-		Enabled:         true,
-		DBPath:          "/var/spool/cgrates/analyzers",
-		IndexType:       utils.MetaString,
-		TTL:             3 * time.Minute,
-		CleanupInterval: 30 * time.Minute,
-	}
-
-	exp := &AnalyzerSCfg{
-		Enabled:         true,
-		DBPath:          "/var/spool/cgrates/analyzers",
-		IndexType:       utils.MetaString,
-		TTL:             3 * time.Minute,
-		CleanupInterval: 30 * time.Minute,
-	}
-	rcv := anlCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestToLoadFromJSONCfg(t *testing.T) {
-	anzOpts := &AnalyzerSOpts{
-		ExporterIDs: []*utils.DynamicStringSliceOpt{
-			{
-				FilterIDs: []string{"filtr1"},
-			},
-		},
-	}
-	var jsonAnzOpts *AnalyzerSOptsJson
-
-	temp := *anzOpts
-
-	anzOpts.loadFromJSONCfg(jsonAnzOpts)
-	if !reflect.DeepEqual(temp, *anzOpts) {
-		t.Errorf("Expected anzOpts to not change, was<%v>, now is <%v>", temp, *anzOpts)
-	}
-}
-
-func TestDiffAnalyzerSOptsJsonCfg(t *testing.T) {
-	d := &AnalyzerSOptsJson{}
-	v1 := &AnalyzerSOpts{
-		ExporterIDs: []*utils.DynamicStringSliceOpt{},
-	}
-	v2 := &AnalyzerSOpts{
-		ExporterIDs: []*utils.DynamicStringSliceOpt{{
-			FilterIDs: []string{"test"},
-		},
-		},
-	}
-	exp := &AnalyzerSOptsJson{
-
-		ExporterIDs: []*utils.DynamicStringSliceOpt{{
-			FilterIDs: []string{"test"},
-		},
-		},
-	}
-	if rcv := diffAnalyzerSOptsJsonCfg(d, v1, v2); utils.ToJSON(rcv) != utils.ToJSON(exp) {
-		t.Errorf("Expected <%v> \n Received \n <%v>", exp, rcv)
 	}
 }

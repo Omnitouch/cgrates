@@ -20,391 +20,305 @@ package utils
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
+	syslog "log/syslog"
 	"os"
-	"reflect"
+	"strings"
 	"testing"
 )
 
-func TestLoggerNewLoggerStdoutOK(t *testing.T) {
-	exp := &StdLogger{
-		nodeID:   "1234",
-		logLevel: 7,
-		w: &logWriter{
-			log.New(os.Stderr, EmptyString, log.LstdFlags),
-		},
-	}
-	if rcv, err := NewLogger(MetaStdLog, "1234", 7); err != nil {
+func TestEmergLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+	loggertype := MetaSysLog
+	id := "id_emerg"
+	if _, err := Newlogger(loggertype, id); err != nil {
 		t.Error(err)
-	} else if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
 	}
-}
 
-func TestLoggerNewLoggerSyslogOK(t *testing.T) {
-	exp := &SysLogger{
-		logLevel: 7,
-	}
-	if rcv, err := NewLogger(MetaSysLog, EmptyString, 7); err != nil {
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(-1)
+	if err := newLogger.Emerg(EmptyString); err != nil {
 		t.Error(err)
 	} else {
-		exp.syslog = rcv.GetSyslog()
-		if !reflect.DeepEqual(rcv, exp) {
-			t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
+		newLogger.SetLogLevel(LOGLEVEL_EMERGENCY)
+		if err := newLogger.Emerg("emergency_panic"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_emerg> [EMERGENCY] emergency_panic"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
 		}
 	}
+
+	log.SetOutput(os.Stderr)
 }
 
-func TestLoggerNewLoggerUnsupported(t *testing.T) {
-	experr := `unsupported logger: <unsupported>`
-	if _, err := NewLogger("unsupported", EmptyString, 7); err == nil || err.Error() != experr {
-		t.Errorf("expected: <%s>, \nreceived: <%+v>", experr, err)
+func TestAlertLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+	loggertype := MetaSysLog
+	id := "id_alert"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
 	}
+
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(0)
+	if err := newLogger.Alert("Alert"); err != nil {
+		t.Error(err)
+	} else {
+		newLogger.SetLogLevel(LOGLEVEL_ALERT)
+		if err := newLogger.Alert("Alert"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_alert> [ALERT] Alert"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
+	}
+
+	log.SetOutput(os.Stderr)
 }
 
-func TestLoggerSysloggerSetGetLogLevel(t *testing.T) {
-	sl, err := NewSysLogger("1234", 4)
+func TestCritLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+
+	loggertype := MetaSysLog
+	id := "id_crit"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
+	}
+
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(1)
+	if err := newLogger.Crit("Critical_level"); err != nil {
+		t.Error(err)
+	} else {
+		newLogger.logLevel = LOGLEVEL_CRITICAL
+		if err := newLogger.Crit("Critical_level"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_crit> [CRITICAL] Critical_level"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
+	}
+
+	log.SetOutput(os.Stderr)
+}
+
+func TestErrorLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+
+	loggertype := MetaSysLog
+	id := "id_error"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
+	}
+
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(2)
+	if err := newLogger.Err("error_panic"); err != nil {
+		t.Error(err)
+	} else {
+		newLogger.SetLogLevel(LOGLEVEL_ERROR)
+		if err := newLogger.Err("error_panic"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_error> [ERROR] error_panic"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
+	}
+
+	log.SetOutput(os.Stderr)
+}
+
+func TestWarningLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+
+	loggertype := MetaSysLog
+	id := "id_error"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
+	}
+
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(3)
+	if err := newLogger.Warning("warning_panic"); err != nil {
+		t.Error(err)
+	} else {
+		newLogger.SetLogLevel(LOGLEVEL_WARNING)
+		if err := newLogger.Warning("warning_panic"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_error> [WARNING] warning_panic"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
+	}
+
+	log.SetOutput(os.Stderr)
+}
+
+func TestNoticeLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+
+	loggertype := MetaSysLog
+	id := "id_notice"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
+	}
+
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(4)
+	if err := newLogger.Notice("notice_panic"); err != nil {
+		t.Error(err)
+	} else {
+		newLogger.SetLogLevel(LOGLEVEL_NOTICE)
+		if err := newLogger.Notice("notice_panic"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_notice> [NOTICE] notice_panic"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
+	}
+
+	log.SetOutput(os.Stderr)
+}
+
+func TestInfoLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+
+	loggertype := MetaSysLog
+	id := "id_info"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
+	}
+
+	newLogger := &StdLogger{nodeID: id}
+
+	newLogger.SetLogLevel(5)
+	if err := newLogger.Info("info_panic"); err != nil {
+		t.Error(err)
+	} else {
+		newLogger.SetLogLevel(LOGLEVEL_INFO)
+		if err := newLogger.Info("info_panic"); err != nil {
+			t.Error(err)
+		}
+		expected := "CGRateS <id_info> [INFO] info_panic"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
+	}
+
+	log.SetOutput(os.Stderr)
+}
+
+func TestDebugLogger(t *testing.T) {
+	output := new(bytes.Buffer)
+	log.SetOutput(output)
+
+	loggertype := MetaSysLog
+	id := "id_debug"
+	if _, err := Newlogger(loggertype, id); err != nil {
+		t.Error(err)
+	}
+
+	newLogger, err := Newlogger(MetaStdLog, id)
 	if err != nil {
 		t.Error(err)
 	}
-	if rcv := sl.GetLogLevel(); rcv != 4 {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", 4, rcv)
-	}
-	sl.SetLogLevel(5)
-	if rcv := sl.GetLogLevel(); rcv != 5 {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", 5, rcv)
-	}
-}
-
-func TestLoggerStdLoggerEmerg(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Emerg(logMsg); err != nil {
+	newLogger.SetLogLevel(6)
+	if err := newLogger.Debug("debug_panic"); err != nil {
 		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
+	} else {
+		newLogger.SetLogLevel(LOGLEVEL_DEBUG)
+		if err := newLogger.Debug("debug_panic"); err != nil {
+			t.Error(err)
+		}
+		expected := "GRateS <id_debug> [DEBUG] debug_panic"
+		if rcv := output.String(); !strings.Contains(rcv, expected) {
+			t.Errorf("Expected %+v, received %+v", expected, rcv)
+		}
 	}
 
-	sl.SetLogLevel(LOGLEVEL_EMERGENCY)
-	expMsg := fmt.Sprintf("CGRateS <%s> [EMERGENCY] %s\n", sl.nodeID, logMsg)
-	if err := sl.Emerg(logMsg); err != nil {
+	log.SetOutput(os.Stderr)
+}
+
+func TestWriteLogger(t *testing.T) {
+	log.SetOutput(os.Stderr)
+
+	loggertype := MetaSysLog
+	id := "id_write"
+	if _, err := Newlogger(loggertype, id); err != nil {
 		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
 	}
-}
 
-func TestLoggerStdLoggerAlert(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Alert(logMsg); err != nil {
+	newWriter, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "CGRates id_write")
+	if err != nil {
 		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
 	}
+	newLogger := &StdLogger{nodeID: id}
+	newLogger.SetSyslog(newWriter)
 
-	sl.SetLogLevel(LOGLEVEL_ALERT)
-	expMsg := fmt.Sprintf("CGRateS <%s> [ALERT] %s\n", sl.nodeID, logMsg)
-	if err := sl.Alert(logMsg); err != nil {
+	if n, err := newLogger.Write([]byte(EmptyString)); err != nil {
 		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
+	} else if n != 1 {
+		t.Errorf("Expected 1, received %+v", n)
 	}
+
+	log.SetOutput(os.Stderr)
 }
 
-func TestLoggerStdLoggerCrit(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Crit(logMsg); err != nil {
+func TestCloseLogger(t *testing.T) {
+	log.SetOutput(io.Discard)
+
+	loggertype := MetaStdLog
+	if _, err := Newlogger(loggertype, EmptyString); err != nil {
 		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
 	}
 
-	sl.SetLogLevel(LOGLEVEL_CRITICAL)
-	expMsg := fmt.Sprintf("CGRateS <%s> [CRITICAL] %s\n", sl.nodeID, logMsg)
-	if err := sl.Crit(logMsg); err != nil {
+	newLogger := &StdLogger{nodeID: EmptyString}
+	if err := newLogger.Close(); err != nil {
 		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
 	}
-}
-
-func TestLoggerStdLoggerErr(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Err(logMsg); err != nil {
+	newWriter, err := syslog.New(0, "CGRates")
+	if err != nil {
 		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
 	}
+	x := newWriter
 
-	sl.SetLogLevel(LOGLEVEL_ERROR)
-	expMsg := fmt.Sprintf("CGRateS <%s> [ERROR] %s\n", sl.nodeID, logMsg)
-	if err := sl.Err(logMsg); err != nil {
+	newLogger.SetSyslog(x)
+	if err := newLogger.Close(); err != nil {
 		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
 	}
 }
 
-func TestLoggerStdLoggerWarning(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Warning(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
-	}
-
-	sl.SetLogLevel(LOGLEVEL_WARNING)
-	expMsg := fmt.Sprintf("CGRateS <%s> [WARNING] %s\n", sl.nodeID, logMsg)
-	if err := sl.Warning(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
-	}
+func TestLogStackLogger(t *testing.T) {
+	LogStack()
 }
 
-func TestLoggerStdLoggerNotice(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Notice(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
-	}
+func TestNewLoggerInvalidLoggerType(t *testing.T) {
+	log.SetOutput(io.Discard)
 
-	sl.SetLogLevel(LOGLEVEL_NOTICE)
-	expMsg := fmt.Sprintf("CGRateS <%s> [NOTICE] %s\n", sl.nodeID, logMsg)
-	if err := sl.Notice(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
+	loggertype := "Invalid_TYPE"
+	expected := "unsupported logger: <Invalid_TYPE>"
+	if _, err := Newlogger(loggertype, EmptyString); err == nil || err.Error() != expected {
+		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
-}
-
-func TestLoggerStdLoggerInfo(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Info(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
-	}
-
-	sl.SetLogLevel(LOGLEVEL_INFO)
-	expMsg := fmt.Sprintf("CGRateS <%s> [INFO] %s\n", sl.nodeID, logMsg)
-	if err := sl.Info(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
-	}
-}
-
-func TestLoggerStdLoggerDebug(t *testing.T) {
-	logMsg := "log message"
-	var buf bytes.Buffer
-	sl := NewStdLoggerWithWriter(&buf, "1234", -1)
-	if err := sl.Debug(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != "" {
-		t.Error("did not expect the message to be logged")
-	}
-
-	sl.SetLogLevel(LOGLEVEL_DEBUG)
-	expMsg := fmt.Sprintf("CGRateS <%s> [DEBUG] %s\n", sl.nodeID, logMsg)
-	if err := sl.Debug(logMsg); err != nil {
-		t.Error(err)
-	} else if buf.String() != expMsg {
-		t.Errorf("expected: <%s>, \nreceived: <%s>", expMsg, buf.String())
-	}
-}
-
-func TestCloseSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 2)
-
-	if err := sl.Close(); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-
-}
-func TestWriteSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 2)
-	exp := 6
-	testbyte := []byte{97, 98, 99, 100, 101, 102}
-	if rcv, err := sl.Write(testbyte); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	} else if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("expected: <%v>, received: <%v>", exp, rcv)
-	}
-
-}
-
-func TestAlertSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 0)
-
-	if err := sl.Alert("Alert Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 2)
-	if err := sl.Alert("Alert Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-func TestCritSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 1)
-
-	if err := sl.Crit("Critical Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 4)
-	if err := sl.Crit("Critical Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-
-func TestDebugSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 6)
-
-	if err := sl.Debug("Debug Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 8)
-	if err := sl.Debug("Debug Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-
-func TestEmergSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", -1)
-
-	if err := sl.Emerg("Emergency Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	// always broadcasts message from journal
-	// sl, _ = NewSysLogger("test2", 1)
-	// if err := sl.Emerg("Emergency Message 2"); err != nil {
-	// 	t.Errorf("Expected <nil>, received %v", err)
-	// }
-
-}
-
-func TestErrSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 2)
-
-	if err := sl.Err("Error Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 4)
-	if err := sl.Err("Error Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-func TestInfoSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 5)
-
-	if err := sl.Info("Info Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 7)
-	if err := sl.Info("Info Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-func TestNoticeSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 4)
-
-	if err := sl.Notice("Notice Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 6)
-	if err := sl.Notice("Notice Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-func TestWarningSysLogger(t *testing.T) {
-	sl, _ := NewSysLogger("test", 3)
-
-	if err := sl.Warning("Warning Message"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-	sl, _ = NewSysLogger("test2", 5)
-	if err := sl.Warning("Warning Message 2"); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-}
-
-func TestCloseNopCloser(t *testing.T) {
-	var nC NopCloser
-
-	if err := nC.Close(); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-
-}
-
-func TestWriteLogWriter(t *testing.T) {
-	l := &logWriter{
-		log.New(io.Discard, EmptyString, log.LstdFlags),
-	}
-	exp := 1
-	if rcv, err := l.Write([]byte{51}); err != nil {
-		t.Error(err)
-	} else if rcv != exp {
-		t.Errorf("Expected <%+v> <%T>, received <%+v> <%T>", exp, exp, rcv, rcv)
-	}
-}
-
-func TestCloseLogWriter(t *testing.T) {
-	var lW logWriter
-	if err := lW.Close(); err != nil {
-		t.Errorf("Expected <nil>, received %v", err)
-	}
-
-}
-
-func TestGetSyslogStdLogger(t *testing.T) {
-	sl := &StdLogger{}
-	if rcv := sl.GetSyslog(); rcv != nil {
-		t.Errorf("Expected <nil>, received %v", rcv)
-	}
-}
-func TestCloseStdLogger(t *testing.T) {
-	sl := &StdLogger{w: Logger}
-	if rcv := sl.Close(); rcv != nil {
-		t.Errorf("Expected <nil>, received %v", rcv)
-	}
-}
-
-func TestWriteStdLogger(t *testing.T) {
-	sl := &StdLogger{
-		w: &logWriter{
-			log.New(io.Discard, EmptyString, log.LstdFlags),
-		},
-	}
-	exp := 1
-	if rcv, err := sl.Write([]byte{222}); err != nil {
-		t.Error(err)
-	} else if rcv != exp {
-		t.Errorf("Expected <%v>, received <%v>", exp, rcv)
-	}
-}
-
-func TestGetLogLevelStdLogger(t *testing.T) {
-	sl := &StdLogger{}
-	exp := 0
-	if rcv := sl.GetLogLevel(); rcv != exp {
-		t.Errorf("Expected <%v>, received %v %T", exp, rcv, rcv)
-	}
-
 }

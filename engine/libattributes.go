@@ -20,21 +20,16 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
-
-type apWithWeight struct {
-	*AttributeProfile
-	weight float64
-}
 
 // Attribute used by AttributeProfile to describe a single attribute
 type Attribute struct {
 	FilterIDs []string
-	Blockers  utils.DynamicBlockers // Blockers flag to stop processing on multiple attributes from a profile
 	Path      string
 	Type      string
 	Value     config.RSRParsers
@@ -42,12 +37,14 @@ type Attribute struct {
 
 // AttributeProfile the profile definition for the attributes
 type AttributeProfile struct {
-	Tenant     string
-	ID         string
-	FilterIDs  []string
-	Weights    utils.DynamicWeights
-	Blockers   utils.DynamicBlockers // Blockers flag to stop processing on multiple runs
-	Attributes []*Attribute
+	Tenant             string
+	ID                 string
+	Contexts           []string // bind this AttributeProfile to multiple contexts
+	FilterIDs          []string
+	ActivationInterval *utils.ActivationInterval // Activation interval
+	Attributes         []*Attribute
+	Blocker            bool // blocker flag to stop processing on multiple runs
+	Weight             float64
 }
 
 // AttributeProfileWithAPIOpts is used in replicatorV1 for dispatcher
@@ -86,10 +83,14 @@ func (ap *AttributeProfile) TenantIDInline() string {
 // AttributeProfiles is a sortable list of Attribute profiles
 type AttributeProfiles []*AttributeProfile
 
+// Sort is part of sort interface, sort based on Weight
+func (aps AttributeProfiles) Sort() {
+	sort.Slice(aps, func(i, j int) bool { return aps[i].Weight > aps[j].Weight })
+}
+
 // ExternalAttribute the attribute for external profile
 type ExternalAttribute struct {
 	FilterIDs []string
-	Blockers  utils.DynamicBlockers
 	Path      string
 	Type      string
 	Value     string
@@ -97,39 +98,14 @@ type ExternalAttribute struct {
 
 // APIAttributeProfile used by APIs
 type APIAttributeProfile struct {
-	Tenant    string
-	ID        string
-	FilterIDs []string
-	Blockers  utils.DynamicBlockers
-	//Blocker    bool // blocker flag to stop processing on multiple runs
-	Weights    utils.DynamicWeights
-	Attributes []*ExternalAttribute
-}
-
-type APIAttributeProfileWithAPIOpts struct {
-	*APIAttributeProfile
-	APIOpts map[string]interface{}
-}
-
-func NewAPIAttributeProfile(attr *AttributeProfile) (ext *APIAttributeProfile) {
-	ext = &APIAttributeProfile{
-		Tenant:     attr.Tenant,
-		ID:         attr.ID,
-		FilterIDs:  attr.FilterIDs,
-		Attributes: make([]*ExternalAttribute, len(attr.Attributes)),
-		Weights:    attr.Weights,
-		Blockers:   attr.Blockers,
-	}
-	for i, at := range attr.Attributes {
-		ext.Attributes[i] = &ExternalAttribute{
-			FilterIDs: at.FilterIDs,
-			Blockers:  at.Blockers,
-			Path:      at.Path,
-			Type:      at.Type,
-			Value:     at.Value.GetRule(utils.InfieldSep),
-		}
-	}
-	return
+	Tenant             string
+	ID                 string
+	Contexts           []string // bind this AttributeProfile to multiple contexts
+	FilterIDs          []string
+	ActivationInterval *utils.ActivationInterval // Activation interval
+	Attributes         []*ExternalAttribute
+	Blocker            bool // blocker flag to stop processing on multiple runs
+	Weight             float64
 }
 
 // AsAttributeProfile converts the external attribute format to the actual AttributeProfile
@@ -150,24 +126,26 @@ func (ext *APIAttributeProfile) AsAttributeProfile() (attr *AttributeProfile, er
 		if attr.Attributes[i].Value, err = config.NewRSRParsers(extAttr.Value, utils.InfieldSep); err != nil {
 			return nil, err
 		}
-		attr.Attributes[i].Blockers = extAttr.Blockers
 		attr.Attributes[i].Type = extAttr.Type
 		attr.Attributes[i].FilterIDs = extAttr.FilterIDs
 		attr.Attributes[i].Path = extAttr.Path
 	}
 	attr.Tenant = ext.Tenant
 	attr.ID = ext.ID
+	attr.Contexts = ext.Contexts
 	attr.FilterIDs = ext.FilterIDs
-	attr.Blockers = ext.Blockers
-	attr.Weights = ext.Weights
+	attr.ActivationInterval = ext.ActivationInterval
+	attr.Blocker = ext.Blocker
+	attr.Weight = ext.Weight
 	return
 }
 
 // NewAttributeFromInline parses an inline rule into a compiled AttributeProfile
 func NewAttributeFromInline(tenant, inlnRule string) (attr *AttributeProfile, err error) {
 	attr = &AttributeProfile{
-		Tenant: tenant,
-		ID:     inlnRule,
+		Tenant:   tenant,
+		ID:       inlnRule,
+		Contexts: []string{utils.MetaAny},
 	}
 	for _, rule := range strings.Split(inlnRule, utils.InfieldSep) {
 		ruleSplt := strings.SplitN(rule, utils.InInFieldSep, 3)
@@ -189,168 +167,4 @@ func NewAttributeFromInline(tenant, inlnRule string) (attr *AttributeProfile, er
 		})
 	}
 	return
-}
-
-func (ap *AttributeProfile) Set(path []string, val interface{}, newBranch bool, rsrSep string) (err error) {
-	switch len(path) {
-	case 1:
-		switch path[0] {
-		case utils.Tenant:
-			ap.Tenant = utils.IfaceAsString(val)
-		case utils.ID:
-			ap.ID = utils.IfaceAsString(val)
-		case utils.FilterIDs:
-			var valA []string
-			valA, err = utils.IfaceAsStringSlice(val)
-			ap.FilterIDs = append(ap.FilterIDs, valA...)
-		case utils.Blockers:
-			if val != utils.EmptyString {
-				ap.Blockers, err = utils.NewDynamicBlockersFromString(utils.IfaceAsString(val), utils.InfieldSep, utils.ANDSep)
-			}
-		case utils.Weights:
-			if val != utils.EmptyString {
-				ap.Weights, err = utils.NewDynamicWeightsFromString(utils.IfaceAsString(val), utils.InfieldSep, utils.ANDSep)
-			}
-		default:
-			return utils.ErrWrongPath
-		}
-	case 2:
-		if path[0] != utils.Attributes {
-			return utils.ErrWrongPath
-		}
-		if len(ap.Attributes) == 0 || newBranch {
-			ap.Attributes = append(ap.Attributes, new(Attribute))
-		}
-		switch path[1] {
-		case utils.FilterIDs:
-			var valA []string
-			valA, err = utils.IfaceAsStringSlice(val)
-			ap.Attributes[len(ap.Attributes)-1].FilterIDs = append(ap.Attributes[len(ap.Attributes)-1].FilterIDs, valA...)
-		case utils.Blockers:
-			if val != utils.EmptyString {
-				ap.Attributes[len(ap.Attributes)-1].Blockers, err = utils.NewDynamicBlockersFromString(utils.IfaceAsString(val), utils.InfieldSep, utils.ANDSep)
-			}
-		case utils.Path:
-			ap.Attributes[len(ap.Attributes)-1].Path = utils.IfaceAsString(val)
-		case utils.Type:
-			ap.Attributes[len(ap.Attributes)-1].Type = utils.IfaceAsString(val)
-		case utils.Value:
-			ap.Attributes[len(ap.Attributes)-1].Value, err = config.NewRSRParsers(utils.IfaceAsString(val), rsrSep)
-		default:
-			return utils.ErrWrongPath
-		}
-	default:
-		return utils.ErrWrongPath
-	}
-	return
-}
-
-func (ap *AttributeProfile) Merge(v2 interface{}) {
-	vi := v2.(*AttributeProfile)
-	if len(vi.Tenant) != 0 {
-		ap.Tenant = vi.Tenant
-	}
-	if len(vi.ID) != 0 {
-		ap.ID = vi.ID
-	}
-	ap.FilterIDs = append(ap.FilterIDs, vi.FilterIDs...)
-	for _, attr := range vi.Attributes {
-		if attr.Type != utils.EmptyString {
-			ap.Attributes = append(ap.Attributes, attr)
-		}
-	}
-	if vi.Blockers != nil {
-		ap.Blockers = append(ap.Blockers, vi.Blockers...)
-	}
-	if vi.Weights != nil {
-		ap.Weights = append(ap.Weights, vi.Weights...)
-	}
-}
-
-func (ap *AttributeProfile) String() string { return utils.ToJSON(ap) }
-func (ap *AttributeProfile) FieldAsString(fldPath []string) (_ string, err error) {
-	var val interface{}
-	if val, err = ap.FieldAsInterface(fldPath); err != nil {
-		return
-	}
-	return utils.IfaceAsString(val), nil
-}
-func (ap *AttributeProfile) FieldAsInterface(fldPath []string) (_ interface{}, err error) {
-	if len(fldPath) == 1 {
-		switch fldPath[0] {
-		default:
-			fld, idx := utils.GetPathIndex(fldPath[0])
-			if idx != nil {
-				switch fld {
-				case utils.Attributes:
-					if *idx < len(ap.Attributes) {
-						return ap.Attributes[*idx], nil
-					}
-				case utils.FilterIDs:
-					if *idx < len(ap.FilterIDs) {
-						return ap.FilterIDs[*idx], nil
-					}
-				}
-			}
-			return nil, utils.ErrNotFound
-		case utils.Tenant:
-			return ap.Tenant, nil
-		case utils.ID:
-			return ap.ID, nil
-		case utils.FilterIDs:
-			return ap.FilterIDs, nil
-		case utils.Blockers:
-			return ap.Blockers, nil
-		case utils.Weights:
-			return ap.Weights, nil
-		case utils.Attributes:
-			return ap.Attributes, nil
-		}
-	}
-	if len(fldPath) == 0 {
-		return nil, utils.ErrNotFound
-	}
-	fld, idx := utils.GetPathIndex(fldPath[0])
-	if fld != utils.Attributes || idx == nil {
-		return nil, utils.ErrNotFound
-	}
-	if *idx >= len(ap.Attributes) {
-		return nil, utils.ErrNotFound
-	}
-	return ap.Attributes[*idx].FieldAsInterface(fldPath[1:])
-}
-
-func (at *Attribute) String() string { return utils.ToJSON(at) }
-func (at *Attribute) FieldAsString(fldPath []string) (_ string, err error) {
-	var val interface{}
-	if val, err = at.FieldAsInterface(fldPath); err != nil {
-		return
-	}
-	return utils.IfaceAsString(val), nil
-}
-
-func (at *Attribute) FieldAsInterface(fldPath []string) (_ interface{}, err error) {
-	if len(fldPath) != 1 {
-		return nil, utils.ErrNotFound
-	}
-	switch fldPath[0] {
-	default:
-		fld, idx := utils.GetPathIndex(fldPath[0])
-		if idx != nil &&
-			fld == utils.FilterIDs &&
-			*idx < len(at.FilterIDs) {
-			return at.FilterIDs[*idx], nil
-		}
-		return nil, utils.ErrNotFound
-	case utils.FilterIDs:
-		return at.FilterIDs, nil
-	case utils.Blockers:
-		return at.Blockers, nil
-	case utils.Path:
-		return at.Path, nil
-	case utils.Type:
-		return at.Type, nil
-	case utils.Value:
-		return at.Value.GetRule(config.CgrConfig().GeneralCfg().RSRSep), nil
-	}
 }

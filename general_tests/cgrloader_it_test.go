@@ -23,27 +23,27 @@ package general_tests
 
 import (
 	"flag"
+	"net/rpc"
 	"os/exec"
 	"path"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	loaderGoogleSheet = flag.Bool("google_sheet", false, "Run the test with google sheet")
 	cgrloaderCfgPath  string
 	cgrloaderCfg      *config.CGRConfig
-	cgrloaderRPC      *birpc.Client
+	cgrloaderRPC      *rpc.Client
 	cgrloaderConfDIR  string //run tests for specific configuration
 
 	sTestsCGRLoaders = []func(t *testing.T){
 		testCGRLoaderInitConfig,
 		testCGRLoaderInitDataDb,
+		testCGRLoaderInitCdrDb,
 		testCGRLoaderStartEngine,
 		testCGRLoaderRpcConn,
 		testCGRLoaderLoadData,
@@ -78,13 +78,19 @@ func TestCGRLoader(t *testing.T) {
 func testCGRLoaderInitConfig(t *testing.T) {
 	var err error
 	cgrloaderCfgPath = path.Join(*dataDir, "conf", "samples", cgrloaderConfDIR)
-	if cgrloaderCfg, err = config.NewCGRConfigFromPath(context.Background(), cgrloaderCfgPath); err != nil {
+	if cgrloaderCfg, err = config.NewCGRConfigFromPath(cgrloaderCfgPath); err != nil {
 		t.Fatal("Got config error: ", err.Error())
 	}
 }
 
 func testCGRLoaderInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(cgrloaderCfg); err != nil {
+	if err := engine.InitDataDb(cgrloaderCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testCGRLoaderInitCdrDb(t *testing.T) {
+	if err := engine.InitStorDb(cgrloaderCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -122,7 +128,7 @@ func testCGRLoaderGetData(t *testing.T) {
 		"ATTR_1001_SESSIONAUTH", "ATTR_1002_SESSIONAUTH", "ATTR_1003_SESSIONAUTH",
 		"ATTR_ACC_ALIAS"}
 	var result []string
-	if err := cgrloaderRPC.Call(context.Background(), utils.AdminSv1GetAttributeProfileIDs, &utils.ArgsItemIDs{Tenant: "cgrates.org"}, &result); err != nil {
+	if err := cgrloaderRPC.Call(utils.APIerSv1GetAttributeProfileIDs, &utils.PaginatorWithTenant{Tenant: "cgrates.org"}, &result); err != nil {
 		t.Error(err)
 	} else if len(expected) != len(result) {
 		t.Errorf("Expecting : %+v, received: %+v", expected, result)

@@ -21,26 +21,26 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
+	"net/rpc"
 	"path"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	rlsV1CfgPath string
 	rlsV1Cfg     *config.CGRConfig
-	rlsV1Rpc     *birpc.Client
+	rlsV1Rpc     *rpc.Client
 	rlsV1ConfDIR string //run tests for specific configuration
 
 	sTestsRLSV1 = []func(t *testing.T){
 		testV1RsLoadConfig,
 		testV1RsInitDataDb,
-
+		testV1RsResetStorDb,
 		testV1RsStartEngine,
 		testV1RsRpcConn,
 		testV1RsSetProfile,
@@ -72,13 +72,20 @@ func TestRsV1IT(t *testing.T) {
 func testV1RsLoadConfig(t *testing.T) {
 	var err error
 	rlsV1CfgPath = path.Join(*dataDir, "conf", "samples", rlsV1ConfDIR)
-	if rlsV1Cfg, err = config.NewCGRConfigFromPath(context.Background(), rlsV1CfgPath); err != nil {
+	if rlsV1Cfg, err = config.NewCGRConfigFromPath(rlsV1CfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testV1RsInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(rlsV1Cfg); err != nil {
+	if err := engine.InitDataDb(rlsV1Cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testV1RsResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(rlsV1Cfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -100,22 +107,22 @@ func testV1RsRpcConn(t *testing.T) {
 func testV1RsSetProfile(t *testing.T) {
 	rls := &engine.ResourceProfileWithAPIOpts{
 		ResourceProfile: &engine.ResourceProfile{
-			Tenant:            "cgrates.org",
-			ID:                "RES_GR_TEST",
-			FilterIDs:         []string{"*string:~*req.Account:1001"},
+			Tenant:    "cgrates.org",
+			ID:        "RES_GR_TEST",
+			FilterIDs: []string{"*string:~*req.Account:1001"},
+			ActivationInterval: &utils.ActivationInterval{
+				ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+				ExpiryTime:     time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			},
 			UsageTTL:          -1,
 			Limit:             2,
 			AllocationMessage: "Account1Channels",
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 20,
-				},
-			},
-			ThresholdIDs: []string{utils.MetaNone},
+			Weight:            20,
+			ThresholdIDs:      []string{utils.MetaNone},
 		},
 	}
 	var result string
-	if err := rlsV1Rpc.Call(context.Background(), utils.AdminSv1SetResourceProfile, rls, &result); err != nil {
+	if err := rlsV1Rpc.Call(utils.APIerSv1SetResourceProfile, rls, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -123,7 +130,7 @@ func testV1RsSetProfile(t *testing.T) {
 }
 
 func testV1RsAllocate(t *testing.T) {
-	argsRU := &utils.CGREvent{
+	cgrEv := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
 		Event: map[string]interface{}{
@@ -136,14 +143,14 @@ func testV1RsAllocate(t *testing.T) {
 		},
 	}
 	var reply string
-	if err := rlsV1Rpc.Call(context.Background(), utils.ResourceSv1AllocateResources,
-		argsRU, &reply); err != nil {
+	if err := rlsV1Rpc.Call(utils.ResourceSv1AllocateResources,
+		cgrEv, &reply); err != nil {
 		t.Error(err)
 	} else if reply != "Account1Channels" {
 		t.Error("Unexpected reply returned", reply)
 	}
 
-	argsRU2 := &utils.CGREvent{
+	cgrEv2 := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
 		Event: map[string]interface{}{
@@ -155,8 +162,8 @@ func testV1RsAllocate(t *testing.T) {
 			utils.OptsResourcesUnits:   1,
 		},
 	}
-	if err := rlsV1Rpc.Call(context.Background(), utils.ResourceSv1AllocateResources,
-		argsRU2, &reply); err != nil {
+	if err := rlsV1Rpc.Call(utils.ResourceSv1AllocateResources,
+		cgrEv2, &reply); err != nil {
 		t.Error(err)
 	} else if reply != "Account1Channels" {
 		t.Error("Unexpected reply returned", reply)
@@ -176,7 +183,7 @@ func testV1RsAuthorize(t *testing.T) {
 			utils.OptsResourcesUsageID: "RandomUsageID",
 		},
 	}
-	if err := rlsV1Rpc.Call(context.Background(), utils.ResourceSv1GetResourcesForEvent,
+	if err := rlsV1Rpc.Call(utils.ResourceSv1GetResourcesForEvent,
 		args, &reply); err != nil {
 		t.Error(err)
 	}
@@ -198,19 +205,20 @@ func testV1RsAuthorize(t *testing.T) {
 	}
 
 	var reply2 string
-	argsRU := &utils.CGREvent{
+	cgrEv := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
 		Event: map[string]interface{}{
 			"Account":     "1001",
-			"Destination": "1002"},
+			"Destination": "1002",
+		},
 		APIOpts: map[string]interface{}{
 			utils.OptsResourcesUsageID: "chan_1",
 			utils.OptsResourcesUnits:   1,
 		},
 	}
-	if err := rlsV1Rpc.Call(context.Background(), utils.ResourceSv1AuthorizeResources,
-		&argsRU, &reply2); err.Error() != "RESOURCE_UNAUTHORIZED" {
+	if err := rlsV1Rpc.Call(utils.ResourceSv1AuthorizeResources,
+		&cgrEv, &reply2); err.Error() != "RESOURCE_UNAUTHORIZED" {
 		t.Error(err)
 	}
 }

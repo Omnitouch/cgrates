@@ -21,41 +21,24 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
-var ThresholdsProfileIDsDftOpt = []string{}
-
-const ThresholdsProfileIgnoreFiltersDftOpt = false
-
 type ThresholdsOpts struct {
-	ProfileIDs           []*utils.DynamicStringSliceOpt
-	ProfileIgnoreFilters []*utils.DynamicBoolOpt
+	ProfileIDs           []string
+	ProfileIgnoreFilters bool
 }
 
 // ThresholdSCfg the threshold config section
 type ThresholdSCfg struct {
-	Enabled                bool
-	IndexedSelects         bool
-	StoreInterval          time.Duration // Dump regularly from cache into dataDB
-	StringIndexedFields    *[]string
-	PrefixIndexedFields    *[]string
-	SuffixIndexedFields    *[]string
-	ExistsIndexedFields    *[]string
-	NotExistsIndexedFields *[]string
-	NestedFields           bool
-	ActionSConns           []string // connections towards ActionS
-	Opts                   *ThresholdsOpts
-}
-
-// loadThresholdSCfg loads the ThresholdS section of the configuration
-func (t *ThresholdSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnThresholdSCfg := new(ThresholdSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, ThresholdSJSON, jsnThresholdSCfg); err != nil {
-		return
-	}
-	return t.loadFromJSONCfg(jsnThresholdSCfg)
+	Enabled             bool
+	IndexedSelects      bool
+	StoreInterval       time.Duration // Dump regularly from cache into dataDB
+	StringIndexedFields *[]string
+	PrefixIndexedFields *[]string
+	SuffixIndexedFields *[]string
+	NestedFields        bool
+	Opts                *ThresholdsOpts
 }
 
 func (thdOpts *ThresholdsOpts) loadFromJSONCfg(jsnCfg *ThresholdsOptsJson) {
@@ -63,16 +46,16 @@ func (thdOpts *ThresholdsOpts) loadFromJSONCfg(jsnCfg *ThresholdsOptsJson) {
 		return
 	}
 	if jsnCfg.ProfileIDs != nil {
-		thdOpts.ProfileIDs = append(thdOpts.ProfileIDs, jsnCfg.ProfileIDs...)
+		thdOpts.ProfileIDs = *jsnCfg.ProfileIDs
 	}
 	if jsnCfg.ProfileIgnoreFilters != nil {
-		thdOpts.ProfileIgnoreFilters = append(thdOpts.ProfileIgnoreFilters, jsnCfg.ProfileIgnoreFilters...)
+		thdOpts.ProfileIgnoreFilters = *jsnCfg.ProfileIgnoreFilters
 	}
 }
 
 func (t *ThresholdSCfg) loadFromJSONCfg(jsnCfg *ThresholdSJsonCfg) (err error) {
 	if jsnCfg == nil {
-		return
+		return nil
 	}
 	if jsnCfg.Enabled != nil {
 		t.Enabled = *jsnCfg.Enabled
@@ -86,39 +69,42 @@ func (t *ThresholdSCfg) loadFromJSONCfg(jsnCfg *ThresholdSJsonCfg) (err error) {
 		}
 	}
 	if jsnCfg.String_indexed_fields != nil {
-		t.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.String_indexed_fields))
+		sif := make([]string, len(*jsnCfg.String_indexed_fields))
+		for i, fID := range *jsnCfg.String_indexed_fields {
+			sif[i] = fID
+		}
+		t.StringIndexedFields = &sif
 	}
 	if jsnCfg.Prefix_indexed_fields != nil {
-		t.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Prefix_indexed_fields))
+		pif := make([]string, len(*jsnCfg.Prefix_indexed_fields))
+		for i, fID := range *jsnCfg.Prefix_indexed_fields {
+			pif[i] = fID
+		}
+		t.PrefixIndexedFields = &pif
 	}
 	if jsnCfg.Suffix_indexed_fields != nil {
-		t.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Suffix_indexed_fields))
-	}
-	if jsnCfg.Exists_indexed_fields != nil {
-		t.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Exists_indexed_fields))
-	}
-	if jsnCfg.Notexists_indexed_fields != nil {
-		t.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Notexists_indexed_fields))
+		sif := make([]string, len(*jsnCfg.Suffix_indexed_fields))
+		for i, fID := range *jsnCfg.Suffix_indexed_fields {
+			sif[i] = fID
+		}
+		t.SuffixIndexedFields = &sif
 	}
 	if jsnCfg.Nested_fields != nil {
 		t.NestedFields = *jsnCfg.Nested_fields
 	}
-	if jsnCfg.Actions_conns != nil {
-		t.ActionSConns = updateInternalConns(*jsnCfg.Actions_conns, utils.MetaActions)
-	}
 	if jsnCfg.Opts != nil {
 		t.Opts.loadFromJSONCfg(jsnCfg.Opts)
 	}
-	return
+	return nil
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (t ThresholdSCfg) AsMapInterface(string) interface{} {
+func (t *ThresholdSCfg) AsMapInterface() (initialMP map[string]interface{}) {
 	opts := map[string]interface{}{
-		utils.MetaProfileIDs:           t.Opts.ProfileIDs,
-		utils.MetaProfileIgnoreFilters: t.Opts.ProfileIgnoreFilters,
+		utils.MetaProfileIDs:              t.Opts.ProfileIDs,
+		utils.MetaProfileIgnoreFiltersCfg: t.Opts.ProfileIgnoreFilters,
 	}
-	mp := map[string]interface{}{
+	initialMP = map[string]interface{}{
 		utils.EnabledCfg:        t.Enabled,
 		utils.IndexedSelectsCfg: t.IndexedSelects,
 		utils.NestedFieldsCfg:   t.NestedFields,
@@ -126,45 +112,37 @@ func (t ThresholdSCfg) AsMapInterface(string) interface{} {
 		utils.OptsCfg:           opts,
 	}
 	if t.StoreInterval != 0 {
-		mp[utils.StoreIntervalCfg] = t.StoreInterval.String()
+		initialMP[utils.StoreIntervalCfg] = t.StoreInterval.String()
 	}
 
 	if t.StringIndexedFields != nil {
-		mp[utils.StringIndexedFieldsCfg] = utils.CloneStringSlice(*t.StringIndexedFields)
+		stringIndexedFields := make([]string, len(*t.StringIndexedFields))
+		for i, item := range *t.StringIndexedFields {
+			stringIndexedFields[i] = item
+		}
+		initialMP[utils.StringIndexedFieldsCfg] = stringIndexedFields
 	}
 	if t.PrefixIndexedFields != nil {
-		mp[utils.PrefixIndexedFieldsCfg] = utils.CloneStringSlice(*t.PrefixIndexedFields)
+		prefixIndexedFields := make([]string, len(*t.PrefixIndexedFields))
+		for i, item := range *t.PrefixIndexedFields {
+			prefixIndexedFields[i] = item
+		}
+		initialMP[utils.PrefixIndexedFieldsCfg] = prefixIndexedFields
 	}
 	if t.SuffixIndexedFields != nil {
-		mp[utils.SuffixIndexedFieldsCfg] = utils.CloneStringSlice(*t.SuffixIndexedFields)
+		suffixIndexedFields := make([]string, len(*t.SuffixIndexedFields))
+		for i, item := range *t.SuffixIndexedFields {
+			suffixIndexedFields[i] = item
+		}
+		initialMP[utils.SuffixIndexedFieldsCfg] = suffixIndexedFields
 	}
-	if t.ExistsIndexedFields != nil {
-		mp[utils.ExistsIndexedFieldsCfg] = utils.CloneStringSlice(*t.ExistsIndexedFields)
-	}
-	if t.NotExistsIndexedFields != nil {
-		mp[utils.NotExistsIndexedFieldsCfg] = utils.CloneStringSlice(*t.NotExistsIndexedFields)
-	}
-	if t.ActionSConns != nil {
-		mp[utils.ActionSConnsCfg] = getInternalJSONConns(t.ActionSConns)
-	}
-	return mp
+	return
 }
 
-func (ThresholdSCfg) SName() string           { return ThresholdSJSON }
-func (t ThresholdSCfg) CloneSection() Section { return t.Clone() }
-
 func (thdOpts *ThresholdsOpts) Clone() *ThresholdsOpts {
-	var thIDs []*utils.DynamicStringSliceOpt
-	if thdOpts.ProfileIDs != nil {
-		thIDs = utils.CloneDynamicStringSliceOpt(thdOpts.ProfileIDs)
-	}
-	var profileIgnoreFilters []*utils.DynamicBoolOpt
-	if thdOpts.ProfileIgnoreFilters != nil {
-		profileIgnoreFilters = utils.CloneDynamicBoolOpt(thdOpts.ProfileIgnoreFilters)
-	}
 	return &ThresholdsOpts{
-		ProfileIDs:           thIDs,
-		ProfileIgnoreFilters: profileIgnoreFilters,
+		ProfileIDs:           utils.CloneStringSlice(thdOpts.ProfileIDs),
+		ProfileIgnoreFilters: thdOpts.ProfileIgnoreFilters,
 	}
 }
 
@@ -179,83 +157,25 @@ func (t ThresholdSCfg) Clone() (cln *ThresholdSCfg) {
 	}
 
 	if t.StringIndexedFields != nil {
-		cln.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*t.StringIndexedFields))
+		idx := make([]string, len(*t.StringIndexedFields))
+		for i, dx := range *t.StringIndexedFields {
+			idx[i] = dx
+		}
+		cln.StringIndexedFields = &idx
 	}
 	if t.PrefixIndexedFields != nil {
-		cln.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*t.PrefixIndexedFields))
+		idx := make([]string, len(*t.PrefixIndexedFields))
+		for i, dx := range *t.PrefixIndexedFields {
+			idx[i] = dx
+		}
+		cln.PrefixIndexedFields = &idx
 	}
 	if t.SuffixIndexedFields != nil {
-		cln.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*t.SuffixIndexedFields))
-	}
-	if t.ExistsIndexedFields != nil {
-		cln.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*t.ExistsIndexedFields))
-	}
-	if t.NotExistsIndexedFields != nil {
-		cln.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*t.NotExistsIndexedFields))
-	}
-	if t.ActionSConns != nil {
-		cln.ActionSConns = utils.CloneStringSlice(t.ActionSConns)
+		idx := make([]string, len(*t.SuffixIndexedFields))
+		for i, dx := range *t.SuffixIndexedFields {
+			idx[i] = dx
+		}
+		cln.SuffixIndexedFields = &idx
 	}
 	return
-}
-
-type ThresholdsOptsJson struct {
-	ProfileIDs           []*utils.DynamicStringSliceOpt `json:"*profileIDs"`
-	ProfileIgnoreFilters []*utils.DynamicBoolOpt        `json:"*profileIgnoreFilters"`
-}
-
-// Threshold service config section
-type ThresholdSJsonCfg struct {
-	Enabled                  *bool
-	Indexed_selects          *bool
-	Store_interval           *string
-	String_indexed_fields    *[]string
-	Prefix_indexed_fields    *[]string
-	Suffix_indexed_fields    *[]string
-	Exists_indexed_fields    *[]string
-	Notexists_indexed_fields *[]string
-	Nested_fields            *bool // applies when indexed fields is not defined
-	Actions_conns            *[]string
-	Opts                     *ThresholdsOptsJson
-}
-
-func diffThresholdsOptsJsonCfg(d *ThresholdsOptsJson, v1, v2 *ThresholdsOpts) *ThresholdsOptsJson {
-	if d == nil {
-		d = new(ThresholdsOptsJson)
-	}
-	if !utils.DynamicStringSliceOptEqual(v1.ProfileIDs, v2.ProfileIDs) {
-		d.ProfileIDs = v2.ProfileIDs
-	}
-	if !utils.DynamicBoolOptEqual(v1.ProfileIgnoreFilters, v2.ProfileIgnoreFilters) {
-		d.ProfileIgnoreFilters = v2.ProfileIgnoreFilters
-	}
-	return d
-}
-
-func diffThresholdSJsonCfg(d *ThresholdSJsonCfg, v1, v2 *ThresholdSCfg) *ThresholdSJsonCfg {
-	if d == nil {
-		d = new(ThresholdSJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if v1.IndexedSelects != v2.IndexedSelects {
-		d.Indexed_selects = utils.BoolPointer(v2.IndexedSelects)
-	}
-	if v1.StoreInterval != v2.StoreInterval {
-		d.Store_interval = utils.StringPointer(v2.StoreInterval.String())
-	}
-	d.String_indexed_fields = diffIndexSlice(d.String_indexed_fields, v1.StringIndexedFields, v2.StringIndexedFields)
-	d.Prefix_indexed_fields = diffIndexSlice(d.Prefix_indexed_fields, v1.PrefixIndexedFields, v2.PrefixIndexedFields)
-	d.Suffix_indexed_fields = diffIndexSlice(d.Suffix_indexed_fields, v1.SuffixIndexedFields, v2.SuffixIndexedFields)
-	d.Exists_indexed_fields = diffIndexSlice(d.Exists_indexed_fields, v1.ExistsIndexedFields, v2.ExistsIndexedFields)
-	d.Notexists_indexed_fields = diffIndexSlice(d.Notexists_indexed_fields, v1.NotExistsIndexedFields, v2.NotExistsIndexedFields)
-	if v1.NestedFields != v2.NestedFields {
-		d.Nested_fields = utils.BoolPointer(v2.NestedFields)
-	}
-	if !utils.SliceStringEqual(v1.ActionSConns, v2.ActionSConns) {
-		d.Actions_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ActionSConns))
-	}
-	d.Opts = diffThresholdsOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

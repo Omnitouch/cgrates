@@ -27,39 +27,40 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 func TestThresholdSReload(t *testing.T) {
 	// utils.Logger.SetLogLevel(7)
 	cfg := config.NewDefaultCGRConfig()
-	ctx, cancel := context.WithCancel(context.TODO())
+
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
-	chS := engine.NewCacheS(cfg, nil, nil, nil)
+	chS := engine.NewCacheS(cfg, nil, nil)
 	close(chS.GetPrecacheChannel(utils.CacheThresholdProfiles))
 	close(chS.GetPrecacheChannel(utils.CacheThresholds))
 	close(chS.GetPrecacheChannel(utils.CacheThresholdFilterIndexes))
-	chSCh := make(chan *engine.CacheS, 1)
-	chSCh <- chS
-	css := &CacheService{cacheCh: chSCh}
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	db := NewDataDBService(cfg, nil, srvDep)
-	tS := NewThresholdService(cfg, db, css, filterSChan, nil, server, make(chan birpc.ClientConnector, 1), anz, srvDep)
-	engine.NewConnManager(cfg)
+	tS := NewThresholdService(cfg, db, chS, filterSChan, server, make(chan rpcclient.ClientConnector, 1), anz, srvDep)
+	engine.NewConnManager(cfg, nil)
 	srvMngr.AddServices(tS,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Error(err)
+	}
 	if tS.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
@@ -67,17 +68,16 @@ func TestThresholdSReload(t *testing.T) {
 		t.Errorf("Expected service to be down")
 	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.ThresholdSJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"),
+		Section: config.THRESHOLDS_JSON,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expecting OK ,received %s", reply)
 	}
-	runtime.Gosched()
-	runtime.Gosched()
 	time.Sleep(10 * time.Millisecond) //need to switch to gorutine
+	runtime.Gosched()
 	if !tS.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
@@ -86,49 +86,49 @@ func TestThresholdSReload(t *testing.T) {
 		t.Errorf("Expected service to be running")
 	}
 	runtime.Gosched()
-	err := tS.Start(ctx, cancel)
+	err := tS.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
-	err = tS.Reload(ctx, cancel)
+	err = tS.Reload()
 	if err != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
 	cfg.ThresholdSCfg().Enabled = false
-	cfg.GetReloadChan() <- config.SectionToService[config.ThresholdSJSON]
+	cfg.GetReloadChan(config.THRESHOLDS_JSON) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 	if tS.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
-	cancel()
-
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }
 func TestThresholdSReload2(t *testing.T) {
 	// utils.Logger.SetLogLevel(7)
 	cfg := config.NewDefaultCGRConfig()
-	ctx, cancel := context.WithCancel(context.TODO())
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
-	chS := engine.NewCacheS(cfg, nil, nil, nil)
+	chS := engine.NewCacheS(cfg, nil, nil)
 	close(chS.GetPrecacheChannel(utils.CacheThresholdProfiles))
 	close(chS.GetPrecacheChannel(utils.CacheThresholds))
 	close(chS.GetPrecacheChannel(utils.CacheThresholdFilterIndexes))
-	chSCh := make(chan *engine.CacheS, 1)
-	chSCh <- chS
-	css := &CacheService{cacheCh: chSCh}
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	db := NewDataDBService(cfg, nil, srvDep)
-	tS := NewThresholdService(cfg, db, css, filterSChan, nil, server, make(chan birpc.ClientConnector, 1), anz, srvDep)
-	engine.NewConnManager(cfg)
+	tS := NewThresholdService(cfg, db, chS, filterSChan, server, make(chan rpcclient.ClientConnector, 1), anz, srvDep)
+	engine.NewConnManager(cfg, nil)
 	srvMngr.AddServices(tS,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Error(err)
+	}
 	if tS.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
@@ -136,9 +136,9 @@ func TestThresholdSReload2(t *testing.T) {
 		t.Errorf("Expected service to be down")
 	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.ThresholdSJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"),
+		Section: config.THRESHOLDS_JSON,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -151,20 +151,20 @@ func TestThresholdSReload2(t *testing.T) {
 	if !db.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
-	err := tS.Start(ctx, cancel)
+	err := tS.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
-	err = tS.Reload(ctx, cancel)
+	err = tS.Reload()
 	if err != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
 	cfg.ThresholdSCfg().Enabled = false
-	cfg.GetReloadChan() <- config.SectionToService[config.ThresholdSJSON]
+	cfg.GetReloadChan(config.THRESHOLDS_JSON) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 	if tS.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 }

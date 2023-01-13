@@ -22,42 +22,34 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
-	"os"
+	"net/rpc"
 	"path"
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/loaders"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	fltrSepCfgPath string
 	fltrSepCfg     *config.CGRConfig
-	fltrSepRPC     *birpc.Client
+	fltrSepRPC     *rpc.Client
 	fltrSepDelay   int
 	fltrSepConfDIR string //run tests for specific configuration
 
 	sTestsFltrSep = []func(t *testing.T){
-		testFltrSepRemoveFolders,
-		testFltrSepCreateFolders,
-
 		testFltrSepLoadConfig,
 		testFltrSepInitDataDb,
+		testFltrSepResetStorDb,
 		testFltrSepStartEngine,
 		testFltrSepRpcConn,
-
-		testFltrSepWriteCSVs,
 		testFltrSepLoadTarrifPlans,
 		testFltrSepFilterSeparation,
-
 		testFltrSepStopEngine,
-		testFltrSepRemoveFolders,
 	}
 )
 
@@ -65,11 +57,11 @@ var (
 func TestFltrSepIT(t *testing.T) {
 	switch *dbType {
 	case utils.MetaInternal:
-		fltrSepConfDIR = "fltr_sep_internal"
+		fltrSepConfDIR = "tutinternal"
 	case utils.MetaMySQL:
-		fltrSepConfDIR = "fltr_sep_mysql"
+		fltrSepConfDIR = "tutmysql"
 	case utils.MetaMongo:
-		fltrSepConfDIR = "fltr_sep_mongo"
+		fltrSepConfDIR = "tutmongo"
 	case utils.MetaPostgres:
 		t.SkipNow()
 	default:
@@ -84,14 +76,20 @@ func TestFltrSepIT(t *testing.T) {
 func testFltrSepLoadConfig(t *testing.T) {
 	var err error
 	fltrSepCfgPath = path.Join(*dataDir, "conf", "samples", fltrSepConfDIR)
-	if fltrSepCfg, err = config.NewCGRConfigFromPath(context.Background(), fltrSepCfgPath); err != nil {
+	if fltrSepCfg, err = config.NewCGRConfigFromPath(fltrSepCfgPath); err != nil {
 		t.Error(err)
 	}
 	fltrSepDelay = 1000
 }
 
 func testFltrSepInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(fltrSepCfg); err != nil {
+	if err := engine.InitDataDb(fltrSepCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testFltrSepResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(fltrSepCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,45 +108,15 @@ func testFltrSepRpcConn(t *testing.T) {
 	}
 }
 
-func testFltrSepWriteCSVs(t *testing.T) {
-	writeFile := func(fileName, data string) error {
-		csvFile, err := os.Create(path.Join(fltrSepCfg.LoaderCfg()[0].TpInDir, fileName))
-		if err != nil {
-			return err
-		}
-		defer csvFile.Close()
-		_, err = csvFile.WriteString(data)
-		if err != nil {
-			return err
-
-		}
-		return csvFile.Sync()
-	}
-
-	// Create and populate Attributes.csv
-	if err := writeFile(utils.AttributesCsv, `
-#Tenant,ID,FilterIDs,Weights,Blockers,AttributeFilterIDs,AttributeBlockers,Path,Type,Value
-cgrates.org,ATTR_FLTR_TEST,*string:~*req.Account:1001|1002|1003|1101;*prefix:~*req.Account:10,;20,;false,,,,,
-cgrates.org,ATTR_FLTR_TEST,,,,,,*req.TestField,*constant,testValue
-`); err != nil {
-		t.Fatal(err)
-	}
-
-}
-
 func testFltrSepLoadTarrifPlans(t *testing.T) {
 	var reply string
-	if err := fltrSepRPC.Call(context.Background(), utils.LoaderSv1Run,
-		&loaders.ArgsProcessFolder{
-			APIOpts: map[string]interface{}{
-				utils.MetaCache:       utils.MetaReload,
-				utils.MetaStopOnError: false,
-			},
-		}, &reply); err != nil {
+	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "fltr_sep")}
+	if err := fltrSepRPC.Call(utils.APIerSv1LoadTariffPlanFromFolder, attrs, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
-		t.Error("Unexpected reply returned:", reply)
+		t.Error("Unexpected reply returned", reply)
 	}
+	time.Sleep(100 * time.Millisecond)
 }
 
 func testFltrSepFilterSeparation(t *testing.T) {
@@ -163,36 +131,31 @@ func testFltrSepFilterSeparation(t *testing.T) {
 		},
 	}
 
-	eAttrPrf := &engine.APIAttributeProfile{
+	eAttrPrf := &engine.AttributeProfile{
 		Tenant:    ev.Tenant,
 		ID:        "ATTR_FLTR_TEST",
 		FilterIDs: []string{"*string:~*req.Account:1001|1002|1003|1101", "*prefix:~*req.Account:10"},
-		Attributes: []*engine.ExternalAttribute{
+		Contexts:  []string{utils.MetaAny},
+		Attributes: []*engine.Attribute{
 			{
-				Path:  utils.MetaReq + utils.NestingSep + "TestField",
-				Value: "testValue",
-				Type:  utils.MetaConstant,
+				Path:      utils.MetaReq + utils.NestingSep + "TestField",
+				Value:     config.NewRSRParsersMustCompile("testValue", utils.InfieldSep),
+				Type:      utils.MetaConstant,
+				FilterIDs: []string{},
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
-		Blockers: utils.DynamicBlockers{
-			{
-				Blocker: false,
-			},
-		},
+		Weight: 20.0,
 	}
 
-	var attrReply *engine.APIAttributeProfile
+	eAttrPrf.Compile()
+	var attrReply *engine.AttributeProfile
 
 	// first option of the first filter and the second filter match
-	if err := fltrSepRPC.Call(context.Background(), utils.AttributeSv1GetAttributeForEvent,
+	if err := fltrSepRPC.Call(utils.AttributeSv1GetAttributeForEvent,
 		ev, &attrReply); err != nil {
 		t.Error(err)
 	} else {
+		attrReply.Compile()
 		sort.Slice(attrReply.FilterIDs, func(i, j int) bool {
 			return attrReply.FilterIDs[i] > attrReply.FilterIDs[j]
 		})
@@ -204,10 +167,11 @@ func testFltrSepFilterSeparation(t *testing.T) {
 
 	// third option of the first filter and the second filter match
 	ev.Event[utils.AccountField] = "1003"
-	if err := fltrSepRPC.Call(context.Background(), utils.AttributeSv1GetAttributeForEvent,
+	if err := fltrSepRPC.Call(utils.AttributeSv1GetAttributeForEvent,
 		ev, &attrReply); err != nil {
 		t.Error(err)
 	} else {
+		attrReply.Compile()
 		sort.Slice(attrReply.FilterIDs, func(i, j int) bool {
 			return attrReply.FilterIDs[i] > attrReply.FilterIDs[j]
 		})
@@ -219,14 +183,14 @@ func testFltrSepFilterSeparation(t *testing.T) {
 
 	// the second filter matches while none of the options from the first filter match
 	ev.Event[utils.AccountField] = "1004"
-	if err := fltrSepRPC.Call(context.Background(), utils.AttributeSv1GetAttributeForEvent,
+	if err := fltrSepRPC.Call(utils.AttributeSv1GetAttributeForEvent,
 		ev, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Errorf("expected: <%+v>, \nreceived: <%+v>", utils.ErrNotFound, err)
 	}
 
 	// fourth option of the first filter matches while the second filter doesn't
 	ev.Event[utils.AccountField] = "1101"
-	if err := fltrSepRPC.Call(context.Background(), utils.AttributeSv1GetAttributeForEvent,
+	if err := fltrSepRPC.Call(utils.AttributeSv1GetAttributeForEvent,
 		ev, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Errorf("expected: <%+v>, \nreceived: <%+v>", utils.ErrNotFound, err)
 	}
@@ -234,18 +198,6 @@ func testFltrSepFilterSeparation(t *testing.T) {
 
 func testFltrSepStopEngine(t *testing.T) {
 	if err := engine.KillEngine(fltrSepDelay); err != nil {
-		t.Error(err)
-	}
-}
-
-func testFltrSepCreateFolders(t *testing.T) {
-	if err := os.MkdirAll("/tmp/TestFltrSepIT/in", 0755); err != nil {
-		t.Error(err)
-	}
-}
-
-func testFltrSepRemoveFolders(t *testing.T) {
-	if err := os.RemoveAll("/tmp/TestFltrSepIT/in"); err != nil {
 		t.Error(err)
 	}
 }

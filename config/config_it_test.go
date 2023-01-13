@@ -21,7 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package config
 
 import (
-	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -33,8 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -43,13 +42,16 @@ var (
 		testNewCgrJsonCfgFromHttp,
 		testNewCGRConfigFromPath,
 		testCGRConfigReloadAttributeS,
-		testCGRConfigReloadAttributeSWithDB,
 		testCGRConfigReloadChargerSDryRun,
 		testCGRConfigReloadChargerS,
 		testCGRConfigReloadThresholdS,
 		testCGRConfigReloadStatS,
 		testCGRConfigReloadResourceS,
 		testCGRConfigReloadSupplierS,
+		testCGRConfigReloadSchedulerS,
+		testCGRConfigReloadCDRs,
+		testCGRConfigReloadRALs,
+		testCGRConfigReloadSessionS,
 		testCGRConfigReloadERs,
 		testCGRConfigReloadDNSAgent,
 		testCGRConfigReloadFreeswitchAgent,
@@ -71,7 +73,6 @@ var (
 		testLoadConfigFromFolderFileNotFound,
 		testLoadConfigFromFolderNoConfigFound,
 		testLoadConfigFromFolderOpenError,
-		testApisLoadFromPath,
 		testHandleConfigSFolderError,
 		testHandleConfigSFilesError,
 		testHandleConfigSFileErrorWrite,
@@ -89,8 +90,8 @@ func testNewCgrJsonCfgFromHttp(t *testing.T) {
 	addr := "https://raw.githubusercontent.com/cgrates/cgrates/master/data/conf/samples/tutmongo/cgrates.json"
 	expVal := NewDefaultCGRConfig()
 
-	err = loadConfigFromPath(context.Background(), path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"),
-		expVal.sections, false, expVal)
+	err = expVal.loadConfigFromPath(path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo"),
+		[]func(*CgrJsonCfg) error{expVal.loadFromJSONCfg}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func testNewCgrJsonCfgFromHttp(t *testing.T) {
 	}
 
 	rply := NewDefaultCGRConfig()
-	if err = loadConfigFromPath(context.Background(), addr, rply.sections, false, rply); err != nil {
+	if err = rply.loadConfigFromPath(addr, []func(*CgrJsonCfg) error{rply.loadFromJSONCfg}, false); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expVal, rply) {
 		t.Errorf("Expected: %s ,received: %s", utils.ToJSON(expVal), utils.ToJSON(rply))
@@ -112,12 +113,10 @@ func testNewCGRConfigFromPath(t *testing.T) {
 	for key, val := range map[string]string{"LOGGER": "*syslog", "LOG_LEVEL": "6", "ROUND_DEC": "5",
 		"DB_ENCODING": "*msgpack", "TP_EXPORT_DIR": "/var/spool/cgrates/tpe", "FAILED_POSTS_DIR": "/var/spool/cgrates/failed_posts",
 		"DF_TENANT": "cgrates.org", "TIMEZONE": "Local"} {
-		if err := os.Setenv(key, val); err != nil {
-			t.Error(err)
-		}
+		os.Setenv(key, val)
 	}
 	addr := "https://raw.githubusercontent.com/cgrates/cgrates/master/data/conf/samples/multifiles/a.json;https://raw.githubusercontent.com/cgrates/cgrates/master/data/conf/samples/multifiles/b/b.json;https://raw.githubusercontent.com/cgrates/cgrates/master/data/conf/samples/multifiles/c.json;https://raw.githubusercontent.com/cgrates/cgrates/master/data/conf/samples/multifiles/d.json"
-	expVal, err := NewCGRConfigFromPath(context.Background(), path.Join("/usr", "share", "cgrates", "conf", "samples", "multifiles"))
+	expVal, err := NewCGRConfigFromPath(path.Join("/usr", "share", "cgrates", "conf", "samples", "multifiles"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +125,7 @@ func testNewCGRConfigFromPath(t *testing.T) {
 		return
 	}
 
-	if rply, err := NewCGRConfigFromPath(context.Background(), addr); err != nil {
+	if rply, err := NewCGRConfigFromPath(addr); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expVal, rply) {
 		t.Errorf("Expected: %s ,received: %s", utils.ToJSON(expVal), utils.ToJSON(rply))
@@ -135,73 +134,31 @@ func testNewCGRConfigFromPath(t *testing.T) {
 }
 func testCGRConfigReloadAttributeS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: AttributeSJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: ATTRIBUTE_JSN,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &AttributeSCfg{
-		Enabled:                true,
-		AccountSConns:          []string{},
-		ResourceSConns:         []string{},
-		StatSConns:             []string{},
-		StringIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-		PrefixIndexedFields:    &[]string{},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		IndexedSelects:         true,
+		Enabled:             true,
+		ApierSConns:         []string{},
+		ResourceSConns:      []string{},
+		StatSConns:          []string{},
+		StringIndexedFields: &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
+		PrefixIndexedFields: &[]string{},
+		SuffixIndexedFields: &[]string{},
+		IndexedSelects:      true,
+		AnyContext:          true,
 		Opts: &AttributesOpts{
-			ProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			ProcessRuns:          []*utils.DynamicIntOpt{},
-			ProfileRuns:          []*utils.DynamicIntOpt{},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
-		},
-	}
-	if !reflect.DeepEqual(expAttr, cfg.AttributeSCfg()) {
-		t.Errorf("Expected %s , received: %s ", utils.ToJSON(expAttr), utils.ToJSON(cfg.AttributeSCfg()))
-	}
-}
-
-func testCGRConfigReloadAttributeSWithDB(t *testing.T) {
-	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
-	cfg.db = make(CgrJsonCfg)
-	if err := cfg.db.SetSection(context.Background(), AttributeSJSON, &AttributeSJsonCfg{
-		Stats_conns: &[]string{utils.MetaLocalHost},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: AttributeSJSON,
-	}, &reply); err != nil {
-		t.Error(err)
-	} else if reply != utils.OK {
-		t.Errorf("Expected OK received: %s", reply)
-	}
-	expAttr := &AttributeSCfg{
-		Enabled:                true,
-		ResourceSConns:         []string{},
-		AccountSConns:          []string{},
-		StatSConns:             []string{utils.MetaLocalHost},
-		StringIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-		PrefixIndexedFields:    &[]string{},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		IndexedSelects:         true,
-		Opts: &AttributesOpts{
-			ProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			ProcessRuns:          []*utils.DynamicIntOpt{},
-			ProfileRuns:          []*utils.DynamicIntOpt{},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
+			ProcessRuns: 1,
+			ProfileIDs:  []string{},
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.AttributeSCfg()) {
@@ -211,11 +168,13 @@ func testCGRConfigReloadAttributeSWithDB(t *testing.T) {
 
 func testCGRConfigReloadChargerSDryRun(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: ChargerSJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: ChargerSCfgJson,
 		DryRun:  true,
 	}, &reply); err != nil {
 		t.Error(err)
@@ -231,25 +190,25 @@ func testCGRConfigReloadChargerSDryRun(t *testing.T) {
 
 func testCGRConfigReloadChargerS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: ChargerSJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: ChargerSCfgJson,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &ChargerSCfg{
-		Enabled:                true,
-		StringIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-		PrefixIndexedFields:    &[]string{},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		IndexedSelects:         true,
-		AttributeSConns:        []string{"*localhost"},
+		Enabled:             true,
+		StringIndexedFields: &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
+		PrefixIndexedFields: &[]string{},
+		SuffixIndexedFields: &[]string{},
+		IndexedSelects:      true,
+		AttributeSConns:     []string{"*localhost"},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.ChargerSCfg()) {
 		t.Errorf("Expected %s , received: %s ", utils.ToJSON(expAttr), utils.ToJSON(cfg.ChargerSCfg()))
@@ -258,26 +217,26 @@ func testCGRConfigReloadChargerS(t *testing.T) {
 
 func testCGRConfigReloadThresholdS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{Section: ThresholdSJSON}, &reply); err != nil {
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: THRESHOLDS_JSON,
+	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &ThresholdSCfg{
-		Enabled:                true,
-		StringIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-		PrefixIndexedFields:    &[]string{},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		ActionSConns:           []string{},
-		IndexedSelects:         true,
+		Enabled:             true,
+		StringIndexedFields: &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
+		PrefixIndexedFields: &[]string{},
+		SuffixIndexedFields: &[]string{},
+		IndexedSelects:      true,
 		Opts: &ThresholdsOpts{
-			ProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
+			ProfileIDs: []string{},
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.ThresholdSCfg()) {
@@ -287,30 +246,27 @@ func testCGRConfigReloadThresholdS(t *testing.T) {
 
 func testCGRConfigReloadStatS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: StatSJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: STATS_JSON,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &StatSCfg{
-		Enabled:                true,
-		StringIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-		PrefixIndexedFields:    &[]string{},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		IndexedSelects:         true,
-		ThresholdSConns:        []string{utils.MetaLocalHost},
+		Enabled:             true,
+		StringIndexedFields: &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
+		PrefixIndexedFields: &[]string{},
+		SuffixIndexedFields: &[]string{},
+		IndexedSelects:      true,
+		ThresholdSConns:     []string{utils.MetaLocalHost},
 		Opts: &StatsOpts{
-			ProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
-			RoundingDecimals:     []*utils.DynamicIntOpt{},
-			PrometheusStatIDs:    []*utils.DynamicStringSliceOpt{},
+			ProfileIDs: []string{},
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.StatSCfg()) {
@@ -320,29 +276,28 @@ func testCGRConfigReloadStatS(t *testing.T) {
 
 func testCGRConfigReloadResourceS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: ResourceSJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: RESOURCES_JSON,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &ResourceSConfig{
-		Enabled:                true,
-		StringIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
-		PrefixIndexedFields:    &[]string{},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		IndexedSelects:         true,
-		ThresholdSConns:        []string{utils.MetaLocalHost},
+		Enabled:             true,
+		StringIndexedFields: &[]string{utils.MetaReq + utils.NestingSep + utils.AccountField},
+		PrefixIndexedFields: &[]string{},
+		SuffixIndexedFields: &[]string{},
+		IndexedSelects:      true,
+		ThresholdSConns:     []string{utils.MetaLocalHost},
 		Opts: &ResourcesOpts{
-			UsageID:  []*utils.DynamicStringOpt{},
-			UsageTTL: []*utils.DynamicDurationOpt{},
-			Units:    []*utils.DynamicFloat64Opt{},
+			UsageID: utils.EmptyString,
+			Units:   1,
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.ResourceSCfg()) {
@@ -352,39 +307,33 @@ func testCGRConfigReloadResourceS(t *testing.T) {
 
 func testCGRConfigReloadSupplierS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: RouteSJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: RouteSJson,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &RouteSCfg{
-		Enabled:                true,
-		StringIndexedFields:    &[]string{"*req.LCRProfile"},
-		PrefixIndexedFields:    &[]string{utils.MetaReq + utils.NestingSep + utils.Destination},
-		SuffixIndexedFields:    &[]string{},
-		ExistsIndexedFields:    &[]string{},
-		NotExistsIndexedFields: &[]string{},
-		ResourceSConns:         []string{},
-		StatSConns:             []string{},
-		AttributeSConns:        []string{},
-		RateSConns:             []string{},
-		AccountSConns:          []string{},
-		IndexedSelects:         true,
-		DefaultRatio:           1,
+		Enabled:             true,
+		StringIndexedFields: &[]string{"*req.LCRProfile"},
+		PrefixIndexedFields: &[]string{utils.MetaReq + utils.NestingSep + utils.Destination},
+		SuffixIndexedFields: &[]string{},
+		ResourceSConns:      []string{},
+		StatSConns:          []string{},
+		AttributeSConns:     []string{},
+		RALsConns:           []string{},
+		IndexedSelects:      true,
+		DefaultRatio:        1,
 		Opts: &RoutesOpts{
-			Context:      []*utils.DynamicStringOpt{},
-			ProfileCount: []*utils.DynamicIntPointerOpt{},
-			IgnoreErrors: []*utils.DynamicBoolOpt{},
-			MaxCost:      []*utils.DynamicInterfaceOpt{},
-			Limit:        []*utils.DynamicIntPointerOpt{},
-			Offset:       []*utils.DynamicIntPointerOpt{},
-			Usage:        []*utils.DynamicDecimalBigOpt{},
-			MaxItems:     []*utils.DynamicIntPointerOpt{},
+			Context:      utils.MetaRoutes,
+			IgnoreErrors: false,
+			MaxCost:      utils.EmptyString,
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.RouteSCfg()) {
@@ -394,14 +343,23 @@ func testCGRConfigReloadSupplierS(t *testing.T) {
 
 func testCGRConfigV1ReloadConfigFromPathInvalidSection(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
-	expectedErr := "Invalid section: <InvalidSection> "
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	expectedErr := "Invalid section: <InvalidSection>"
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err := cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
+	if err := cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
 		Section: "InvalidSection",
 	}, &reply); err == nil || err.Error() != expectedErr {
-		t.Errorf("Expected %q. received %q", expectedErr, err.Error())
+		t.Errorf("Expected %+v. received %+v", expectedErr, err)
+	}
+
+	expectedErr = utils.NewErrMandatoryIeMissing("Path").Error()
+	if err := cfg.V1ReloadConfig(&ReloadArgs{
+		Section: "InvalidSection",
+	}, &reply); err == nil || err.Error() != expectedErr {
+		t.Errorf("Expected %+v. received %+v", expectedErr, err)
 	}
 }
 
@@ -409,10 +367,12 @@ func testV1ReloadConfigFromPathConfigSanity(t *testing.T) {
 	expectedErr := "<AttributeS> not enabled but requested by <ChargerS> component"
 	var reply string
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutinternal")
-	if err := cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: ChargerSJSON}, &reply); err == nil || err.Error() != expectedErr {
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	if err := cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutinternal"),
+		Section: ChargerSCfgJson}, &reply); err == nil || err.Error() != expectedErr {
 		t.Errorf("Expected %+v, received %+v", expectedErr, err)
 	}
 }
@@ -421,8 +381,155 @@ func testLoadConfigFromHTTPValidURL(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
 
 	url := "https://raw.githubusercontent.com/cgrates/cgrates/master/data/conf/samples/multifiles/a.json"
-	if err := loadConfigFromHTTP(context.Background(), url, cfg.sections, cfg); err != nil {
+	if err := cfg.loadConfigFromHTTP(url, nil); err != nil {
 		t.Error(err)
+	}
+}
+
+func testCGRConfigReloadSchedulerS(t *testing.T) {
+	cfg := NewDefaultCGRConfig()
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	var reply string
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: SCHEDULER_JSN,
+	}, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("Expected OK received: %s", reply)
+	}
+	expAttr := &SchedulerCfg{
+		Enabled:                true,
+		CDRsConns:              []string{utils.MetaLocalHost},
+		ThreshSConns:           []string{},
+		StatSConns:             []string{},
+		Filters:                []string{},
+		DynaprepaidActionPlans: []string{},
+	}
+	if !reflect.DeepEqual(expAttr, cfg.SchedulerCfg()) {
+		t.Errorf("Expected %s , received: %s ", utils.ToJSON(expAttr), utils.ToJSON(cfg.SchedulerCfg()))
+	}
+}
+
+func testCGRConfigReloadCDRs(t *testing.T) {
+	cfg := NewDefaultCGRConfig()
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	cfg.RalsCfg().Enabled = true
+	var reply string
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: CDRS_JSN,
+	}, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("Expected OK received: %s", reply)
+	}
+	rsr, err := NewRSRParsersFromSlice([]string{"~*req.PayPalAccount", "~*req.LCRProfile", "~*req.ResourceID"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expAttr := &CdrsCfg{
+		Enabled:         true,
+		ExtraFields:     rsr,
+		ChargerSConns:   []string{utils.MetaLocalHost},
+		RaterConns:      []string{},
+		AttributeSConns: []string{},
+		ThresholdSConns: []string{},
+		StatSConns:      []string{},
+		SMCostRetries:   5,
+		StoreCdrs:       true,
+		SchedulerConns:  []string{},
+		EEsConns:        []string{utils.MetaLocalHost},
+	}
+	if !reflect.DeepEqual(expAttr, cfg.CdrsCfg()) {
+		t.Errorf("Expected %s , received: %s ", utils.ToJSON(expAttr), utils.ToJSON(cfg.CdrsCfg()))
+	}
+}
+
+func testCGRConfigReloadRALs(t *testing.T) {
+	cfg := NewDefaultCGRConfig()
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	blMap := cfg.RalsCfg().BalanceRatingSubject
+	maxComp := cfg.RalsCfg().MaxComputedUsage
+	var reply string
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: RALS_JSN,
+	}, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("Expected OK received: %s", reply)
+	}
+	expAttr := &RalsCfg{
+		Enabled:                 true,
+		RpSubjectPrefixMatching: false,
+		RemoveExpired:           true,
+		MaxComputedUsage:        maxComp,
+		BalanceRatingSubject:    blMap,
+		ThresholdSConns:         []string{utils.MetaLocalHost},
+		StatSConns:              []string{utils.MetaLocalHost},
+		MaxIncrements:           1000000,
+	}
+	if !reflect.DeepEqual(expAttr, cfg.RalsCfg()) {
+		t.Errorf("Expected %s , received: %s ", utils.ToJSON(expAttr), utils.ToJSON(cfg.RalsCfg()))
+	}
+}
+
+func testCGRConfigReloadSessionS(t *testing.T) {
+	cfg := NewDefaultCGRConfig()
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	cfg.RalsCfg().Enabled = true
+	cfg.ChargerSCfg().Enabled = true
+	cfg.CdrsCfg().Enabled = true
+	var reply string
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
+		Section: SessionSJson,
+	}, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("Expected OK received: %s", reply)
+	}
+	expAttr := &SessionSCfg{
+		Enabled:       true,
+		ListenBijson:  "127.0.0.1:2014",
+		ChargerSConns: []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)},
+		RALsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)},
+		ResSConns:     []string{utils.MetaLocalHost},
+		ThreshSConns:  []string{},
+		StatSConns:    []string{},
+		RouteSConns:   []string{utils.MetaLocalHost},
+		AttrSConns:    []string{utils.MetaLocalHost},
+		CDRsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
+
+		ReplicationConns:  []string{},
+		SessionIndexes:    utils.StringSet{},
+		ClientProtocol:    1,
+		TerminateAttempts: 5,
+		AlterableFields:   utils.NewStringSet([]string{}),
+		STIRCfg: &STIRcfg{
+			AllowedAttest:      utils.NewStringSet([]string{utils.MetaAny}),
+			PayloadMaxduration: -1,
+			DefaultAttest:      "A",
+		},
+		SchedulerConns: []string{},
+		DefaultUsage: map[string]time.Duration{
+			utils.MetaAny:   3 * time.Hour,
+			utils.MetaVoice: 3 * time.Hour,
+			utils.MetaData:  1048576,
+			utils.MetaSMS:   1,
+		},
+	}
+	if !reflect.DeepEqual(expAttr, cfg.SessionSCfg()) {
+		t.Errorf("Expected %s , received: %s ", utils.ToJSON(expAttr), utils.ToJSON(cfg.SessionSCfg()))
 	}
 }
 
@@ -437,18 +544,20 @@ func testCGRConfigReloadERs(t *testing.T) {
 	}
 
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	cfg.SessionSCfg().Enabled = true
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "ers_example")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: ERsJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "ers_example"),
+		Section: ERsJson,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected OK received: %s", reply)
 	}
-	flags := utils.FlagsWithParamsFromSlice([]string{"*dryRun"})
+	flags := utils.FlagsWithParamsFromSlice([]string{"*dryrun"})
 	flagsDefault := utils.FlagsWithParamsFromSlice([]string{})
 	content := []*FCTemplate{
 		{Tag: utils.ToR, Path: utils.MetaCgreq + utils.NestingSep + utils.ToR, Type: utils.MetaVariable, Value: NewRSRParsersMustCompile("~*req.2", utils.InfieldSep), Mandatory: true, Layout: time.RFC3339},
@@ -483,11 +592,11 @@ func testCGRConfigReloadERs(t *testing.T) {
 				CacheDumpFields:     []*FCTemplate{},
 				PartialCommitFields: []*FCTemplate{},
 				Opts: &EventReaderOpts{
-					CSVFieldSeparator:   utils.StringPointer(","),
-					PartialCacheAction:  utils.StringPointer(utils.MetaNone),
-					CSVHeaderDefineChar: utils.StringPointer(":"),
+					CSVFieldSeparator:   utils.StringPointer(utils.FieldsSep),
+					CSVHeaderDefineChar: utils.StringPointer(utils.InInFieldSep),
 					CSVRowLength:        utils.IntPointer(0),
 					PartialOrderField:   utils.StringPointer("~*req.AnswerTime"),
+					PartialCacheAction:  utils.StringPointer(utils.MetaNone),
 					XMLRootPath:         utils.StringPointer(utils.EmptyString),
 					NATSSubject:         utils.StringPointer("cgrates_cdrs"),
 				},
@@ -505,8 +614,8 @@ func testCGRConfigReloadERs(t *testing.T) {
 				CacheDumpFields:     []*FCTemplate{},
 				PartialCommitFields: []*FCTemplate{},
 				Opts: &EventReaderOpts{
-					CSVFieldSeparator:   utils.StringPointer(","),
-					CSVHeaderDefineChar: utils.StringPointer(":"),
+					CSVFieldSeparator:   utils.StringPointer(utils.FieldsSep),
+					CSVHeaderDefineChar: utils.StringPointer(utils.InInFieldSep),
 					CSVRowLength:        utils.IntPointer(0),
 					PartialOrderField:   utils.StringPointer("~*req.AnswerTime"),
 					PartialCacheAction:  utils.StringPointer(utils.MetaNone),
@@ -524,12 +633,14 @@ func testCGRConfigReloadERs(t *testing.T) {
 
 func testCGRConfigReloadDNSAgent(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	cfg.SessionSCfg().Enabled = true
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "dnsagent_reload")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: DNSAgentJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "dnsagent_reload"),
+		Section: DNSAgentJson,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -550,12 +661,14 @@ func testCGRConfigReloadDNSAgent(t *testing.T) {
 
 func testCGRConfigReloadFreeswitchAgent(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	cfg.SessionSCfg().Enabled = true
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "freeswitch_reload")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: FreeSWITCHAgentJSON,
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "freeswitch_reload"),
+		Section: FreeSWITCHAgentJSN,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -687,13 +800,13 @@ func testCgrCfgV1ReloadConfigSection(t *testing.T) {
 				"timezone":            "",
 				"type":                utils.MetaNone,
 				"opts": map[string]interface{}{
-					"csvFieldSeparator":         ",",
-					"csvHeaderDefineChar":       ":",
-					"csvRowLength":              0.,
-					"partialOrderField":         "~*req.AnswerTime",
-					utils.PartialCacheActionOpt: utils.MetaNone,
-					"xmlRootPath":               "",
-					"natsSubject":               "cgrates_cdrs",
+					"csvFieldSeparator":   ",",
+					"csvHeaderDefineChar": ":",
+					"csvRowLength":        0.,
+					"partialOrderField":   "~*req.AnswerTime",
+					"partialCacheAction":  utils.MetaNone,
+					"xmlRootPath":         "",
+					"natsSubject":         "cgrates_cdrs",
 				},
 				"partial_commit_fields": []interface{}{},
 			},
@@ -701,23 +814,23 @@ func testCgrCfgV1ReloadConfigSection(t *testing.T) {
 				"cache_dump_fields":   []interface{}{},
 				"concurrent_requests": 1024,
 				"filters":             []string{},
-				"flags":               []string{"*dryRun"},
+				"flags":               []string{"*dryrun"},
 				"id":                  "file_reader1",
 				"processed_path":      "/tmp/ers/out",
 				"run_delay":           "-1",
 				"source_path":         "/tmp/ers/in",
 				"tenant":              "",
 				"timezone":            "",
-				"type":                "*fileCSV",
+				"type":                "*file_csv",
 				"fields":              content,
 				"opts": map[string]interface{}{
-					"csvFieldSeparator":         ",",
-					"csvHeaderDefineChar":       ":",
-					"csvRowLength":              0.,
-					"partialOrderField":         "~*req.AnswerTime",
-					utils.PartialCacheActionOpt: utils.MetaNone,
-					"xmlRootPath":               "",
-					"natsSubject":               "cgrates_cdrs",
+					"csvFieldSeparator":   ",",
+					"csvHeaderDefineChar": ":",
+					"csvRowLength":        0.,
+					"partialOrderField":   "~*req.AnswerTime",
+					"partialCacheAction":  utils.MetaNone,
+					"xmlRootPath":         "",
+					"natsSubject":         "cgrates_cdrs",
 				},
 				"partial_commit_fields": []interface{}{},
 			},
@@ -728,13 +841,15 @@ func testCgrCfgV1ReloadConfigSection(t *testing.T) {
 	}
 
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
 	var reply string
 	var rcv map[string]interface{}
 
-	cfg.ConfigPath = "/usr/share/cgrates/conf/samples/ers_example"
-	if err := cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
-		Section: ERsJSON,
+	if err := cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    "/usr/share/cgrates/conf/samples/ers_example",
+		Section: ERsJson,
 	}, &reply); err != nil {
 		t.Fatal(err)
 	} else if reply != utils.OK {
@@ -742,9 +857,9 @@ func testCgrCfgV1ReloadConfigSection(t *testing.T) {
 	}
 
 	expected = map[string]interface{}{
-		ERsJSON: expected,
+		ERsJson: expected,
 	}
-	if err := cfg.V1GetConfig(context.Background(), &SectionWithAPIOpts{Sections: []string{ERsJSON}}, &rcv); err != nil {
+	if err := cfg.V1GetConfig(&SectionWithAPIOpts{Section: ERsJson}, &rcv); err != nil {
 		t.Error(err)
 	} else if utils.ToJSON(expected) != utils.ToJSON(rcv) {
 		t.Errorf("Expected: %+v, \n received: %+v", utils.ToJSON(expected), utils.ToJSON(rcv))
@@ -759,17 +874,21 @@ func testCgrCfgV1ReloadConfigSection(t *testing.T) {
 
 func testCGRConfigReloadConfigFromJSONSessionS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	cfg.RalsCfg().Enabled = true
 	cfg.ChargerSCfg().Enabled = true
 	cfg.CdrsCfg().Enabled = true
 	var reply string
-	if err = cfg.V1SetConfig(context.Background(), &SetConfigArgs{
+	if err = cfg.V1SetConfig(&SetConfigArgs{
 		Config: map[string]interface{}{
 			"sessions": map[string]interface{}{
 				"enabled":          true,
 				"resources_conns":  []string{"*localhost"},
 				"routes_conns":     []string{"*localhost"},
 				"attributes_conns": []string{"*localhost"},
+				"rals_conns":       []string{"*internal"},
 				"cdrs_conns":       []string{"*internal"},
 				"chargers_conns":   []string{"*internal"},
 			},
@@ -780,17 +899,16 @@ func testCGRConfigReloadConfigFromJSONSessionS(t *testing.T) {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &SessionSCfg{
-		Enabled:         true,
-		ListenBijson:    "127.0.0.1:2014",
-		ChargerSConns:   []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)},
-		ResourceSConns:  []string{utils.MetaLocalHost},
-		ThresholdSConns: []string{},
-		StatSConns:      []string{},
-		AccountSConns:   []string{},
-		RateSConns:      []string{},
-		RouteSConns:     []string{utils.MetaLocalHost},
-		AttributeSConns: []string{utils.MetaLocalHost},
-		CDRsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
+		Enabled:       true,
+		ListenBijson:  "127.0.0.1:2014",
+		ChargerSConns: []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)},
+		RALsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)},
+		ResSConns:     []string{utils.MetaLocalHost},
+		ThreshSConns:  []string{},
+		StatSConns:    []string{},
+		RouteSConns:   []string{utils.MetaLocalHost},
+		AttrSConns:    []string{utils.MetaLocalHost},
+		CDRsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
 
 		ReplicationConns:  []string{},
 		SessionIndexes:    utils.StringSet{},
@@ -802,45 +920,12 @@ func testCGRConfigReloadConfigFromJSONSessionS(t *testing.T) {
 			PayloadMaxduration: -1,
 			DefaultAttest:      "A",
 		},
-		ActionSConns: []string{},
+		SchedulerConns: []string{},
 		DefaultUsage: map[string]time.Duration{
 			utils.MetaAny:   3 * time.Hour,
 			utils.MetaVoice: 3 * time.Hour,
 			utils.MetaData:  1048576,
 			utils.MetaSMS:   1,
-		},
-		Opts: &SessionsOpts{
-			Accounts:               []*utils.DynamicBoolOpt{},
-			Attributes:             []*utils.DynamicBoolOpt{},
-			CDRs:                   []*utils.DynamicBoolOpt{},
-			Chargers:               []*utils.DynamicBoolOpt{},
-			Resources:              []*utils.DynamicBoolOpt{},
-			Routes:                 []*utils.DynamicBoolOpt{},
-			Stats:                  []*utils.DynamicBoolOpt{},
-			Thresholds:             []*utils.DynamicBoolOpt{},
-			Initiate:               []*utils.DynamicBoolOpt{},
-			Update:                 []*utils.DynamicBoolOpt{},
-			Terminate:              []*utils.DynamicBoolOpt{},
-			Message:                []*utils.DynamicBoolOpt{},
-			AttributesDerivedReply: []*utils.DynamicBoolOpt{},
-			BlockerError:           []*utils.DynamicBoolOpt{},
-			CDRsDerivedReply:       []*utils.DynamicBoolOpt{},
-			ResourcesAuthorize:     []*utils.DynamicBoolOpt{},
-			ResourcesAllocate:      []*utils.DynamicBoolOpt{},
-			ResourcesRelease:       []*utils.DynamicBoolOpt{},
-			ResourcesDerivedReply:  []*utils.DynamicBoolOpt{},
-			RoutesDerivedReply:     []*utils.DynamicBoolOpt{},
-			StatsDerivedReply:      []*utils.DynamicBoolOpt{},
-			ThresholdsDerivedReply: []*utils.DynamicBoolOpt{},
-			MaxUsage:               []*utils.DynamicBoolOpt{},
-			ForceDuration:          []*utils.DynamicBoolOpt{},
-			TTL:                    []*utils.DynamicDurationOpt{},
-			Chargeable:             []*utils.DynamicBoolOpt{},
-			TTLLastUsage:           []*utils.DynamicDurationPointerOpt{},
-			TTLLastUsed:            []*utils.DynamicDurationPointerOpt{},
-			DebitInterval:          []*utils.DynamicDurationOpt{},
-			TTLMaxDelay:            []*utils.DynamicDurationOpt{},
-			TTLUsage:               []*utils.DynamicDurationPointerOpt{},
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.SessionSCfg()) {
@@ -850,16 +935,20 @@ func testCGRConfigReloadConfigFromJSONSessionS(t *testing.T) {
 
 func testCGRConfigReloadConfigFromStringSessionS(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	cfg.RalsCfg().Enabled = true
 	cfg.ChargerSCfg().Enabled = true
 	cfg.CdrsCfg().Enabled = true
 	var reply string
-	if err = cfg.V1SetConfigFromJSON(context.Background(), &SetConfigFromJSONArgs{
+	if err = cfg.V1SetConfigFromJSON(&SetConfigFromJSONArgs{
 		Config: `{"sessions":{
 				"enabled":          true,
 				"resources_conns":  ["*localhost"],
 				"routes_conns":     ["*localhost"],
 				"attributes_conns": ["*localhost"],
+				"rals_conns":       ["*internal"],
 				"cdrs_conns":       ["*internal"],
 				"chargers_conns":   ["*localhost"]
 				}}`}, &reply); err != nil {
@@ -868,17 +957,16 @@ func testCGRConfigReloadConfigFromStringSessionS(t *testing.T) {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &SessionSCfg{
-		Enabled:         true,
-		ListenBijson:    "127.0.0.1:2014",
-		ChargerSConns:   []string{utils.MetaLocalHost},
-		ResourceSConns:  []string{utils.MetaLocalHost},
-		ThresholdSConns: []string{},
-		StatSConns:      []string{},
-		AccountSConns:   []string{},
-		RateSConns:      []string{},
-		RouteSConns:     []string{utils.MetaLocalHost},
-		AttributeSConns: []string{utils.MetaLocalHost},
-		CDRsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
+		Enabled:       true,
+		ListenBijson:  "127.0.0.1:2014",
+		ChargerSConns: []string{utils.MetaLocalHost},
+		RALsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)},
+		ResSConns:     []string{utils.MetaLocalHost},
+		ThreshSConns:  []string{},
+		StatSConns:    []string{},
+		RouteSConns:   []string{utils.MetaLocalHost},
+		AttrSConns:    []string{utils.MetaLocalHost},
+		CDRsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
 
 		ReplicationConns:  []string{},
 		SessionIndexes:    utils.StringSet{},
@@ -890,45 +978,12 @@ func testCGRConfigReloadConfigFromStringSessionS(t *testing.T) {
 			PayloadMaxduration: -1,
 			DefaultAttest:      "A",
 		},
-		ActionSConns: []string{},
+		SchedulerConns: []string{},
 		DefaultUsage: map[string]time.Duration{
 			utils.MetaAny:   3 * time.Hour,
 			utils.MetaVoice: 3 * time.Hour,
 			utils.MetaData:  1048576,
 			utils.MetaSMS:   1,
-		},
-		Opts: &SessionsOpts{
-			Accounts:               []*utils.DynamicBoolOpt{},
-			Attributes:             []*utils.DynamicBoolOpt{},
-			CDRs:                   []*utils.DynamicBoolOpt{},
-			Chargers:               []*utils.DynamicBoolOpt{},
-			Resources:              []*utils.DynamicBoolOpt{},
-			Routes:                 []*utils.DynamicBoolOpt{},
-			Stats:                  []*utils.DynamicBoolOpt{},
-			Thresholds:             []*utils.DynamicBoolOpt{},
-			Initiate:               []*utils.DynamicBoolOpt{},
-			Update:                 []*utils.DynamicBoolOpt{},
-			Terminate:              []*utils.DynamicBoolOpt{},
-			Message:                []*utils.DynamicBoolOpt{},
-			AttributesDerivedReply: []*utils.DynamicBoolOpt{},
-			BlockerError:           []*utils.DynamicBoolOpt{},
-			CDRsDerivedReply:       []*utils.DynamicBoolOpt{},
-			ResourcesAuthorize:     []*utils.DynamicBoolOpt{},
-			ResourcesAllocate:      []*utils.DynamicBoolOpt{},
-			ResourcesRelease:       []*utils.DynamicBoolOpt{},
-			ResourcesDerivedReply:  []*utils.DynamicBoolOpt{},
-			RoutesDerivedReply:     []*utils.DynamicBoolOpt{},
-			StatsDerivedReply:      []*utils.DynamicBoolOpt{},
-			ThresholdsDerivedReply: []*utils.DynamicBoolOpt{},
-			MaxUsage:               []*utils.DynamicBoolOpt{},
-			ForceDuration:          []*utils.DynamicBoolOpt{},
-			TTL:                    []*utils.DynamicDurationOpt{},
-			Chargeable:             []*utils.DynamicBoolOpt{},
-			TTLLastUsage:           []*utils.DynamicDurationPointerOpt{},
-			TTLLastUsed:            []*utils.DynamicDurationPointerOpt{},
-			DebitInterval:          []*utils.DynamicDurationOpt{},
-			TTLMaxDelay:            []*utils.DynamicDurationOpt{},
-			TTLUsage:               []*utils.DynamicDurationPointerOpt{},
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.SessionSCfg()) {
@@ -936,22 +991,25 @@ func testCGRConfigReloadConfigFromStringSessionS(t *testing.T) {
 	}
 
 	var rcv string
-	expected := `{"sessions":{"accounts_conns":[],"actions_conns":[],"alterable_fields":[],"attributes_conns":["*localhost"],"cdrs_conns":["*internal"],"channel_sync_interval":"0","chargers_conns":["*localhost"],"client_protocol":1,"default_usage":{"*any":"3h0m0s","*data":"1048576","*sms":"1","*voice":"3h0m0s"},"enabled":true,"listen_bigob":"","listen_bijson":"127.0.0.1:2014","min_dur_low_balance":"0","opts":{"*accounts":[],"*attributes":[],"*attributesDerivedReply":[],"*blockerError":[],"*cdrs":[],"*cdrsDerivedReply":[],"*chargeable":[],"*chargers":[],"*debitInterval":[],"*forceDuration":[],"*initiate":[],"*maxUsage":[],"*message":[],"*resources":[],"*resourcesAllocate":[],"*resourcesAuthorize":[],"*resourcesDerivedReply":[],"*resourcesRelease":[],"*routes":[],"*routesDerivedReply":[],"*stats":[],"*statsDerivedReply":[],"*terminate":[],"*thresholds":[],"*thresholdsDerivedReply":[],"*ttl":[],"*ttlLastUsage":[],"*ttlLastUsed":[],"*ttlMaxDelay":[],"*ttlUsage":[],"*update":[]},"rates_conns":[],"replication_conns":[],"resources_conns":["*localhost"],"routes_conns":["*localhost"],"session_indexes":[],"stats_conns":[],"stir":{"allowed_attest":["*any"],"default_attest":"A","payload_maxduration":"-1","privatekey_path":"","publickey_path":""},"store_session_costs":false,"terminate_attempts":5,"thresholds_conns":[]}}`
-	if err := cfg.V1GetConfigAsJSON(context.Background(), &SectionWithAPIOpts{Sections: []string{SessionSJSON}}, &rcv); err != nil {
+	expected := `{"sessions":{"alterable_fields":[],"attributes_conns":["*localhost"],"cdrs_conns":["*internal"],"channel_sync_interval":"0","chargers_conns":["*localhost"],"client_protocol":1,"debit_interval":"0","default_usage":{"*any":"3h0m0s","*data":"1048576","*sms":"1","*voice":"3h0m0s"},"enabled":true,"listen_bigob":"","listen_bijson":"127.0.0.1:2014","min_dur_low_balance":"0","rals_conns":["*internal"],"replication_conns":[],"resources_conns":["*localhost"],"routes_conns":["*localhost"],"scheduler_conns":[],"session_indexes":[],"session_ttl":"0","stats_conns":[],"stir":{"allowed_attest":["*any"],"default_attest":"A","payload_maxduration":"-1","privatekey_path":"","publickey_path":""},"store_session_costs":false,"terminate_attempts":5,"thresholds_conns":[]}}`
+	if err := cfg.V1GetConfigAsJSON(&SectionWithAPIOpts{Section: SessionSJson}, &rcv); err != nil {
 		t.Error(err)
 	} else if expected != rcv {
-		t.Errorf("Expected: %+s, \n received: %s", expected, rcv)
+		t.Errorf("Expected: %+q, \n received: %s", expected, rcv)
 	}
 }
 
 func testCGRConfigReloadAll(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
-	cfg.rldCh = make(chan string, 100)
+	for _, section := range sortedCfgSections {
+		cfg.rldChans[section] = make(chan struct{}, 1)
+	}
+	cfg.RalsCfg().Enabled = true
 	cfg.ChargerSCfg().Enabled = true
 	cfg.CdrsCfg().Enabled = true
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2")
-	if err = cfg.V1ReloadConfig(context.Background(), &ReloadArgs{
+	if err = cfg.V1ReloadConfig(&ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "tutmongo2"),
 		Section: utils.MetaAll,
 	}, &reply); err != nil {
 		t.Error(err)
@@ -959,17 +1017,16 @@ func testCGRConfigReloadAll(t *testing.T) {
 		t.Errorf("Expected OK received: %s", reply)
 	}
 	expAttr := &SessionSCfg{
-		Enabled:         true,
-		ListenBijson:    "127.0.0.1:2014",
-		ChargerSConns:   []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)},
-		ResourceSConns:  []string{utils.MetaLocalHost},
-		ThresholdSConns: []string{},
-		StatSConns:      []string{},
-		AccountSConns:   []string{},
-		RateSConns:      []string{},
-		RouteSConns:     []string{utils.MetaLocalHost},
-		AttributeSConns: []string{utils.MetaLocalHost},
-		CDRsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
+		Enabled:       true,
+		ListenBijson:  "127.0.0.1:2014",
+		ChargerSConns: []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)},
+		RALsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)},
+		ResSConns:     []string{utils.MetaLocalHost},
+		ThreshSConns:  []string{},
+		StatSConns:    []string{},
+		RouteSConns:   []string{utils.MetaLocalHost},
+		AttrSConns:    []string{utils.MetaLocalHost},
+		CDRsConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaCDRs)},
 
 		ReplicationConns:  []string{},
 		SessionIndexes:    utils.StringSet{},
@@ -981,45 +1038,12 @@ func testCGRConfigReloadAll(t *testing.T) {
 			PayloadMaxduration: -1,
 			DefaultAttest:      "A",
 		},
-		ActionSConns: make([]string, 0),
+		SchedulerConns: []string{},
 		DefaultUsage: map[string]time.Duration{
 			utils.MetaAny:   3 * time.Hour,
 			utils.MetaVoice: 3 * time.Hour,
 			utils.MetaData:  1048576,
 			utils.MetaSMS:   1,
-		},
-		Opts: &SessionsOpts{
-			Accounts:               []*utils.DynamicBoolOpt{},
-			Attributes:             []*utils.DynamicBoolOpt{},
-			CDRs:                   []*utils.DynamicBoolOpt{},
-			Chargers:               []*utils.DynamicBoolOpt{},
-			Resources:              []*utils.DynamicBoolOpt{},
-			Routes:                 []*utils.DynamicBoolOpt{},
-			Stats:                  []*utils.DynamicBoolOpt{},
-			Thresholds:             []*utils.DynamicBoolOpt{},
-			Initiate:               []*utils.DynamicBoolOpt{},
-			Update:                 []*utils.DynamicBoolOpt{},
-			Terminate:              []*utils.DynamicBoolOpt{},
-			Message:                []*utils.DynamicBoolOpt{},
-			AttributesDerivedReply: []*utils.DynamicBoolOpt{},
-			BlockerError:           []*utils.DynamicBoolOpt{},
-			CDRsDerivedReply:       []*utils.DynamicBoolOpt{},
-			ResourcesAuthorize:     []*utils.DynamicBoolOpt{},
-			ResourcesAllocate:      []*utils.DynamicBoolOpt{},
-			ResourcesRelease:       []*utils.DynamicBoolOpt{},
-			ResourcesDerivedReply:  []*utils.DynamicBoolOpt{},
-			RoutesDerivedReply:     []*utils.DynamicBoolOpt{},
-			StatsDerivedReply:      []*utils.DynamicBoolOpt{},
-			ThresholdsDerivedReply: []*utils.DynamicBoolOpt{},
-			MaxUsage:               []*utils.DynamicBoolOpt{},
-			ForceDuration:          []*utils.DynamicBoolOpt{},
-			TTL:                    []*utils.DynamicDurationOpt{},
-			Chargeable:             []*utils.DynamicBoolOpt{},
-			TTLLastUsage:           []*utils.DynamicDurationPointerOpt{},
-			TTLLastUsed:            []*utils.DynamicDurationPointerOpt{},
-			DebitInterval:          []*utils.DynamicDurationOpt{},
-			TTLMaxDelay:            []*utils.DynamicDurationOpt{},
-			TTLUsage:               []*utils.DynamicDurationPointerOpt{},
 		},
 	}
 	if !reflect.DeepEqual(expAttr, cfg.SessionSCfg()) {
@@ -1048,7 +1072,7 @@ func testHttpHandlerConfigSForNotExistFile(t *testing.T) {
 func testHandleConfigSFolderError(t *testing.T) {
 	flPath := "/usr/share/cgrates/conf/samples/NotExists/cgrates.json"
 	w := httptest.NewRecorder()
-	handleConfigSFolder(context.Background(), flPath, w)
+	handleConfigSFolder(flPath, w)
 
 	resp := w.Result()
 	body, _ := io.ReadAll(resp.Body)
@@ -1126,7 +1150,7 @@ func testHttpHandlerConfigSForFolder(t *testing.T) {
 	if resp.Status != "200 OK" {
 		t.Errorf("Expected %+v , received: %+v ", "200 OK", resp.Status)
 	}
-	cfg, err := NewCGRConfigFromPath(context.Background(), "/usr/share/cgrates/conf/samples/diamagent_internal/")
+	cfg, err := NewCGRConfigFromPath("/usr/share/cgrates/conf/samples/diamagent_internal/")
 	if err != nil {
 		t.Error(err)
 	}
@@ -1143,8 +1167,9 @@ func testLoadConfigFromFolderFileNotFound(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
 
 	expected := "file </usr/share/cgrates/conf/samples/docker/cgrates.json>:NOT_FOUND:ENV_VAR:DOCKER_IP"
-	if err = loadConfigFromFolder(context.Background(), "/usr/share/cgrates/conf/samples/docker",
-		cfg.sections, false, cfg); err == nil || err.Error() != expected {
+	if err = cfg.loadConfigFromFolder("/usr/share/cgrates/conf/samples/",
+		[]func(jsonCfg *CgrJsonCfg) error{cfg.loadFromJSONCfg},
+		false); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 }
@@ -1157,8 +1182,9 @@ func testLoadConfigFromFolderOpenError(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
 
 	expected := "open /tmp/testLoadConfigFromFolderOpenError/notes.json: no such file or directory"
-	if err = loadConfigFromFile(context.Background(), path.Join(newDir, "notes.json"),
-		cfg.sections, false, cfg); err == nil || err.Error() != expected {
+	if err = cfg.loadConfigFromFile(path.Join(newDir, "notes.json"),
+		[]func(jsonCfg *CgrJsonCfg) error{cfg.loadFromJSONCfg},
+		false); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 	if err = os.RemoveAll(newDir); err != nil {
@@ -1173,8 +1199,9 @@ func testLoadConfigFromFolderNoConfigFound(t *testing.T) {
 	}
 	cfg := NewDefaultCGRConfig()
 
-	if err = loadConfigFromFolder(context.Background(), newDir,
-		cfg.sections, false, cfg); err == nil || err != filepath.ErrBadPattern {
+	if err = cfg.loadConfigFromFolder(newDir,
+		[]func(jsonCfg *CgrJsonCfg) error{cfg.loadFromJSONCfg},
+		false); err == nil || err != filepath.ErrBadPattern {
 		t.Errorf("Expected %+v, received %+v", filepath.ErrBadPattern, err)
 	}
 	if err = os.RemoveAll(newDir); err != nil {
@@ -1186,8 +1213,9 @@ func testLoadConfigFromPathInvalidArgument(t *testing.T) {
 	cfg := NewDefaultCGRConfig()
 
 	expected := "stat /\x00: invalid argument"
-	if err = loadConfigFromPath(context.Background(), "/\x00",
-		cfg.sections, false, cfg); err == nil || err.Error() != expected {
+	if err = cfg.loadConfigFromPath("/\x00",
+		[]func(jsonCfg *CgrJsonCfg) error{cfg.loadFromJSONCfg},
+		false); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 }
@@ -1199,9 +1227,10 @@ func testLoadConfigFromPathValidPath(t *testing.T) {
 	}
 	cfg := NewDefaultCGRConfig()
 
-	expected := "No config file found on path /tmp/testLoadConfigFromPathValidPath "
-	if err = loadConfigFromPath(context.Background(), newDir,
-		cfg.sections, false, cfg); err == nil || err.Error() != expected {
+	expected := "No config file found on path /tmp/testLoadConfigFromPathValidPath"
+	if err = cfg.loadConfigFromPath(newDir,
+		[]func(jsonCfg *CgrJsonCfg) error{cfg.loadFromJSONCfg},
+		false); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 	if err = os.RemoveAll(newDir); err != nil {
@@ -1216,163 +1245,14 @@ func testLoadConfigFromPathFile(t *testing.T) {
 	}
 	cfg := NewDefaultCGRConfig()
 
-	expected := "No config file found on path /tmp/testLoadConfigFromPathFile "
-	if err = loadConfigFromPath(context.Background(), newDir,
-		cfg.sections, false, cfg); err == nil || err.Error() != expected {
+	expected := "No config file found on path /tmp/testLoadConfigFromPathFile"
+	if err = cfg.loadConfigFromPath(newDir,
+		[]func(jsonCfg *CgrJsonCfg) error{cfg.loadFromJSONCfg},
+		false); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 	if err = os.RemoveAll(newDir); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func testApisLoadFromPath(t *testing.T) {
-	cfg := NewDefaultCGRConfig()
-	// pathL := "/tmp/test.json"
-	if err := os.Mkdir(path.Join("/tmp", "TestApisLoadFromPath"), 0777); err != nil {
-		t.Error(err)
-	}
-	file, err := os.Create(path.Join("/tmp", "TestApisLoadFromPath", "test.json"))
-	if err != nil {
-		t.Error(err)
-	}
-	defer file.Close()
-	data := `
-	{
-		// CGRateS Configuration file
-		//
-		
-		
-		"general": {
-			"log_level": 7,
-			"reply_timeout": "50s"
-		},
-		
-		
-		"listen": {
-			"rpc_json": ":2012",
-			"rpc_gob": ":2013",
-			"http": ":2080"
-		},
-		
-		
-		"data_db": {
-			"db_type": "*internal"
-		},
-			
-		
-		"rals": {
-			"enabled": true,
-			"thresholds_conns": ["*internal"],
-			"max_increments":3000000
-		},
-		
-		
-		"schedulers": {
-			"enabled": true,
-			"cdrs_conns": ["*internal"],
-			"stats_conns": ["*localhost"]
-		},
-		
-		
-		"cdrs": {
-			"enabled": true,
-			"chargers_conns":["*internal"]
-		},
-		
-		
-		"attributes": {
-			"enabled": true,
-			"stats_conns": ["*localhost"],
-			"resources_conns": ["*localhost"],
-			"accounts_conns": ["*localhost"]
-		},
-		
-		
-		"chargers": {
-			"enabled": true,
-			"attributes_conns": ["*internal"]
-		},
-		
-		
-		"resources": {
-			"enabled": true,
-			"store_interval": "-1",
-			"thresholds_conns": ["*internal"]
-		},
-		
-		
-		"stats": {
-			"enabled": true,
-			"store_interval": "-1",
-			"thresholds_conns": ["*internal"]
-		},
-		
-		"thresholds": {
-			"enabled": true,
-			"store_interval": "-1"
-		},
-		
-		
-		"routes": {
-			"enabled": true,
-			"prefix_indexed_fields":["*req.Destination"],
-			"stats_conns": ["*internal"],
-			"resources_conns": ["*internal"],
-		},
-		
-		
-		"sessions": {
-			"enabled": true,
-			"routes_conns": ["*internal"],
-			"resources_conns": ["*internal"],
-			"attributes_conns": ["*internal"],
-			"cdrs_conns": ["*internal"],
-			"chargers_conns": ["*internal"]
-		},
-		
-		
-		"admins": {
-			"enabled": true,
-			"scheduler_conns": ["*internal"]
-		},
-		
-		
-		"rates": {
-			"enabled": true
-		},
-		
-		
-		"actions": {
-			"enabled": true,
-			"accounts_conns": ["*localhost"]
-		},
-		
-		
-		"accounts": {
-			"enabled": true
-		},
-		
-		
-		"filters": {
-			"stats_conns": ["*internal"],
-			"resources_conns": ["*internal"],
-			"accounts_conns": ["*internal"],
-		},
-		
-		}
-	`
-	_, err = file.Write([]byte(data))
-	if err != nil {
-		t.Error(err)
-	}
-
-	if err := cfg.LoadFromPath(context.Background(), path.Join("/tmp", "TestApisLoadFromPath")); err != nil {
-		t.Error(err)
-	}
-
-	if err := os.RemoveAll(path.Join("/tmp", "TestApisLoadFromPath")); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -1427,7 +1307,7 @@ func testHandleConfigSFolderErrorWrite(t *testing.T) {
 	newFile.Close()
 
 	w := new(responseTest)
-	handleConfigSFolder(context.Background(), flPath, w)
+	handleConfigSFolder(flPath, w)
 
 	if err = os.Remove(path.Join(flPath, "random.json")); err != nil {
 		t.Fatal(err)
@@ -1444,130 +1324,8 @@ func (responseTest) Header() http.Header {
 	return nil
 }
 
-func (responseTest) Write([]byte) (int, error) {
-	return 0, errors.New("Invalid section")
+func (responseTest) Write(p []byte) (int, error) {
+	return 0, fmt.Errorf("Invalid section")
 }
 
-func (responseTest) WriteHeader(int) {}
-
-func TestGetLockFilePath(t *testing.T) {
-	l := LoaderSCfg{
-		ID:           "file",
-		LockFilePath: "../tmp/file.txt",
-		TpInDir:      "/home",
-	}
-
-	exp := "/tmp/file.txt"
-	pathL := l.GetLockFilePath()
-	if pathL != exp {
-		t.Errorf("Expected %s \n but received \n %s", exp, pathL)
-	}
-
-	l.LockFilePath = "file.txt"
-	pathL = l.GetLockFilePath()
-	exp = "/home/file.txt"
-	if pathL != exp {
-		t.Errorf("Expected %s \n but received \n %s", exp, pathL)
-	}
-
-	if err := os.Mkdir(path.Join("/tmp", "TestGetLockFilePath"), 0777); err != nil {
-		t.Error(err)
-	}
-	l.LockFilePath = "TestGetLockFilePath"
-	l.TpInDir = "/tmp"
-	pathL = l.GetLockFilePath()
-	exp = "/tmp/TestGetLockFilePath/file.lck"
-	if pathL != exp {
-		t.Errorf("Expected %s \n but received \n %s", exp, pathL)
-	}
-	if err := os.RemoveAll(path.Join("/tmp", "TestGetLockFilePath")); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestReloadCfgInDb(t *testing.T) {
-	cfg := NewDefaultCGRConfig()
-	db := &CgrJsonCfg{}
-	cfg.db = db
-	cfg.attributeSCfg = &AttributeSCfg{
-		Enabled:                true,
-		ResourceSConns:         []string{"*internal"},
-		StatSConns:             []string{"*internal"},
-		AccountSConns:          []string{"*internal"},
-		IndexedSelects:         false,
-		StringIndexedFields:    &[]string{"field1"},
-		SuffixIndexedFields:    &[]string{"field1"},
-		PrefixIndexedFields:    &[]string{"field1"},
-		ExistsIndexedFields:    &[]string{"field1"},
-		NotExistsIndexedFields: &[]string{"field1"},
-		Opts: &AttributesOpts{
-			ProcessRuns: []*utils.DynamicIntOpt{
-				{
-					FilterIDs: []string{},
-					Value:     2,
-				},
-			},
-		},
-		NestedFields: true,
-	}
-	var reply string
-	cfg.sections = newSections(cfg)
-	cfg.rldCh = make(chan string, 100)
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "attributes_internal")
-	jsn := &AttributeSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Resources_conns:          &[]string{"*localhost"},
-		Stats_conns:              &[]string{"*localhost"},
-		Accounts_conns:           &[]string{"*localhost"},
-		Indexed_selects:          utils.BoolPointer(true),
-		String_indexed_fields:    &[]string{"field2"},
-		Suffix_indexed_fields:    &[]string{"field2"},
-		Prefix_indexed_fields:    &[]string{"field2"},
-		Exists_indexed_fields:    &[]string{"field2"},
-		Notexists_indexed_fields: &[]string{"field2"},
-		Opts: &AttributesOptsJson{
-			ProcessRuns: []*utils.DynamicIntOpt{
-				{
-					Value: 3,
-				},
-			},
-		},
-		Nested_fields: utils.BoolPointer(false),
-	}
-	db.SetSection(context.Background(), AttributeSJSON, jsn)
-	expected := &AttributeSCfg{
-		Enabled:                false,
-		ResourceSConns:         []string{"*localhost"},
-		StatSConns:             []string{"*localhost"},
-		AccountSConns:          []string{"*localhost"},
-		IndexedSelects:         true,
-		StringIndexedFields:    &[]string{"field2"},
-		SuffixIndexedFields:    &[]string{"field2"},
-		PrefixIndexedFields:    &[]string{"field2"},
-		ExistsIndexedFields:    &[]string{"field2"},
-		NotExistsIndexedFields: &[]string{"field2"},
-		Opts: &AttributesOpts{
-			ProcessRuns: []*utils.DynamicIntOpt{
-				{
-					FilterIDs: []string{},
-					Value:     2,
-				},
-				{
-					Value: 3,
-				},
-			},
-		},
-		NestedFields: false,
-	}
-	args2 := &ReloadArgs{
-		Section: AttributeSJSON,
-	}
-	if err := cfg.V1ReloadConfig(context.Background(), args2, &reply); err != nil {
-		t.Error(err)
-	}
-
-	rcv := cfg.AttributeSCfg()
-	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
+func (responseTest) WriteHeader(statusCode int) {}

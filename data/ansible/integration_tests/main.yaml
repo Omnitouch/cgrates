@@ -33,7 +33,7 @@
 
     ###############################################################
     # CGRateS location
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
     ###############################################################
   remote_user: root
   tasks:
@@ -121,7 +121,7 @@
 
   - name: git clone cgrates
     git:
-      repo: https://github.com/Omnitouch/cgrates.git
+      repo: https://github.com/cgrates/cgrates.git
       dest: '{{ cgrates_dir }}'
     become: yes
     become_user: "{{ user }}"

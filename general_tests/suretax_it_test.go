@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 /*
@@ -49,6 +49,7 @@ var (
 	sTestSTI = []func(t *testing.T){
 		testSTIInitCfg,
 		testSTIResetDataDb,
+		testSTIResetStorDb,
 		testSTIStartEngine,
 		testSTIRpcConn,
 		testSTILoadTariffPlanFromFolder,
@@ -77,6 +78,13 @@ func testSTIInitCfg(t *testing.T) {
 // Remove data in both rating and accounting db
 func testSTIResetDataDb(t *testing.T) {
 	if err := engine.InitDataDb(stiCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testSTIResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(stiCfg); err != nil {
 		t.Fatal(err)
 	}
 }

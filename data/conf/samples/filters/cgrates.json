@@ -23,14 +23,24 @@
 },
 
 
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
+	"enabled": true,
+	"thresholds_conns": ["*localhost"],
+},
+
+"schedulers": {
+	"enabled": true,				
+},
+
 "filters": {								
 	"stats_conns": ["*localhost"],
 	"resources_conns": ["*localhost"],
-	"accounts_conns": ["*localhost"],
-},
-
-"accounts": {
-    "enabled": true
+	"apiers_conns": ["*localhost"],
 },
 
 
@@ -66,9 +76,10 @@
 	"attributes_conns": ["*internal"],
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"caches_conns":["*localhost"],
+	"scheduler_conns": ["*internal"],
 },
 
 

@@ -26,42 +26,47 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/rpcclient"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestCoreSReload(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	coreRPC := make(chan birpc.ClientConnector, 1)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	coreRPC := make(chan rpcclient.ClientConnector, 1)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	caps := engine.NewCaps(1, "test_caps")
-	coreS := NewCoreService(cfg, caps, server, coreRPC, anz, nil, utils.EmptyString, nil, nil, srvDep)
-	engine.NewConnManager(cfg)
+	coreS := NewCoreService(cfg, caps, server, coreRPC, anz, nil, "", nil, nil, nil, srvDep)
+	engine.NewConnManager(cfg, nil)
 	srvMngr.AddServices(coreS,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	ctx, cancel := context.WithCancel(context.TODO())
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Fatal(err)
+	}
 	if coreS.IsRunning() {
 		t.Fatalf("Expected service to be down")
 	}
 
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "caps_queue")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.CoreSJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "caps_queue"),
+		Section: config.CoreSCfgJson,
 	}, &reply); err != nil {
 		t.Fatal(err)
 	} else if reply != utils.OK {
@@ -76,11 +81,11 @@ func TestCoreSReload(t *testing.T) {
 	if !coreS.IsRunning() {
 		t.Fatalf("Expected service to be running")
 	}
-	err := coreS.Start(ctx, cancel)
+	err := coreS.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Fatalf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
-	err = coreS.Reload(ctx, cancel)
+	err = coreS.Reload()
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
@@ -88,13 +93,13 @@ func TestCoreSReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
-	cfg.GetReloadChan() <- config.SectionToService[config.CoreSJSON]
+	cfg.GetReloadChan(config.CoreSCfgJson) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 	if !coreS.IsRunning() {
 		t.Fatalf("Expected service to be running")
 	}
 
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 
 }

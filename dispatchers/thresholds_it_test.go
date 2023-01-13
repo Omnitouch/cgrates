@@ -25,9 +25,10 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var sTestsDspTh = []func(t *testing.T){
@@ -103,9 +104,11 @@ func testDspThPingFailover(t *testing.T) {
 func testDspThProcessEventFailover(t *testing.T) {
 	var ids []string
 	eIDs := []string{"THD_ACNT_1001"}
+	nowTime := time.Now()
 	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
+		Time:   &nowTime,
 		Event: map[string]interface{}{
 			utils.EventName:    "Event1",
 			utils.AccountField: "1001"},
@@ -150,9 +153,11 @@ func testDspThPing(t *testing.T) {
 
 func testDspThTestAuthKey(t *testing.T) {
 	var ids []string
+	nowTime := time.Now()
 	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
+		Time:   &nowTime,
 		Event: map[string]interface{}{
 			utils.AccountField: "1002"},
 
@@ -175,9 +180,11 @@ func testDspThTestAuthKey(t *testing.T) {
 func testDspThTestAuthKey2(t *testing.T) {
 	var ids []string
 	eIDs := []string{"THD_ACNT_1002"}
+	nowTime := time.Now()
 	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     utils.UUIDSha1Prefix(),
+		Time:   &nowTime,
 		Event: map[string]interface{}{
 			utils.AccountField: "1002"},
 

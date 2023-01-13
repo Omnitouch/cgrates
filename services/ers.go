@@ -22,22 +22,22 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/ers"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/ers"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewEventReaderService returns the EventReader Service
 func NewEventReaderService(cfg *config.CGRConfig, filterSChan chan *engine.FilterS,
-	connMgr *engine.ConnManager,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &EventReaderService{
 		rldChan:     make(chan struct{}, 1),
 		cfg:         cfg,
 		filterSChan: filterSChan,
+		shdChan:     shdChan,
 		connMgr:     connMgr,
 		srvDep:      srvDep,
 	}
@@ -48,6 +48,7 @@ type EventReaderService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	filterSChan chan *engine.FilterS
+	shdChan     *utils.SyncedChan
 
 	ers      *ers.ERService
 	rldChan  chan struct{}
@@ -57,17 +58,16 @@ type EventReaderService struct {
 }
 
 // Start should handle the sercive start
-func (erS *EventReaderService) Start(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (erS *EventReaderService) Start() (err error) {
 	if erS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
-	}
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, erS.filterSChan); err != nil {
-		return
 	}
 
 	erS.Lock()
 	defer erS.Unlock()
+
+	filterS := <-erS.filterSChan
+	erS.filterSChan <- filterS
 
 	// remake the stop chan
 	erS.stopChan = make(chan struct{})
@@ -76,20 +76,20 @@ func (erS *EventReaderService) Start(ctx *context.Context, shtDwn context.Cancel
 
 	// build the service
 	erS.ers = ers.NewERService(erS.cfg, filterS, erS.connMgr)
-	go erS.listenAndServe(erS.ers, erS.stopChan, erS.rldChan, shtDwn)
+	go erS.listenAndServe(erS.ers, erS.stopChan, erS.rldChan)
 	return
 }
 
-func (erS *EventReaderService) listenAndServe(ers *ers.ERService, stopChan chan struct{}, rldChan chan struct{}, shtDwn context.CancelFunc) (err error) {
+func (erS *EventReaderService) listenAndServe(ers *ers.ERService, stopChan chan struct{}, rldChan chan struct{}) (err error) {
 	if err = ers.ListenAndServe(stopChan, rldChan); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<%s> error: <%s>", utils.ERs, err.Error()))
-		shtDwn()
+		erS.shdChan.CloseOnce()
 	}
 	return
 }
 
 // Reload handles the change of config
-func (erS *EventReaderService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (erS *EventReaderService) Reload() (err error) {
 	erS.RLock()
 	erS.rldChan <- struct{}{}
 	erS.RUnlock()

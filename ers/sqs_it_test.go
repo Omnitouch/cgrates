@@ -32,9 +32,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -52,7 +52,7 @@ func TestSQSER(t *testing.T) {
 	"readers": [
 		{
 			"id": "sqs",										// identifier of the EventReader profile
-			"type": "*sqsJSONMap",							// reader type <*fileCSV>
+			"type": "*sqs_json_map",							// reader type <*file_csv>
 			"run_delay":  "-1",									// sleep interval in seconds between consecutive runs, -1 to use automation via inotify or 0 to disable running all together
 			"concurrent_requests": 1024,						// maximum simultaneous requests/files to process, 0 for unlimited
 			"source_path": "sqs.us-east-2.amazonaws.com",		// read data from this path
@@ -68,7 +68,7 @@ func TestSQSER(t *testing.T) {
 				// "awsToken": "".
 			},
 			"fields":[									// import fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
-				{"tag": "OriginID", "type": "*composed", "value": "~*req.OriginID", "path": "*cgreq.OriginID"},
+				{"tag": "CGRID", "type": "*composed", "value": "~*req.CGRID", "path": "*cgreq.CGRID"},
 			],
 		},
 	],
@@ -85,7 +85,7 @@ func TestSQSER(t *testing.T) {
 	rdrExit = make(chan struct{}, 1)
 
 	if rdr, err = NewSQSER(cfg, 1, rdrEvents, make(chan *erEvent, 1),
-		rdrErr, new(engine.FilterS), rdrExit, nil); err != nil {
+		rdrErr, new(engine.FilterS), rdrExit); err != nil {
 		t.Fatal(err)
 	}
 	sqsRdr := rdr.(*SQSER)
@@ -99,9 +99,9 @@ func TestSQSER(t *testing.T) {
 	}
 	scv := sqs.New(sess)
 
-	randomOriginID := utils.UUIDSha1Prefix()
+	randomCGRID := utils.UUIDSha1Prefix()
 	scv.SendMessage(&sqs.SendMessageInput{
-		MessageBody: aws.String(fmt.Sprintf(`{"OriginID": "%s"}`, randomOriginID)),
+		MessageBody: aws.String(fmt.Sprintf(`{"CGRID": "%s"}`, randomCGRID)),
 		QueueUrl:    sqsRdr.queueURL,
 	})
 
@@ -119,8 +119,9 @@ func TestSQSER(t *testing.T) {
 		expected := &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     ev.cgrEvent.ID,
+			Time:   ev.cgrEvent.Time,
 			Event: map[string]interface{}{
-				"OriginID": randomOriginID,
+				"CGRID": randomCGRID,
 			},
 		}
 		if !reflect.DeepEqual(ev.cgrEvent, expected) {

@@ -27,13 +27,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 func testCreateDirs(t *testing.T) {
@@ -62,22 +61,26 @@ func TestLoaderSReload(t *testing.T) {
 			Value: config.NewRSRParsersMustCompile("1001", utils.InfieldSep),
 		},
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	conMngr := engine.NewConnManager(cfg)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	conMngr := engine.NewConnManager(cfg, nil)
 	srv := NewLoaderService(cfg, db, filterSChan,
-		server, make(chan birpc.ClientConnector, 1),
+		server, make(chan rpcclient.ClientConnector, 1),
 		conMngr, anz, srvDep)
 	srvMngr.AddServices(srv, db)
-	ctx, cancel := context.WithCancel(context.TODO())
-	srvMngr.StartServices(ctx, cancel)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Fatal(err)
+	}
 
 	if db.IsRunning() {
 		t.Errorf("Expected service to be down")
@@ -88,9 +91,9 @@ func TestLoaderSReload(t *testing.T) {
 	}
 
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "loaders", "tutinternal")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.LoaderSJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "loaders", "tutinternal"),
+		Section: config.LoaderJson,
 	}, &reply); err != nil {
 		t.Fatal(err)
 	} else if reply != utils.OK {
@@ -105,12 +108,12 @@ func TestLoaderSReload(t *testing.T) {
 		t.Fatal("Expected service to be running")
 	}
 
-	err := srv.Start(ctx, cancel)
+	err := srv.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
@@ -119,14 +122,14 @@ func TestLoaderSReload(t *testing.T) {
 		v.Enabled = false
 	}
 	time.Sleep(10 * time.Millisecond)
-	cfg.GetReloadChan() <- config.SectionToService[config.LoaderSJSON]
+	cfg.GetReloadChan(config.LoaderJson) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 	testCleanupFiles(t)
 }
@@ -144,18 +147,18 @@ func TestLoaderSReload2(t *testing.T) {
 	for _, ld := range cfg.LoaderCfg() {
 		ld.Enabled = false
 	}
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
 	db.dbchan <- new(engine.DataManager)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	srv := NewLoaderService(cfg, db, filterSChan,
-		server, make(chan birpc.ClientConnector, 1),
+		server, make(chan rpcclient.ClientConnector, 1),
 		nil, anz, srvDep)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := srv.Start(ctx, cancel)
+	err := srv.Start()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,22 +172,22 @@ func TestLoaderSReload3(t *testing.T) {
 	cfg.LoaderCfg()[0].Enabled = true
 	cfg.LoaderCfg()[0].TpInDir = "/tmp/TestLoaderSReload3"
 	cfg.LoaderCfg()[0].RunDelay = -1
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
 	db.dbchan <- new(engine.DataManager)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	srv := NewLoaderService(cfg, db, filterSChan,
-		server, make(chan birpc.ClientConnector, 1),
+		server, make(chan rpcclient.ClientConnector, 1),
 		nil, anz, srvDep)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := srv.Start(ctx, cancel)
+	err := srv.Start()
 	if err == nil || err.Error() != "no such file or directory" {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "no such file or directory", err)
 	}
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err == nil || err.Error() != "no such file or directory" {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "no such file or directory", err)
 	}

@@ -28,18 +28,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
 func init() {
 	log.SetOutput(io.Discard)
+}
+
+type testMockClients struct {
+	calls func(args interface{}, reply interface{}) error
+}
+
+func (sT *testMockClients) Call(method string, arg interface{}, rply interface{}) error {
+	return sT.calls(arg, rply)
 }
 
 func TestSessionSReload1(t *testing.T) {
@@ -48,10 +54,13 @@ func TestSessionSReload1(t *testing.T) {
 	cfg.SessionSCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
 	cfg.RPCConns()["cache1"] = &config.RPCConn{
 		Strategy: rpcclient.PoolFirst,
-		Conns: []*config.RemoteHost{{
-			Address:   "127.0.0.1:9999",
-			Transport: utils.MetaGOB,
-		}},
+		PoolSize: 0,
+		Conns: []*config.RemoteHost{
+			{
+				Address:   "127.0.0.1:9999",
+				Transport: utils.MetaGOB,
+			},
+		},
 	}
 	cfg.CacheCfg().ReplicationConns = []string{"cache1"}
 	cfg.CacheCfg().Partitions[utils.CacheClosedSessions].Limit = 0
@@ -60,81 +69,70 @@ func TestSessionSReload1(t *testing.T) {
 	defer func() {
 		engine.Cache = temporaryCache
 	}()
-	engine.Cache = engine.NewCacheS(cfg, nil, nil, nil)
+	engine.Cache = engine.NewCacheS(cfg, nil, nil)
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 
-	clientConect := make(chan birpc.ClientConnector, 1)
+	clientConect := make(chan rpcclient.ClientConnector, 1)
 	clientConect <- &testMockClients{
-		calls: func(ctx *context.Context, args, reply interface{}) error {
+		calls: func(args interface{}, reply interface{}) error {
 			rply, cancast := reply.(*[]*engine.ChrgSProcessEventReply)
 			if !cancast {
 				return fmt.Errorf("can't cast")
 			}
 			*rply = []*engine.ChrgSProcessEventReply{
 				{
-					ChargerSProfile: "raw",
-					AlteredFields: []*engine.FieldsAltered{
-						{
-							MatchedProfileID: utils.MetaDefault,
-							Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-						},
-						{
-							MatchedProfileID: utils.MetaNone,
-							Fields:           []string{"~*req.RunID"},
-						},
-					},
-					CGREvent: args.(*utils.CGREvent),
+					ChargerSProfile:    "raw",
+					AttributeSProfiles: []string{utils.MetaNone},
+					AlteredFields:      []string{"~*req.RunID"},
+					CGREvent:           args.(*utils.CGREvent),
 				},
 			}
 			return nil
 		},
 	}
-	conMng := engine.NewConnManager(cfg)
-	conMng.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers), utils.ChargerSv1, clientConect)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	db := NewDataDBService(cfg, conMng, srvDep)
-	db.dbchan = make(chan *engine.DataManager, 1)
-	db.dbchan <- nil
-	srv := NewSessionService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), conMng, anz, srvDep)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := srv.Start(ctx, cancel)
+	conMng := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): clientConect,
+	})
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	srv := NewSessionService(cfg, new(DataDBService), server, make(chan rpcclient.ClientConnector, 1), shdChan, conMng, anz, srvDep)
+	err := srv.Start()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !srv.IsRunning() {
 		t.Fatal("Expected service to be running")
 	}
-	args := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testSSv1ItProcessEventInitiateSession",
-		Event: map[string]interface{}{
-			utils.Tenant:           "cgrates.org",
-			utils.ToR:              utils.MetaVoice,
-			utils.OriginID:         "testSSv1ItProcessEvent",
-			utils.RequestType:      utils.MetaPostpaid,
-			utils.AccountField:     "1001",
-			utils.CGRDebitInterval: 10,
-			utils.Destination:      "1002",
-			utils.SetupTime:        time.Date(2018, time.January, 7, 16, 60, 0, 0, time.UTC),
-			utils.AnswerTime:       time.Date(2018, time.January, 7, 16, 60, 10, 0, time.UTC),
-			utils.Usage:            0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaRunID:       utils.MetaDefault,
-			utils.OptsSesInitiate: true,
-			utils.MetaThresholds:  true,
+	args := &sessions.V1InitSessionArgs{
+		InitSession:       true,
+		ProcessThresholds: true,
+		CGREvent: &utils.CGREvent{
+			Tenant: "cgrates.org",
+			ID:     "testSSv1ItProcessEventInitiateSession",
+			Event: map[string]interface{}{
+				utils.Tenant:       "cgrates.org",
+				utils.ToR:          utils.MetaVoice,
+				utils.OriginID:     "testSSv1ItProcessEvent",
+				utils.RequestType:  utils.MetaPostpaid,
+				utils.AccountField: "1001",
+				// utils.CGRDebitInterval: 10,
+				utils.Destination: "1002",
+				utils.SetupTime:   time.Date(2018, time.January, 7, 16, 60, 0, 0, time.UTC),
+				utils.AnswerTime:  time.Date(2018, time.January, 7, 16, 60, 10, 0, time.UTC),
+				utils.Usage:       0,
+			},
 		},
 	}
-	var rply sessions.V1InitSessionReply
-	ss := srv.(*SessionService)
-	if ss.sm == nil {
-		t.Fatal("sessions is nil")
-	}
-	ss.sm.BiRPCv1InitiateSession(context.Background(), args, &rply)
-	if err = srv.Shutdown(); err == nil || err != utils.ErrPartiallyExecuted {
+
+	rply := new(sessions.V1InitSessionReply)
+	srv.(*SessionService).sm.BiRPCv1InitiateSession(nil, args, rply)
+	err = srv.Shutdown()
+	if err == nil || err != utils.ErrPartiallyExecuted {
 		t.Fatalf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrPartiallyExecuted, err)
 	}
 }
@@ -143,35 +141,51 @@ func TestSessionSReload2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 
 	cfg.ChargerSCfg().Enabled = true
+	cfg.RalsCfg().Enabled = true
 	cfg.CdrsCfg().Enabled = true
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
-	chS := engine.NewCacheS(cfg, nil, nil, nil)
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
 	close(chS.GetPrecacheChannel(utils.CacheChargerProfiles))
 	close(chS.GetPrecacheChannel(utils.CacheChargerFilterIndexes))
+	close(chS.GetPrecacheChannel(utils.CacheDestinations))
+	close(chS.GetPrecacheChannel(utils.CacheReverseDestinations))
+	close(chS.GetPrecacheChannel(utils.CacheRatingPlans))
+	close(chS.GetPrecacheChannel(utils.CacheRatingProfiles))
+	close(chS.GetPrecacheChannel(utils.CacheActions))
+	close(chS.GetPrecacheChannel(utils.CacheActionPlans))
+	close(chS.GetPrecacheChannel(utils.CacheAccountActionPlans))
+	close(chS.GetPrecacheChannel(utils.CacheActionTriggers))
+	close(chS.GetPrecacheChannel(utils.CacheSharedGroups))
+	close(chS.GetPrecacheChannel(utils.CacheTimings))
 
-	internalChan := make(chan birpc.ClientConnector, 1)
+	internalChan := make(chan rpcclient.ClientConnector, 1)
 	internalChan <- nil
+	cacheSChan := make(chan rpcclient.ClientConnector, 1)
+	cacheSChan <- chS
 
 	server := cores.NewServer(nil)
 
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	srv := NewSessionService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep)
-	engine.NewConnManager(cfg)
+	cfg.StorDbCfg().Type = utils.Internal
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	srv := NewSessionService(cfg, db, server, make(chan rpcclient.ClientConnector, 1), shdChan, nil, anz, srvDep)
+	engine.NewConnManager(cfg, nil)
 
 	srv.(*SessionService).sm = &sessions.SessionS{}
 	if !srv.IsRunning() {
 		t.Fatalf("\nExpecting service to be running")
 	}
-	ctx, cancel := context.WithCancel(context.TODO())
-	err2 := srv.Start(ctx, cancel)
+	err2 := srv.Start()
 	if err2 != utils.ErrServiceAlreadyRunning {
 		t.Fatalf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err2)
 	}
 	cfg.SessionSCfg().Enabled = false
-	err := srv.Reload(ctx, cancel)
+	err := srv.Reload()
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
@@ -180,7 +194,7 @@ func TestSessionSReload2(t *testing.T) {
 	if srv.IsRunning() {
 		t.Fatalf("Expected service to be down")
 	}
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 
 }
@@ -189,25 +203,46 @@ func TestSessionSReload3(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 
 	cfg.ChargerSCfg().Enabled = true
+	cfg.RalsCfg().Enabled = true
 	cfg.CdrsCfg().Enabled = true
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
-	chS := engine.NewCacheS(cfg, nil, nil, nil)
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
 	close(chS.GetPrecacheChannel(utils.CacheChargerProfiles))
 	close(chS.GetPrecacheChannel(utils.CacheChargerFilterIndexes))
+	close(chS.GetPrecacheChannel(utils.CacheDestinations))
+	close(chS.GetPrecacheChannel(utils.CacheReverseDestinations))
+	close(chS.GetPrecacheChannel(utils.CacheRatingPlans))
+	close(chS.GetPrecacheChannel(utils.CacheRatingProfiles))
+	close(chS.GetPrecacheChannel(utils.CacheActions))
+	close(chS.GetPrecacheChannel(utils.CacheActionPlans))
+	close(chS.GetPrecacheChannel(utils.CacheAccountActionPlans))
+	close(chS.GetPrecacheChannel(utils.CacheActionTriggers))
+	close(chS.GetPrecacheChannel(utils.CacheSharedGroups))
+	close(chS.GetPrecacheChannel(utils.CacheTimings))
 
-	internalChan := make(chan birpc.ClientConnector, 1)
+	internalChan := make(chan rpcclient.ClientConnector, 1)
 	internalChan <- nil
+	cacheSChan := make(chan rpcclient.ClientConnector, 1)
+	cacheSChan <- chS
 
 	server := cores.NewServer(nil)
 
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
+	cfg.StorDbCfg().Type = utils.Internal
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	srv := NewSessionService(cfg, db, server, make(chan rpcclient.ClientConnector, 1), shdChan, nil, anz, srvDep)
+	engine.NewConnManager(cfg, nil)
 
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	srv := NewSessionService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep)
-	engine.NewConnManager(cfg)
-	err2 := srv.(*SessionService).start(func() {})
+	srv.(*SessionService).sm = &sessions.SessionS{}
+	if !srv.IsRunning() {
+		t.Fatalf("\nExpecting service to be running")
+	}
+	err2 := srv.(*SessionService).start()
 	if err2 != nil {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", nil, err2)
 	}

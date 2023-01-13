@@ -20,9 +20,8 @@ package config
 import (
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestStatSCfgloadFromJsonCfgCase1(t *testing.T) {
@@ -35,8 +34,6 @@ func TestStatSCfgloadFromJsonCfgCase1(t *testing.T) {
 		String_indexed_fields:    &[]string{"*req.string"},
 		Prefix_indexed_fields:    &[]string{"*req.index1", "*req.index2"},
 		Suffix_indexed_fields:    &[]string{"*req.index1", "*req.index2"},
-		Exists_indexed_fields:    &[]string{"*req.index1", "*req.index2"},
-		Notexists_indexed_fields: &[]string{"*req.index1", "*req.index2"},
 		Nested_fields:            utils.BoolPointer(true),
 	}
 	expected := &StatSCfg{
@@ -48,14 +45,9 @@ func TestStatSCfgloadFromJsonCfgCase1(t *testing.T) {
 		StringIndexedFields:    &[]string{"*req.string"},
 		PrefixIndexedFields:    &[]string{"*req.index1", "*req.index2"},
 		SuffixIndexedFields:    &[]string{"*req.index1", "*req.index2"},
-		ExistsIndexedFields:    &[]string{"*req.index1", "*req.index2"},
-		NotExistsIndexedFields: &[]string{"*req.index1", "*req.index2"},
 		NestedFields:           true,
 		Opts: &StatsOpts{
-			ProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
-			RoundingDecimals:     []*utils.DynamicIntOpt{},
-			PrometheusStatIDs:    []*utils.DynamicStringSliceOpt{},
+			ProfileIDs: []string{},
 		},
 	}
 	jsonCfg := NewDefaultCGRConfig()
@@ -64,42 +56,10 @@ func TestStatSCfgloadFromJsonCfgCase1(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, jsonCfg.statsCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsonCfg.statsCfg))
 	}
-	cfgJSON = nil
-	if err = jsonCfg.statsCfg.loadFromJSONCfg(cfgJSON); err != nil {
-		t.Error(err)
-	}
-}
+	jsonCfg.statsCfg.Opts.loadFromJSONCfg(nil)
+	if reflect.DeepEqual(nil, jsonCfg.statsCfg.Opts) {
 
-func TestStatSCfgloadFromJsonCfgOptsNil(t *testing.T) {
-	statsOpt := &StatsOpts{
-		ProfileIDs: []*utils.DynamicStringSliceOpt{
-			{
-				Value: []string{},
-			},
-		},
-		ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-			{
-				Value: false,
-			},
-		},
-	}
-
-	exp := &StatsOpts{
-		ProfileIDs: []*utils.DynamicStringSliceOpt{
-			{
-				Value: []string{},
-			},
-		},
-		ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-			{
-				Value: false,
-			},
-		},
-	}
-
-	statsOpt.loadFromJSONCfg(nil)
-	if !reflect.DeepEqual(statsOpt, exp) {
-		t.Errorf("Expected %v \n but received \n %v", exp, statsOpt)
+		t.Error("expected nil")
 	}
 }
 
@@ -126,19 +86,15 @@ func TestStatSCfgAsMapInterface(t *testing.T) {
 		utils.IndexedSelectsCfg:         true,
 		utils.PrefixIndexedFieldsCfg:    []string{},
 		utils.SuffixIndexedFieldsCfg:    []string{},
-		utils.ExistsIndexedFieldsCfg:    []string{},
-		utils.NotExistsIndexedFieldsCfg: []string{},
 		utils.NestedFieldsCfg:           false,
 		utils.OptsCfg: map[string]interface{}{
-			utils.MetaProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			utils.MetaProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
-			utils.OptsRoundingDecimals:     []*utils.DynamicIntOpt{},
-			utils.OptsPrometheusStatIDs:    []*utils.DynamicStringSliceOpt{},
+			utils.MetaProfileIDs:              []string{},
+			utils.MetaProfileIgnoreFiltersCfg: false,
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.statsCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.statsCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, received %+v", eMap, rcv)
 	}
 }
@@ -154,8 +110,6 @@ func TestStatSCfgAsMapInterface1(t *testing.T) {
             "string_indexed_fields": ["*req.string"],
 			"prefix_indexed_fields": ["*req.prefix_indexed_fields1","*req.prefix_indexed_fields2"],
             "suffix_indexed_fields":["*req.suffix_indexed_fields"],
-			"exists_indexed_fields":["*req.exists_indexed_fields"],
-			"notexists_indexed_fields":["*req.notexists_indexed_fields"],
 			"nested_fields": true,	
 		},	
 }`
@@ -168,20 +122,16 @@ func TestStatSCfgAsMapInterface1(t *testing.T) {
 		utils.StringIndexedFieldsCfg:    []string{"*req.string"},
 		utils.PrefixIndexedFieldsCfg:    []string{"*req.prefix_indexed_fields1", "*req.prefix_indexed_fields2"},
 		utils.SuffixIndexedFieldsCfg:    []string{"*req.suffix_indexed_fields"},
-		utils.ExistsIndexedFieldsCfg:    []string{"*req.exists_indexed_fields"},
-		utils.NotExistsIndexedFieldsCfg: []string{"*req.notexists_indexed_fields"},
 		utils.NestedFieldsCfg:           true,
 		utils.OptsCfg: map[string]interface{}{
-			utils.MetaProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			utils.MetaProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
-			utils.OptsRoundingDecimals:     []*utils.DynamicIntOpt{},
-			utils.OptsPrometheusStatIDs:    []*utils.DynamicStringSliceOpt{},
+			utils.MetaProfileIDs:              []string{},
+			utils.MetaProfileIgnoreFiltersCfg: false,
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.statsCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
-		t.Errorf("Expected %+v \n, received %+v", eMap, rcv)
+	} else if rcv := cgrCfg.statsCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
+		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
 func TestStatSCfgClone(t *testing.T) {
@@ -195,7 +145,9 @@ func TestStatSCfgClone(t *testing.T) {
 		PrefixIndexedFields:    &[]string{"*req.index1", "*req.index2"},
 		SuffixIndexedFields:    &[]string{"*req.index1", "*req.index2"},
 		NestedFields:           true,
-		Opts:                   &StatsOpts{},
+		Opts: &StatsOpts{
+			ProfileIDs: []string{},
+		},
 	}
 	rcv := ban.Clone()
 	if !reflect.DeepEqual(ban, rcv) {
@@ -212,174 +164,5 @@ func TestStatSCfgClone(t *testing.T) {
 	}
 	if (*rcv.SuffixIndexedFields)[0] = ""; (*ban.SuffixIndexedFields)[0] != "*req.index1" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffStatServJsonCfg(t *testing.T) {
-	var d *StatServJsonCfg
-
-	v1 := &StatSCfg{
-		Enabled:                false,
-		IndexedSelects:         false,
-		StoreInterval:          1 * time.Second,
-		StoreUncompressedLimit: 2,
-		ThresholdSConns:        []string{"*localhost"},
-		StringIndexedFields:    &[]string{"*req.index1"},
-		PrefixIndexedFields:    &[]string{"*req.index2"},
-		SuffixIndexedFields:    &[]string{"*req.index3"},
-		NestedFields:           false,
-		Opts: &StatsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.org",
-					Value:  []string{"statsid1"},
-				},
-			},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-				{
-					Tenant: "cgrates.org",
-					Value:  false,
-				},
-			},
-			RoundingDecimals: []*utils.DynamicIntOpt{
-				{
-					Tenant: "cgrates.org",
-					Value:  1,
-				},
-			},
-			PrometheusStatIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.org",
-					Value:  []string{"statsid1"},
-				},
-			},
-		},
-	}
-
-	v2 := &StatSCfg{
-		Enabled:                true,
-		IndexedSelects:         true,
-		StoreInterval:          2 * time.Second,
-		StoreUncompressedLimit: 3,
-		ThresholdSConns:        []string{"*birpc"},
-		StringIndexedFields:    &[]string{"*req.index11"},
-		PrefixIndexedFields:    &[]string{"*req.index22"},
-		SuffixIndexedFields:    &[]string{"*req.index33"},
-		NestedFields:           true,
-		Opts: &StatsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  []string{"statsid2"},
-				},
-			},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  true,
-				},
-			},
-			RoundingDecimals: []*utils.DynamicIntOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  2,
-				},
-			},
-			PrometheusStatIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  []string{"statsid2"},
-				},
-			},
-		},
-	}
-
-	expected := &StatServJsonCfg{
-		Enabled:                  utils.BoolPointer(true),
-		Indexed_selects:          utils.BoolPointer(true),
-		Store_interval:           utils.StringPointer("2s"),
-		Store_uncompressed_limit: utils.IntPointer(3),
-		Thresholds_conns:         &[]string{"*birpc"},
-		String_indexed_fields:    &[]string{"*req.index11"},
-		Prefix_indexed_fields:    &[]string{"*req.index22"},
-		Suffix_indexed_fields:    &[]string{"*req.index33"},
-		Nested_fields:            utils.BoolPointer(true),
-		Opts: &StatsOptsJson{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  []string{"statsid2"},
-				},
-			},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  true,
-				},
-			},
-			RoundingDecimals: []*utils.DynamicIntOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  2,
-				},
-			},
-			PrometheusStatIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  []string{"statsid2"},
-				},
-			},
-		},
-	}
-
-	rcv := diffStatServJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &StatServJsonCfg{
-		Opts: &StatsOptsJson{},
-	}
-	rcv = diffStatServJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestStatSCloneSection(t *testing.T) {
-	statsCfg := &StatSCfg{
-		Enabled:                false,
-		IndexedSelects:         false,
-		StoreInterval:          1 * time.Second,
-		StoreUncompressedLimit: 2,
-		ThresholdSConns:        []string{"*localhost"},
-		StringIndexedFields:    &[]string{"*req.index1"},
-		PrefixIndexedFields:    &[]string{"*req.index2"},
-		SuffixIndexedFields:    &[]string{"*req.index3"},
-		NestedFields:           false,
-		Opts: &StatsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{},
-		},
-	}
-
-	exp := &StatSCfg{
-		Enabled:                false,
-		IndexedSelects:         false,
-		StoreInterval:          1 * time.Second,
-		StoreUncompressedLimit: 2,
-		ThresholdSConns:        []string{"*localhost"},
-		StringIndexedFields:    &[]string{"*req.index1"},
-		PrefixIndexedFields:    &[]string{"*req.index2"},
-		SuffixIndexedFields:    &[]string{"*req.index3"},
-		NestedFields:           false,
-		Opts: &StatsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{},
-		},
-	}
-
-	rcv := statsCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

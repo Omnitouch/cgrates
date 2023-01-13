@@ -18,12 +18,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import "github.com/Omnitouch/cgrates/utils"
+import "github.com/cgrates/cgrates/utils"
 
 func init() {
 	c := &CmdRemoveStatQueue{
 		name:      "stats_profile_remove",
-		rpcMethod: utils.AdminSv1RemoveStatQueueProfile,
+		rpcMethod: utils.APIerSv1RemoveStatQueueProfile,
 		rpcParams: &utils.TenantIDWithAPIOpts{},
 	}
 	commands[c.Name()] = c

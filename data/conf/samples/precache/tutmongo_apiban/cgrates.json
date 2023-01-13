@@ -22,11 +22,24 @@
 },
 
 
-
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
 
 
 "caches":{
 	"partitions": {
+		"*destinations": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*reverse_destinations": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*rating_plans": {"limit": 10000, "ttl":"0s","precache": true},
+		"*rating_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*actions": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*action_plans": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*account_action_plans": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*action_triggers": {"limit": 10000, "ttl":"0s", "precache": true},
+		"*shared_groups": {"limit": 10000, "ttl":"0s", "precache": true},
 		"*resource_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
 		"*resources": {"limit": 10000, "ttl":"0s", "precache": true},
 		"*statqueues": {"limit": 10000, "ttl":"0s", "precache": true},
@@ -50,17 +63,30 @@
 },
 
 
+"rals": {
+	"enabled": true,
+},
+
+
+"schedulers": {
+	"enabled": true,
+},
+
+
 "migrator": {
 	"out_datadb_type": "mongo",
 	"out_datadb_port": "27017",
 	"out_datadb_name": "10",
-
+	"out_stordb_type": "mongo",
+	"out_stordb_port": "27017",
+	"out_stordb_name": "cgrates",
 	"users_filters":["Account"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

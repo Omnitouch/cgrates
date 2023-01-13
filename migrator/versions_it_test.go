@@ -26,10 +26,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -48,7 +47,7 @@ var sTestsVrsIT = []func(t *testing.T){
 func TestVersionITRedis(t *testing.T) {
 	var err error
 	vrsPath = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	vrsCfg, err = config.NewCGRConfigFromPath(context.Background(), vrsPath)
+	vrsCfg, err = config.NewCGRConfigFromPath(vrsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +61,11 @@ func TestVersionITRedis(t *testing.T) {
 func TestVersionITMongo(t *testing.T) {
 	var err error
 	vrsPath = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	vrsCfg, err = config.NewCGRConfigFromPath(context.Background(), vrsPath)
+	vrsCfg, err = config.NewCGRConfigFromPath(vrsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	vrsCfg.StorDbCfg().Name = vrsCfg.DataDbCfg().Name
 	vrsSameOutDB = true
 	for _, stest := range sTestsVrsIT {
 		t.Run("TestVrsionITMigrateMongo", stest)
@@ -78,12 +78,22 @@ func testVrsITConnect(t *testing.T) {
 		vrsCfg.DataDbCfg().Host, vrsCfg.DataDbCfg().Port,
 		vrsCfg.DataDbCfg().Name, vrsCfg.DataDbCfg().User,
 		vrsCfg.DataDbCfg().Password, vrsCfg.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), vrsCfg.DataDbCfg().Opts, vrsCfg.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), vrsCfg.DataDbCfg().Opts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vrsMigrator, err = NewMigrator(nil, dataDBOut,
-		false, false)
+
+	storDBOut, err := NewMigratorStorDB(vrsCfg.StorDbCfg().Type,
+		vrsCfg.StorDbCfg().Host, vrsCfg.StorDbCfg().Port,
+		vrsCfg.StorDbCfg().Name, vrsCfg.StorDbCfg().User,
+		vrsCfg.StorDbCfg().Password, vrsCfg.GeneralCfg().DBDataEncoding,
+		vrsCfg.StorDbCfg().StringIndexedFields, vrsCfg.StorDbCfg().PrefixIndexedFields,
+		vrsCfg.StorDbCfg().Opts, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	vrsMigrator, err = NewMigrator(nil, dataDBOut, nil, storDBOut,
+		false, false, false, vrsSameOutDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +101,12 @@ func testVrsITConnect(t *testing.T) {
 
 func testVrsITFlush(t *testing.T) {
 	vrsMigrator.dmOut.DataManager().DataDB().Flush("")
+	vrsMigrator.storDBOut.StorDB().Flush((path.Join(vrsCfg.DataFolderPath, "storage",
+		vrsCfg.StorDbCfg().Type)))
 	if vrs, err := vrsMigrator.dmOut.DataManager().DataDB().GetVersions(""); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		t.Errorf("Expected err=%s received err=%v and rply=%s", utils.ErrNotFound.Error(), err, utils.ToJSON(vrs))
+	}
+	if vrs, err := vrsMigrator.storDBOut.StorDB().GetVersions(""); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Errorf("Expected err=%s received err=%v and rply=%s", utils.ErrNotFound.Error(), err, utils.ToJSON(vrs))
 	}
 }
@@ -115,10 +130,21 @@ func testVrsITMigrate(t *testing.T) {
 		} else if !reflect.DeepEqual(expVrs, vrs) {
 			t.Errorf("Expected %s received %s", utils.ToJSON(expVrs), utils.ToJSON(vrs))
 		}
+
+		expVrs = engine.CurrentStorDBVersions()
+		if vrs, err := vrsMigrator.storDBOut.StorDB().GetVersions(""); err != nil {
+			t.Error(err)
+		} else if !reflect.DeepEqual(expVrs, vrs) {
+			t.Errorf("Expected %s received %s", utils.ToJSON(expVrs), utils.ToJSON(vrs))
+		}
 	}
 
-	currentVersion := engine.Versions{utils.Attributes: 0}
+	currentVersion := engine.Versions{Alias: 0}
 	err := vrsMigrator.dmOut.DataManager().DataDB().SetVersions(currentVersion, false)
+	if err != nil {
+		t.Error("Error when setting version ", err.Error())
+	}
+	err = vrsMigrator.storDBOut.StorDB().SetVersions(currentVersion, false)
 	if err != nil {
 		t.Error("Error when setting version ", err.Error())
 	}
@@ -139,5 +165,11 @@ func testVrsITMigrate(t *testing.T) {
 			t.Errorf("Expected %s received %s", utils.ToJSON(expVrs), utils.ToJSON(vrs))
 		}
 
+		expVrs = engine.CurrentStorDBVersions()
+		if vrs, err := vrsMigrator.storDBOut.StorDB().GetVersions(""); err != nil {
+			t.Error(err)
+		} else if !reflect.DeepEqual(expVrs, vrs) {
+			t.Errorf("Expected %s received %s", utils.ToJSON(expVrs), utils.ToJSON(vrs))
+		}
 	}
 }

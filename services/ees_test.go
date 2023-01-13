@@ -21,39 +21,41 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/ees"
+	"github.com/cgrates/cgrates/ees"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestEventExporterSCoverage for cover testing
 func TestEventExporterSCoverage(t *testing.T) {
 
 	cfg := config.NewDefaultCGRConfig()
+	chS := engine.NewCacheS(cfg, nil, nil)
 	cfg.AttributeSCfg().Enabled = true
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	srv := NewEventExporterService(cfg, filterSChan, engine.NewConnManager(cfg), server, make(chan birpc.ClientConnector, 1), anz, srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	srv := NewEventExporterService(cfg, filterSChan, engine.NewConnManager(cfg, nil), server, make(chan rpcclient.ClientConnector, 1), anz, srvDep)
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 	srv2 := &EventExporterService{
 		cfg:         cfg,
 		filterSChan: filterSChan,
-		connMgr:     engine.NewConnManager(cfg),
+		connMgr:     engine.NewConnManager(cfg, nil),
 		server:      server,
-		intConnChan: make(chan birpc.ClientConnector, 1),
+		intConnChan: make(chan rpcclient.ClientConnector, 1),
 		anz:         anz,
 		srvDep:      srvDep,
 		rldChan:     make(chan struct{}, 1),
-		eeS:         &ees.EeS{},
+		eeS:         &ees.EventExporterS{},
 		stopChan:    make(chan struct{}, 1),
 	}
 	if !srv2.IsRunning() {
@@ -67,7 +69,7 @@ func TestEventExporterSCoverage(t *testing.T) {
 	if shouldRun != false {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", false, shouldRun)
 	}
-	srv2.intConnChan <- &testMockClients{}
+	srv2.intConnChan <- chS
 	shutErr := srv2.Shutdown()
 	if shutErr != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", shutErr)

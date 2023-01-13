@@ -33,6 +33,16 @@
     "remote_conns": ["rmtConn"],
     "items":{
       "*accounts":{"remote":true},
+      "*reverse_destinations": {"remote":true},
+      "*destinations": {"remote":true},
+      "*rating_plans": {"remote":true},
+      "*rating_profiles":{"remote":true},
+      "*actions":{"remote":true},
+      "*action_plans": {"remote":true},
+      "*account_action_plans":{"remote":true},
+      "*action_triggers":{"remote":true},
+      "*shared_groups":{"remote":true},
+      "*timings": {"remote":true},
       "*filters": {"remote":true},
       "*route_profiles":{"remote":true},
       "*attribute_profiles":{"remote":true},
@@ -40,12 +50,29 @@
       "*dispatcher_profiles":{"remote":true},
       "*dispatcher_hosts":{"remote":true},
       "*load_ids":{"remote":true},
-      "*indexes":{"remote":true}
+      "*resource_filter_indexes" : {"remote":true},
+		  "*stat_filter_indexes" : {"remote":true},
+		  "*threshold_filter_indexes" : {"remote":true},
+		  "*route_filter_indexes" : {"remote":true},
+		  "*attribute_filter_indexes" : {"remote":true},
+		  "*charger_filter_indexes" : {"remote":true},
+		  "*dispatcher_filter_indexes" : {"remote":true},
+		  "*reverse_filter_indexes" : {"remote":true},
     }
   },
 
+  "stor_db": {
+    "db_password": "CGRateS.org",
+  },
 
-  "rates": {
+
+  "rals": {
+    "enabled": true,
+    "max_increments":3000000,
+  },
+
+
+  "schedulers": {
     "enabled": true,
   },
 
@@ -56,12 +83,13 @@
 
   "sessions": {
     "enabled": true,
-    "rates_conns": ["*internal"],
+    "rals_conns": ["*internal"],
     "chargers_conns": ["*internal"],
   },
 
-  "admins": {
+  "apiers": {
     "enabled": true,
     "caches_conns":["conn1"],
+    "scheduler_conns": ["conn1"],
   }
 }

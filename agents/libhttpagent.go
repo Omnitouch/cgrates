@@ -28,7 +28,7 @@ import (
 	"strings"
 
 	"github.com/antchfx/xmlquery"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // newHADataProvider constructs a DataProvider

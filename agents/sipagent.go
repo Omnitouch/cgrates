@@ -25,11 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/sipingo"
 )
 
@@ -377,7 +376,7 @@ func (sa *SIPAgent) handleMessage(sipMessage sipingo.Message, remoteHost string)
 // processRequest represents one processor processing the request
 func (sa *SIPAgent) processRequest(reqProcessor *config.RequestProcessor,
 	agReq *AgentRequest) (processed bool, err error) {
-	if pass, err := sa.filterS.Pass(context.TODO(), agReq.Tenant,
+	if pass, err := sa.filterS.Pass(agReq.Tenant,
 		reqProcessor.Filters, agReq); err != nil || !pass {
 		return pass, err
 	}
@@ -396,7 +395,16 @@ func (sa *SIPAgent) processRequest(reqProcessor *config.RequestProcessor,
 			break
 		}
 	}
-
+	var cgrArgs utils.Paginator
+	if reqType == utils.MetaAuthorize ||
+		reqType == utils.MetaMessage ||
+		reqType == utils.MetaEvent {
+		if cgrArgs, err = utils.GetRoutePaginatorFromOpts(cgrEv.APIOpts); err != nil {
+			utils.Logger.Warning(fmt.Sprintf("<%s> args extraction failed because <%s>",
+				utils.SIPAgent, err.Error()))
+			err = nil // reset the error and continue the processing
+		}
+	}
 	if reqProcessor.Flags.Has(utils.MetaLog) {
 		utils.Logger.Info(
 			fmt.Sprintf("<%s> LOG, processorID: %s, SIP message: %s",
@@ -411,21 +419,41 @@ func (sa *SIPAgent) processRequest(reqProcessor *config.RequestProcessor,
 			fmt.Sprintf("<%s> DRY_RUN, processorID: %s, CGREvent: %s",
 				utils.SIPAgent, reqProcessor.ID, utils.ToJSON(cgrEv)))
 	case utils.MetaAuthorize:
+		authArgs := sessions.NewV1AuthorizeArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaRoutes),
+			reqProcessor.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			reqProcessor.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs, reqProcessor.Flags.Has(utils.MetaFD),
+			reqProcessor.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1AuthorizeReply)
-		err = sa.connMgr.Call(context.TODO(), sa.cfg.SIPAgentCfg().SessionSConns, utils.SessionSv1AuthorizeEvent,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.MetaAccounts))
+		err = sa.connMgr.Call(sa.cfg.SIPAgentCfg().SessionSConns, nil, utils.SessionSv1AuthorizeEvent,
+			authArgs, rply)
+		rply.SetMaxUsageNeeded(authArgs.GetMaxUsage)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaEvent:
+		evArgs := &sessions.V1ProcessEventArgs{
+			Flags:     reqProcessor.Flags.SliceFlags(),
+			CGREvent:  cgrEv,
+			Paginator: cgrArgs,
+		}
+
 		rply := new(sessions.V1ProcessEventReply)
-		err = sa.connMgr.Call(context.TODO(), sa.cfg.SIPAgentCfg().SessionSConns, utils.SessionSv1ProcessEvent,
-			cgrEv, rply)
-		// if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
-		// cgrEv.Event[utils.Usage] = 0 // avoid further debits
-		// } else
-		// if needsMaxUsage(reqProcessor.Flags[utils.MetaRALs]) {
-		// cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
-		// }
+		err = sa.connMgr.Call(sa.cfg.SIPAgentCfg().SessionSConns, nil, utils.SessionSv1ProcessEvent,
+			evArgs, rply)
+		if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
+			cgrEv.Event[utils.Usage] = 0 // avoid further debits
+		} else if needsMaxUsage(reqProcessor.Flags[utils.MetaRALs]) {
+			cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
+		}
 		agReq.setCGRReply(rply, err)
 	}
 	if err := agReq.SetFields(reqProcessor.ReplyFields); err != nil {

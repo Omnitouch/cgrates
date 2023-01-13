@@ -28,7 +28,11 @@
 },
 
 
-
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
 
 "chargers": {
 	"enabled": true,
@@ -40,7 +44,7 @@
 	"chargers_conns": ["*internal"],
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
 },
 

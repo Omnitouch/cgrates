@@ -23,13 +23,13 @@ package engine
 
 import (
 	"fmt"
+	"path"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -53,11 +53,25 @@ func TestDMitinitDB(t *testing.T) {
 		dataDB, err = NewRedisStorage(
 			fmt.Sprintf("%s:%s", cfg.DataDbCfg().Host, cfg.DataDbCfg().Port),
 			4, cfg.DataDbCfg().User, cfg.DataDbCfg().Password, cfg.GeneralCfg().DBDataEncoding,
-			cfg.DataDbCfg().Opts.RedisMaxConns, cfg.DataDbCfg().Opts.RedisConnectAttempts, "", false, 0, 0, 0, 0, 0, false, utils.EmptyString, utils.EmptyString, utils.EmptyString)
+			10, 20, "", false, 0, 0, 0, 0, 0, false, utils.EmptyString, utils.EmptyString, utils.EmptyString)
 		if err != nil {
 			t.Fatal("Could not connect to Redis", err.Error())
 		}
-	case utils.MetaPostgres, utils.MetaMongo:
+	case utils.MetaMongo:
+		cdrsMongoCfgPath := path.Join(*dataDir, "conf", "samples", "tutmongo")
+		mgoITCfg, err := config.NewCGRConfigFromPath(cdrsMongoCfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dataDB, err = NewMongoStorage(mgoITCfg.StorDbCfg().Host,
+			mgoITCfg.StorDbCfg().Port, mgoITCfg.StorDbCfg().Name,
+			mgoITCfg.StorDbCfg().User, mgoITCfg.StorDbCfg().Password,
+			mgoITCfg.GeneralCfg().DBDataEncoding,
+			utils.StorDB, nil, 10*time.Second)
+		if err != nil {
+			t.Fatal("Could not connect to Mongo", err.Error())
+		}
+	case utils.MetaPostgres:
 		t.SkipNow()
 	default:
 		t.Fatal("Unknown Database type")
@@ -88,31 +102,29 @@ func testDMitCRUDStatQueue(t *testing.T) {
 		},
 		SQMetrics: map[string]StatMetric{
 			utils.MetaASR: &StatASR{
-				Metric: &Metric{
-					Value: utils.NewDecimal(2, 0),
-					Count: 3,
-					Events: map[string]*DecimalWithCompress{
-						"cgrates.org:ev1": {Stat: utils.NewDecimal(1, 0)},
-						"cgrates.org:ev2": {Stat: utils.NewDecimal(1, 0)},
-						"cgrates.org:ev3": {Stat: utils.NewDecimal(0, 0)},
-					},
+				Answered: 2,
+				Count:    3,
+				Events: map[string]*StatWithCompress{
+					"cgrates.org:ev1": {Stat: 1},
+					"cgrates.org:ev2": {Stat: 1},
+					"cgrates.org:ev3": {Stat: 0},
 				},
 			},
 		},
 	}
-	if _, rcvErr := dm2.GetStatQueue(context.TODO(), sq.Tenant, sq.ID, true, false, utils.EmptyString); rcvErr != utils.ErrNotFound {
+	if _, rcvErr := dm2.GetStatQueue(sq.Tenant, sq.ID, true, false, utils.EmptyString); rcvErr != utils.ErrNotFound {
 		t.Error(rcvErr)
 	}
 	if _, ok := Cache.Get(utils.CacheStatQueues, sq.TenantID()); ok != false {
 		t.Error("should not be in cache")
 	}
-	if err := dm2.SetStatQueue(context.TODO(), sq); err != nil {
+	if err := dm2.SetStatQueue(sq); err != nil {
 		t.Error(err)
 	}
 	if _, ok := Cache.Get(utils.CacheStatQueues, sq.TenantID()); ok != false {
 		t.Error("should not be in cache")
 	}
-	if rcv, err := dm2.GetStatQueue(context.TODO(), sq.Tenant, sq.ID, true, true, utils.EmptyString); err != nil {
+	if rcv, err := dm2.GetStatQueue(sq.Tenant, sq.ID, true, true, utils.EmptyString); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(sq, rcv) {
 		t.Errorf("expecting: %v, received: %v", sq, rcv)
@@ -120,14 +132,14 @@ func testDMitCRUDStatQueue(t *testing.T) {
 	if _, ok := Cache.Get(utils.CacheStatQueues, sq.TenantID()); ok != true {
 		t.Error("should be in cache")
 	}
-	if err := dm2.RemoveStatQueue(context.TODO(), sq.Tenant, sq.ID); err != nil {
+	if err := dm2.RemoveStatQueue(sq.Tenant, sq.ID); err != nil {
 		t.Error(err)
 	}
 	Cache.Clear(nil)
 	if _, ok := Cache.Get(utils.CacheStatQueues, sq.TenantID()); ok != false {
 		t.Error("should not be in cache")
 	}
-	if _, rcvErr := dm2.GetStatQueue(context.TODO(), sq.Tenant, sq.ID, true, false, utils.EmptyString); rcvErr != utils.ErrNotFound {
+	if _, rcvErr := dm2.GetStatQueue(sq.Tenant, sq.ID, true, false, utils.EmptyString); rcvErr != utils.ErrNotFound {
 		t.Error(rcvErr)
 	}
 }

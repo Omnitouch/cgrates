@@ -13,8 +13,16 @@
 	"db_name": "10", 						
 },
 
-"rates": {
-	"enabled": true,
+"stor_db": {								// database used to store offline tariff plans and CDRs
+	"db_password": "CGRateS.org",			// password to use when connecting to stordb
+},
+
+"rals": {
+	"enabled": true,					// enable Rater service: <true|false>
+},
+
+"schedulers": {
+	"enabled": true,					// start Scheduler service: <true|false>
 },
 
 "cdrs": {
@@ -33,14 +41,15 @@
 "sessions": {
 	"enabled": true,
 	"debit_interval": "1ms",					// interval to perform debits on.
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

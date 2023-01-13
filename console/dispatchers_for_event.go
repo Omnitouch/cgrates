@@ -19,13 +19,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
 	c := &CmdDispatcherProfile{
-		name:      "dispatchers_for_event",
+		name:      "dispatches_for_event",
 		rpcMethod: utils.DispatcherSv1GetProfilesForEvent,
 	}
 	commands[c.Name()] = c

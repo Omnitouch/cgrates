@@ -20,10 +20,11 @@ package migrator
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -32,32 +33,56 @@ var (
 
 func NewMigratorDataDB(db_type, host, port, name, user, pass,
 	marshaler string, cacheCfg *config.CacheCfg,
-	opts *config.DataDBOpts, itmsCfg map[string]*config.ItemOpts) (db MigratorDataDB, err error) {
-	dbCon, err := engine.NewDataDBConn(db_type, host,
-		port, name, user, pass, marshaler, opts, itmsCfg)
-	if err != nil {
-		return nil, err
+	opts *config.DataDBOpts, itmsCfg map[string]*config.ItemOpt) (db MigratorDataDB, err error) {
+	var dbCon engine.DataDB
+	if dbCon, err = engine.NewDataDBConn(db_type, host,
+		port, name, user, pass, marshaler, opts, nil); err != nil {
+		return
 	}
 	dm := engine.NewDataManager(dbCon, cacheCfg, nil)
-	var d MigratorDataDB
 	switch db_type {
 	case utils.Redis:
-		d = newRedisMigrator(dm)
+		db = newRedisMigrator(dm)
 	case utils.Mongo:
-		d = newMongoMigrator(dm)
-		db = d.(MigratorDataDB)
+		db = newMongoMigrator(dm)
 	case utils.Internal:
-		d = newInternalMigrator(dm)
-		db = d.(MigratorDataDB)
+		db = newInternalMigrator(dm)
 	default:
 		err = fmt.Errorf("unknown db '%s' valid options are '%s' or '%s or '%s'",
 			db_type, utils.Redis, utils.Mongo, utils.Internal)
 	}
-	return d, nil
+	return
 }
 
+func NewMigratorStorDB(db_type, host, port, name, user, pass, marshaler string,
+	stringIndexedFields, prefixIndexedFields []string,
+	opts *config.StorDBOpts, itmsCfg map[string]*config.ItemOpt) (db MigratorStorDB, err error) {
+	var storDb engine.StorDB
+	if storDb, err = engine.NewStorDBConn(db_type, host, port, name, user,
+		pass, marshaler, stringIndexedFields, prefixIndexedFields, opts, itmsCfg); err != nil {
+		return
+	}
+	switch db_type {
+	case utils.Mongo:
+		db = newMongoStorDBMigrator(storDb)
+	case utils.MySQL:
+		db = newMigratorSQL(storDb)
+	case utils.Postgres:
+		db = newMigratorSQL(storDb)
+	case utils.Internal:
+		db = newInternalStorDBMigrator(storDb)
+	default:
+		err = fmt.Errorf("Unknown db '%s' valid options are [%s, %s, %s, %s]",
+			db_type, utils.MySQL, utils.Mongo, utils.Postgres, utils.Internal)
+	}
+	return
+}
 func (m *Migrator) getVersions(str string) (vrs engine.Versions, err error) {
-	vrs, err = m.dmIN.DataManager().DataDB().GetVersions(utils.EmptyString)
+	if str == utils.CDRs || str == utils.SessionSCosts || strings.HasPrefix(str, "Tp") {
+		vrs, err = m.storDBIn.StorDB().GetVersions(utils.EmptyString)
+	} else {
+		vrs, err = m.dmIN.DataManager().DataDB().GetVersions(utils.EmptyString)
+	}
 	if err != nil {
 		return nil, utils.NewCGRError(utils.Migrator,
 			utils.ServerErrorCaps,
@@ -73,13 +98,18 @@ func (m *Migrator) getVersions(str string) (vrs engine.Versions, err error) {
 }
 
 func (m *Migrator) setVersions(str string) (err error) {
-	vrs := engine.Versions{str: engine.CurrentDataDBVersions()[str]}
-	err = m.dmOut.DataManager().DataDB().SetVersions(vrs, false)
+	if str == utils.CDRs || str == utils.SessionSCosts || strings.HasPrefix(str, "Tp") {
+		vrs := engine.Versions{str: engine.CurrentStorDBVersions()[str]}
+		err = m.storDBOut.StorDB().SetVersions(vrs, false)
+	} else {
+		vrs := engine.Versions{str: engine.CurrentDataDBVersions()[str]}
+		err = m.dmOut.DataManager().DataDB().SetVersions(vrs, false)
+	}
 	if err != nil {
 		err = utils.NewCGRError(utils.Migrator,
 			utils.ServerErrorCaps,
 			err.Error(),
-			fmt.Sprintf("error: <%s> when updating %s version into DataDB", err.Error(), str))
+			fmt.Sprintf("error: <%s> when updating %s version into StorDB", err.Error(), str))
 	}
 	return
 }

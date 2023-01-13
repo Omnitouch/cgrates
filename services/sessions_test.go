@@ -22,37 +22,36 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/cgrates/cgrates/sessions"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
-
-type testMockClients struct {
-	calls func(_ *context.Context, _, _ interface{}) error
-}
-
-func (sT *testMockClients) Call(ctx *context.Context, method string, arg, rply interface{}) error {
-	return sT.calls(ctx, arg, rply)
-}
 
 // TestSessionSCoverage for cover testing
 func TestSessionSCoverage(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.ChargerSCfg().Enabled = true
+	cfg.RalsCfg().Enabled = true
 	cfg.CdrsCfg().Enabled = true
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
+	internalChan := make(chan rpcclient.ClientConnector, 1)
+	internalChan <- nil
+	cacheSChan := make(chan rpcclient.ClientConnector, 1)
+	cacheSChan <- chS
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	srv := NewSessionService(cfg, db, nil, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep)
-	engine.NewConnManager(cfg)
+	cfg.StorDbCfg().Type = utils.Internal
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	srv := NewSessionService(cfg, db, server, make(chan rpcclient.ClientConnector, 1), shdChan, nil, anz, srvDep)
+	engine.NewConnManager(cfg, nil)
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
@@ -60,7 +59,8 @@ func TestSessionSCoverage(t *testing.T) {
 		cfg:      cfg,
 		dm:       db,
 		server:   server,
-		connChan: make(chan birpc.ClientConnector, 1),
+		shdChan:  shdChan,
+		connChan: make(chan rpcclient.ClientConnector, 1),
 		connMgr:  nil,
 		anz:      anz,
 		srvDep:   srvDep,

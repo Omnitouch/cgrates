@@ -28,13 +28,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 func TestAnalyzerSReload(t *testing.T) {
@@ -42,29 +41,33 @@ func TestAnalyzerSReload(t *testing.T) {
 	if err := os.MkdirAll("/tmp/analyzers", 0700); err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 
+	shdChan := utils.NewSyncedChan()
 	shdWg := new(sync.WaitGroup)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anzRPC := make(chan birpc.ClientConnector, 1)
-	anz := NewAnalyzerService(cfg, server, filterSChan, anzRPC, srvDep)
-	engine.NewConnManager(cfg)
+	anzRPC := make(chan rpcclient.ClientConnector, 1)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, anzRPC, srvDep)
+	engine.NewConnManager(cfg, nil)
 	srvMngr.AddServices(anz,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	ctx, cancel := context.WithCancel(context.TODO())
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Error(err)
+	}
 	if anz.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "analyzers")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.AnalyzerSJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "analyzers"),
+		Section: config.AnalyzerCfgJson,
 	}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -79,23 +82,23 @@ func TestAnalyzerSReload(t *testing.T) {
 	if !anz.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
-	err := anz.Start(ctx, cancel)
+	err := anz.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
-	err = anz.Reload(ctx, cancel)
+	err = anz.Reload()
 	if err != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
 	cfg.AnalyzerSCfg().Enabled = false
-	cfg.GetReloadChan() <- config.SectionToService[config.AnalyzerSJSON]
+	cfg.GetReloadChan(config.AnalyzerCfgJson) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 
 	if anz.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 
-	cancel()
+	shdChan.CloseOnce()
 	time.Sleep(10 * time.Millisecond)
 	if err := os.RemoveAll("/tmp/analyzers"); err != nil {
 		t.Fatal(err)
@@ -107,16 +110,19 @@ func TestAnalyzerSReload2(t *testing.T) {
 	if err := os.MkdirAll("/tmp/analyzers", 0700); err != nil {
 		t.Fatal(err)
 	}
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anzRPC := make(chan birpc.ClientConnector, 1)
-	anz := NewAnalyzerService(cfg, server, filterSChan, anzRPC, srvDep)
-	// anz.stopChan = make(chan struct{})
-	// anz.start()
-	// close(anz.stopChan)
-	// anz.start()
+	anzRPC := make(chan rpcclient.ClientConnector, 1)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, anzRPC, srvDep)
+	anz.stopChan = make(chan struct{})
+	anz.start()
+	close(anz.stopChan)
+	anz.start()
 	anz.anz = nil
 	if err := os.RemoveAll("/tmp/analyzers"); err != nil {
 		t.Fatal(err)
@@ -134,17 +140,19 @@ func TestAnalyzerSReload3(t *testing.T) {
 		log.Fatal(err)
 	}
 	cfg.AnalyzerSCfg().IndexType = ""
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	anzRPC := make(chan birpc.ClientConnector, 1)
-	anz := NewAnalyzerService(cfg, server, filterSChan, anzRPC, srvDep)
-	// anz.stopChan = make(chan struct{})
-	ctx, cancel := context.WithCancel(context.TODO())
-	anz.Start(ctx, cancel)
+	anzRPC := make(chan rpcclient.ClientConnector, 1)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, anzRPC, srvDep)
+	anz.stopChan = make(chan struct{})
+	anz.Start()
 
 	anz.anz = nil
-	// close(anz.stopChan)
+	close(anz.stopChan)
 
 }

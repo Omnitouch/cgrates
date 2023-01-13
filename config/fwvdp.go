@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewFWVProvider constructs a utils.DataProvider
@@ -60,7 +60,7 @@ func (fP *FWVProvider) FieldAsInterface(fldPath []string) (data interface{}, err
 	err = nil // cancel previous err
 	indexes := strings.Split(fwvIdx, "-")
 	if len(indexes) != 2 {
-		return "", fmt.Errorf("Invalid format for index : %+v ", fldPath)
+		return "", fmt.Errorf("Invalid format for index : %+v", fldPath)
 	}
 	startIndex, err := strconv.Atoi(indexes[0])
 	if err != nil {

@@ -26,16 +26,27 @@
     },
   },
 
-  "rates": {
-    "enabled": true,
+  "stor_db": {
+    "db_password": "CGRateS.org"
+  },
+
+
+  "rals": {
+    "enabled": true
+  },
+
+
+  "schedulers": {
+    "enabled": true
   },
 
   "dispatchers":{
     "enabled": true
   },
 
-  "admins": {
+  "apiers": {
     "enabled": true,
+    "scheduler_conns": ["*internal"]
   }
 
 

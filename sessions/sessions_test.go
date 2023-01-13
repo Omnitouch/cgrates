@@ -19,30 +19,30 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package sessions
 
 import (
+	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cenkalti/rpc2"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 	jwt "github.com/dgrijalva/jwt-go"
 )
 
 var attrs = &engine.AttrSProcessEventReply{
-	AlteredFields: []*engine.FieldsAltered{
-		{
-			MatchedProfileID: "ATTR_ACNT_1001",
-			Fields:           []string{"*req.OfficeGroup"},
-		},
-	},
+	MatchedProfiles: []string{"ATTR_ACNT_1001"},
+	AlteredFields:   []string{"*req.OfficeGroup"},
 	CGREvent: &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "TestSSv1ItAuth",
 		Event: map[string]interface{}{
-
+			utils.CGRID:        "5668666d6b8e44eb949042f25ce0796ec3592ff9",
 			utils.Tenant:       "cgrates.org",
 			utils.Category:     "call",
 			utils.ToR:          utils.MetaVoice,
@@ -55,75 +55,53 @@ var attrs = &engine.AttrSProcessEventReply{
 			utils.SetupTime:    "2018-01-07T17:00:00Z",
 			utils.Usage:        300000000000.0,
 		},
-		APIOpts: map[string]interface{}{
-			utils.MetaOriginID: "5668666d6b8e44eb949042f25ce0796ec3592ff9",
-		},
 	},
 }
 
 func TestIsIndexed(t *testing.T) {
 	sS := &SessionS{}
-	if sS.isIndexed(&Session{
-
-		OptsStart: map[string]interface{}{
-			utils.MetaOriginID: "test",
-		},
-	}, true) {
+	if sS.isIndexed(&Session{CGRID: "test"}, true) {
 		t.Error("Expecting: false, received: true")
 	}
-	if sS.isIndexed(&Session{OptsStart: map[string]interface{}{
-		utils.MetaOriginID: "test",
-	}}, false) {
+	if sS.isIndexed(&Session{CGRID: "test"}, false) {
 		t.Error("Expecting: false, received: true")
 	}
 	sS = &SessionS{
-		aSessions: map[string]*Session{"test": {OptsStart: map[string]interface{}{
-			utils.MetaOriginID: "test",
-		}}},
+		aSessions: map[string]*Session{"test": {CGRID: "test"}},
 	}
-	if !sS.isIndexed(&Session{OptsStart: map[string]interface{}{
-		utils.MetaOriginID: "test",
-	}}, false) {
+	if !sS.isIndexed(&Session{CGRID: "test"}, false) {
 		t.Error("Expecting: true, received: false")
 	}
-	if sS.isIndexed(&Session{OptsStart: map[string]interface{}{
-		utils.MetaOriginID: "test",
-	}}, true) {
+	if sS.isIndexed(&Session{CGRID: "test"}, true) {
 		t.Error("Expecting: true, received: false")
 	}
 
 	sS = &SessionS{
-		pSessions: map[string]*Session{"test": {OptsStart: map[string]interface{}{
-			utils.MetaOriginID: "test",
-		}}},
+		pSessions: map[string]*Session{"test": {CGRID: "test"}},
 	}
-	if !sS.isIndexed(&Session{OptsStart: map[string]interface{}{
-		utils.MetaOriginID: "test",
-	}}, true) {
+	if !sS.isIndexed(&Session{CGRID: "test"}, true) {
 		t.Error("Expecting: false, received: true")
 	}
-	if sS.isIndexed(&Session{OptsStart: map[string]interface{}{
-		utils.MetaOriginID: "test",
-	}}, false) {
+	if sS.isIndexed(&Session{CGRID: "test"}, false) {
 		t.Error("Expecting: false, received: true")
 	}
 }
 
 func TestOnBiJSONConnectDisconnect(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
-	sessions := NewSessionS(cfg, dm, nil, nil)
+	sessions := NewSessionS(cfg, dm, nil)
 
 	//connect BiJSON
-	client := &birpc.Service{}
+	client := rpc2.NewClient(nil)
 	sessions.OnBiJSONConnect(client)
 
 	//we'll change the connection identifier just for testing
 	sessions.biJClnts[client] = "test_conn"
 	sessions.biJIDs = nil
 
-	expected := NewSessionS(cfg, dm, nil, nil)
+	expected := NewSessionS(cfg, dm, nil)
 	expected.biJClnts[client] = "test_conn"
 	expected.biJIDs = nil
 
@@ -141,21 +119,20 @@ func TestOnBiJSONConnectDisconnect(t *testing.T) {
 
 func TestBiRPCv1RegisterInternalBiJSONConn(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
-	sessions := NewSessionS(cfg, dm, nil, nil)
+	sessions := NewSessionS(cfg, dm, nil)
 
-	client := &birpc.Service{}
+	client := rpc2.NewClient(nil)
 
 	var reply string
-	if err := sessions.BiRPCv1RegisterInternalBiJSONConn(context.WithClient(context.Background(), client), utils.EmptyString, &reply); err != nil {
+	if err := sessions.BiRPCv1RegisterInternalBiJSONConn(client, utils.EmptyString, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Errorf("Expected %+v, received %+v", reply, utils.OK)
 	}
 }
 
-/*
 func TestSessionSIndexAndUnindexSessions(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.SessionSCfg().SessionIndexes = utils.StringSet{
@@ -189,15 +166,18 @@ func TestSessionSIndexAndUnindexSessions(t *testing.T) {
 	})
 	// Index first session
 	session := &Session{
-		CGRID:      GetSetOptsOriginID(sEv),
+		CGRID:      GetSetCGRID(sEv),
 		EventStart: sEv,
 		SRuns: []*SRun{
 			{
 				Event: sEv,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
-	cgrID := GetSetOptsOriginID(sEv)
+	cgrID := GetSetCGRID(sEv)
 	sS.indexSession(session, false)
 	eIndexes := map[string]map[string]map[string]utils.StringSet{
 		"OriginID": {
@@ -253,13 +233,16 @@ func TestSessionSIndexAndUnindexSessions(t *testing.T) {
 		"Extra3":           "",
 		"Extra4":           "info2",
 	})
-	cgrID2 := GetSetOptsOriginID(sSEv2)
+	cgrID2 := GetSetCGRID(sSEv2)
 	session2 := &Session{
 		CGRID:      cgrID2,
 		EventStart: sSEv2,
 		SRuns: []*SRun{
 			{
 				Event: sSEv2,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -271,13 +254,16 @@ func TestSessionSIndexAndUnindexSessions(t *testing.T) {
 		utils.AccountField: "account2",
 		"Extra5":           "info5",
 	})
-	cgrID3 := GetSetOptsOriginID(sSEv3)
+	cgrID3 := GetSetCGRID(sSEv3)
 	session3 := &Session{
 		CGRID:      cgrID3,
 		EventStart: sSEv3,
 		SRuns: []*SRun{
 			{
 				Event: sSEv3,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -472,6 +458,7 @@ func TestSessionSIndexAndUnindexSessions(t *testing.T) {
 		t.Errorf("Expecting: %+v, received: %+v", eRIdxes, sS.aSessionsRIdx)
 	}
 }
+
 func TestSessionSRegisterAndUnregisterASessions(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	sS := NewSessionS(cfg, nil, nil)
@@ -499,6 +486,9 @@ func TestSessionSRegisterAndUnregisterASessions(t *testing.T) {
 		SRuns: []*SRun{
 			{
 				Event: sSEv,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -554,6 +544,9 @@ func TestSessionSRegisterAndUnregisterASessions(t *testing.T) {
 		SRuns: []*SRun{
 			{
 				Event: sSEv2,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -618,6 +611,9 @@ func TestSessionSRegisterAndUnregisterASessions(t *testing.T) {
 		SRuns: []*SRun{
 			{
 				Event: sSEv3,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -708,6 +704,9 @@ func TestSessionSRegisterAndUnregisterPSessions(t *testing.T) {
 		SRuns: []*SRun{
 			{
 				Event: sSEv,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -766,6 +765,9 @@ func TestSessionSRegisterAndUnregisterPSessions(t *testing.T) {
 		SRuns: []*SRun{
 			{
 				Event: sSEv2,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
 		},
 	}
@@ -830,6 +832,7 @@ func TestSessionSRegisterAndUnregisterPSessions(t *testing.T) {
 		SRuns: []*SRun{
 			{
 				Event: sSEv3,
+				CD:    &engine.CallDescriptor{},
 			},
 		},
 	}
@@ -966,7 +969,317 @@ func TestSessionSNewV1AuthorizeArgs(t *testing.T) {
 		t.Errorf("Expecting %+v,\n received: %+v", expected, rply)
 	}
 }
-*/
+
+func TestV1AuthorizeArgsParseFlags11(t *testing.T) {
+	v1authArgs := new(V1AuthorizeArgs)
+	v1authArgs.CGREvent = new(utils.CGREvent)
+	eOut := new(V1AuthorizeArgs)
+	eOut.CGREvent = new(utils.CGREvent)
+	//empty check
+	strArg := ""
+	v1authArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1authArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v", eOut, v1authArgs)
+	}
+	//normal check -> without *dispatchers
+	cgrArgs, _ := utils.GetRoutePaginatorFromOpts(v1authArgs.APIOpts)
+	eOut = &V1AuthorizeArgs{
+		GetMaxUsage:        true,
+		AuthorizeResources: true,
+		GetRoutes:          true,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		GetAttributes:      true,
+		AttributeIDs:       []string{"Attr1", "Attr2"},
+		ProcessThresholds:  true,
+		ThresholdIDs:       []string{"tr1", "tr2", "tr3"},
+		ProcessStats:       true,
+		StatIDs:            []string{"st1", "st2", "st3"},
+		Paginator:          cgrArgs,
+		CGREvent:           eOut.CGREvent,
+		ForceDuration:      true,
+	}
+
+	strArg = "*accounts;*fd;*resources;*routes;*routes_ignore_errors;*routes_event_cost;*attributes:Attr1&Attr2;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3"
+	v1authArgs = new(V1AuthorizeArgs)
+	v1authArgs.CGREvent = new(utils.CGREvent)
+	v1authArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1authArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1authArgs))
+	}
+	// //normal check -> with *dispatchers
+	cgrArgs, _ = utils.GetRoutePaginatorFromOpts(v1authArgs.APIOpts)
+	eOut = &V1AuthorizeArgs{
+		GetMaxUsage:        true,
+		AuthorizeResources: true,
+		GetRoutes:          true,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		GetAttributes:      true,
+		AttributeIDs:       []string{"Attr1", "Attr2"},
+		ProcessThresholds:  true,
+		ThresholdIDs:       []string{"tr1", "tr2", "tr3"},
+		ProcessStats:       true,
+		StatIDs:            []string{"st1", "st2", "st3"},
+		Paginator:          cgrArgs,
+		CGREvent:           eOut.CGREvent,
+		ForceDuration:      true,
+	}
+
+	strArg = "*accounts;*fd;*resources;;*dispatchers;*routes;*routes_ignore_errors;*routes_event_cost;*attributes:Attr1&Attr2;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3"
+	v1authArgs = new(V1AuthorizeArgs)
+	v1authArgs.CGREvent = new(utils.CGREvent)
+	v1authArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1authArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1authArgs))
+	}
+	eOut = &V1AuthorizeArgs{
+		GetMaxUsage:        true,
+		AuthorizeResources: true,
+		GetRoutes:          true,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      "100",
+		GetAttributes:      true,
+		AttributeIDs:       []string{"Attr1", "Attr2"},
+		ProcessThresholds:  true,
+		ThresholdIDs:       []string{"tr1", "tr2", "tr3"},
+		ProcessStats:       true,
+		StatIDs:            []string{"st1", "st2", "st3"},
+		Paginator:          cgrArgs,
+		CGREvent:           eOut.CGREvent,
+		ForceDuration:      true,
+	}
+
+	strArg = "*accounts;*fd;*resources;;*dispatchers;*routes;*routes_ignore_errors;*routes_maxcost:100;*attributes:Attr1&Attr2;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3"
+	v1authArgs = new(V1AuthorizeArgs)
+	v1authArgs.CGREvent = new(utils.CGREvent)
+	v1authArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1authArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1authArgs))
+	}
+}
+
+func TestSessionSNewV1UpdateSessionArgs(t *testing.T) {
+	cgrEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+	}
+	expected := &V1UpdateSessionArgs{
+		GetAttributes: true,
+		UpdateSession: true,
+		CGREvent:      cgrEv,
+		ForceDuration: true,
+	}
+	rply := NewV1UpdateSessionArgs(true, nil, true, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	expected = &V1UpdateSessionArgs{
+		GetAttributes: false,
+		UpdateSession: true,
+		CGREvent:      cgrEv,
+		ForceDuration: true,
+	}
+	rply = NewV1UpdateSessionArgs(false, nil, true, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	//test with len(AttributeIDs) != 0
+	attributeIDs := []string{"ATTR1", "ATTR2"}
+	rply = NewV1UpdateSessionArgs(false, attributeIDs, true, cgrEv, true)
+	expected.AttributeIDs = []string{"ATTR1", "ATTR2"}
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+}
+
+func TestSessionSNewV1TerminateSessionArgs(t *testing.T) {
+	cgrEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+	}
+	expected := &V1TerminateSessionArgs{
+		TerminateSession:  true,
+		ProcessThresholds: true,
+		CGREvent:          cgrEv,
+		ForceDuration:     true,
+	}
+	rply := NewV1TerminateSessionArgs(true, false, true, nil, false, nil, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	expected = &V1TerminateSessionArgs{
+		CGREvent:      cgrEv,
+		ForceDuration: true,
+	}
+	rply = NewV1TerminateSessionArgs(false, false, false, nil, false, nil, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	//test with len(thresholdIDs) != 0 && len(StatIDs) != 0
+	thresholdIDs := []string{"ID1", "ID2"}
+	statIDs := []string{"test1", "test2"}
+	expected = &V1TerminateSessionArgs{
+		CGREvent:      cgrEv,
+		ThresholdIDs:  []string{"ID1", "ID2"},
+		StatIDs:       []string{"test1", "test2"},
+		ForceDuration: true,
+	}
+	rply = NewV1TerminateSessionArgs(false, false, false, thresholdIDs, false, statIDs, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+
+}
+
+func TestSessionSNewV1ProcessMessageArgs(t *testing.T) {
+	cgrEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+	}
+	expected := &V1ProcessMessageArgs{
+		AllocateResources: true,
+		Debit:             true,
+		GetAttributes:     true,
+		CGREvent:          cgrEv,
+		GetRoutes:         true,
+		ForceDuration:     true,
+	}
+	rply := NewV1ProcessMessageArgs(true, nil, false, nil, false,
+		nil, true, true, true, false, false, cgrEv, utils.Paginator{}, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	expected = &V1ProcessMessageArgs{
+		AllocateResources:  true,
+		GetAttributes:      true,
+		CGREvent:           cgrEv,
+		GetRoutes:          true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		RoutesIgnoreErrors: true,
+		ForceDuration:      true,
+	}
+	rply = NewV1ProcessMessageArgs(true, nil, false, nil, false,
+		nil, true, false, true, true, true, cgrEv, utils.Paginator{}, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	//test with len(thresholdIDs) != 0 && len(StatIDs) != 0
+	attributeIDs := []string{"ATTR1", "ATTR2"}
+	thresholdIDs := []string{"ID1", "ID2"}
+	statIDs := []string{"test3", "test4"}
+
+	expected = &V1ProcessMessageArgs{
+		AllocateResources:  true,
+		GetAttributes:      true,
+		CGREvent:           cgrEv,
+		GetRoutes:          true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		RoutesIgnoreErrors: true,
+		AttributeIDs:       []string{"ATTR1", "ATTR2"},
+		ThresholdIDs:       []string{"ID1", "ID2"},
+		StatIDs:            []string{"test3", "test4"},
+		ForceDuration:      true,
+	}
+	rply = NewV1ProcessMessageArgs(true, attributeIDs, false, thresholdIDs, false, statIDs,
+		true, false, true, true, true, cgrEv, utils.Paginator{}, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	expected = &V1ProcessMessageArgs{
+		AllocateResources:  true,
+		GetAttributes:      true,
+		CGREvent:           cgrEv,
+		GetRoutes:          true,
+		RoutesMaxCost:      "100",
+		RoutesIgnoreErrors: true,
+		ForceDuration:      true,
+	}
+	rply = NewV1ProcessMessageArgs(true, nil, false, nil, false,
+		nil, true, false, true, true, false, cgrEv, utils.Paginator{}, true, "100")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+}
+
+func TestSessionSNewV1InitSessionArgs(t *testing.T) {
+	//t1
+	cgrEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+	}
+	attributeIDs := []string{"ATTR1", "ATTR2"}
+	thresholdIDs := []string{"test1", "test2"}
+	statIDs := []string{"test3", "test4"}
+	expected := &V1InitSessionArgs{
+		GetAttributes:     true,
+		AllocateResources: true,
+		InitSession:       true,
+		ProcessThresholds: true,
+		ProcessStats:      true,
+		AttributeIDs:      []string{"ATTR1", "ATTR2"},
+		ThresholdIDs:      []string{"test1", "test2"},
+		StatIDs:           []string{"test3", "test4"},
+		CGREvent:          cgrEv,
+		ForceDuration:     true,
+	}
+	rply := NewV1InitSessionArgs(true, attributeIDs, true, thresholdIDs, true, statIDs, true, true, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+
+	//t2
+	cgrEv = &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+	}
+	expected = &V1InitSessionArgs{
+		GetAttributes:     true,
+		AllocateResources: true,
+		InitSession:       true,
+		ProcessThresholds: true,
+		ProcessStats:      true,
+		CGREvent:          cgrEv,
+		ForceDuration:     true,
+	}
+	rply = NewV1InitSessionArgs(true, nil, true, nil, true, nil, true, true, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+	expected = &V1InitSessionArgs{
+		GetAttributes:     true,
+		AllocateResources: false,
+		InitSession:       true,
+		ProcessThresholds: false,
+		ProcessStats:      true,
+		CGREvent:          cgrEv,
+		ForceDuration:     true,
+	}
+	rply = NewV1InitSessionArgs(true, nil, false, nil, true, nil, false, true, cgrEv, true)
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", expected, rply)
+	}
+}
 
 func TestSessionSV1AuthorizeReplyAsNavigableMap(t *testing.T) {
 	splrs := engine.SortedRoutesList{
@@ -1006,15 +1319,15 @@ func TestSessionSV1AuthorizeReplyAsNavigableMap(t *testing.T) {
 	if rply := v1AuthRpl.AsNavigableMap(); !reflect.DeepEqual(expected, rply) {
 		t.Errorf("Expecting \n%+v\n, received: \n%+v", expected, rply)
 	}
-	v1AuthRpl.MaxUsage = utils.NewDecimalFromFloat64(float64(5 * time.Minute))
-	expected[utils.CapMaxUsage] = utils.NewLeafNode(v1AuthRpl.MaxUsage)
+	v1AuthRpl.MaxUsage = utils.DurationPointer(5 * time.Minute)
+	expected[utils.CapMaxUsage] = utils.NewLeafNode(5 * time.Minute)
 	if rply := v1AuthRpl.AsNavigableMap(); !reflect.DeepEqual(expected, rply) {
 		t.Errorf("Expecting \n%+v\n, received: \n%+v", expected, rply)
 	}
 	v1AuthRpl = &V1AuthorizeReply{
 		Attributes:         attrs,
 		ResourceAllocation: utils.StringPointer("ResGr1"),
-		MaxUsage:           utils.NewDecimalFromFloat64(float64(5 * time.Minute)),
+		MaxUsage:           utils.DurationPointer(5 * time.Minute),
 		RouteProfiles:      splrs,
 		ThresholdIDs:       thIDs,
 		StatQueueIDs:       statIDs,
@@ -1023,7 +1336,7 @@ func TestSessionSV1AuthorizeReplyAsNavigableMap(t *testing.T) {
 	expected = map[string]*utils.DataNode{
 		utils.CapAttributes:         {Type: utils.NMMapType, Map: map[string]*utils.DataNode{"OfficeGroup": utils.NewLeafNode("Marketing")}},
 		utils.CapResourceAllocation: utils.NewLeafNode("ResGr1"),
-		utils.CapMaxUsage:           utils.NewLeafNode(v1AuthRpl.MaxUsage),
+		utils.CapMaxUsage:           utils.NewLeafNode(5 * time.Minute),
 		utils.CapRouteProfiles:      nm,
 		utils.CapThresholds:         {Type: utils.NMSliceType, Slice: []*utils.DataNode{utils.NewLeafNode("THD_RES_1"), utils.NewLeafNode("THD_STATS_1"), utils.NewLeafNode("THD_STATS_2"), utils.NewLeafNode("THD_CDRS_1")}},
 		utils.CapStatQueues:         {Type: utils.NMSliceType, Slice: []*utils.DataNode{utils.NewLeafNode("Stats2"), utils.NewLeafNode("Stats1"), utils.NewLeafNode("Stats3")}},
@@ -1273,7 +1586,7 @@ func TestV1ProcessEventReplyAsNavigableMap(t *testing.T) {
 
 func TestSessionStransitSState(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	sS := NewSessionS(cfg, nil, nil, nil)
+	sS := NewSessionS(cfg, nil, nil)
 	sSEv := engine.NewMapEvent(map[string]interface{}{
 		utils.EventName:    "TEST_EVENT",
 		utils.ToR:          "*voice",
@@ -1293,9 +1606,7 @@ func TestSessionStransitSState(t *testing.T) {
 		utils.OriginHost:   "127.0.0.1",
 	})
 	s := &Session{
-		OptsStart: map[string]interface{}{
-			utils.MetaOriginID: "session1",
-		},
+		CGRID:      "session1",
 		EventStart: sSEv,
 	}
 	//register the session as active
@@ -1321,7 +1632,7 @@ func TestSessionStransitSState(t *testing.T) {
 
 func TestSessionSrelocateSessionS(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	sS := NewSessionS(cfg, nil, nil, nil)
+	sS := NewSessionS(cfg, nil, nil)
 	sSEv := engine.NewMapEvent(map[string]interface{}{
 		utils.EventName:    "TEST_EVENT",
 		utils.ToR:          "*voice",
@@ -1340,44 +1651,129 @@ func TestSessionSrelocateSessionS(t *testing.T) {
 		utils.Route:        "supplier1",
 		utils.OriginHost:   "127.0.0.1",
 	})
-	opt := make(map[string]interface{})
-	initialOriginID := GetSetOptsOriginID(sSEv, opt)
+	initialCGRID := GetSetCGRID(sSEv)
 	s := &Session{
+		CGRID:      initialCGRID,
 		EventStart: sSEv,
-		OptsStart: map[string]interface{}{
-			utils.MetaOriginID: initialOriginID,
-		},
 	}
 	//register the session as active
 	sS.registerSession(s, false)
 	//verify the session
-	rcvS := sS.getSessions(utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]), false)
+	rcvS := sS.getSessions(s.CGRID, false)
 	if !reflect.DeepEqual(rcvS[0], s) {
 		t.Errorf("Expecting %+v, received: %+v", s, rcvS[0])
 	}
 	//relocate the session
-	sS.relocateSession(context.Background(), "111", "222", "127.0.0.1")
-	//check if the session exist with old originID
-	rcvS = sS.getSessions(initialOriginID, false)
+	sS.relocateSession("111", "222", "127.0.0.1")
+	//check if the session exist with old CGRID
+	rcvS = sS.getSessions(initialCGRID, false)
 	if len(rcvS) != 0 {
 		t.Errorf("Expecting 0, received: %+v", len(rcvS))
 	}
 	ev := engine.NewMapEvent(map[string]interface{}{
 		utils.OriginID:   "222",
 		utils.OriginHost: "127.0.0.1"})
-	opt2 := make(map[string]interface{})
-	originID := GetSetOptsOriginID(ev, opt2)
-	//check the session with new originID
-	rcvS = sS.getSessions(originID, false)
+	cgrID := GetSetCGRID(ev)
+	//check the session with new CGRID
+	rcvS = sS.getSessions(cgrID, false)
 	if !reflect.DeepEqual(rcvS[0], s) {
 		t.Errorf("Expecting %+v, received: %+v", s, rcvS[0])
 	}
 }
 
+func TestSessionSNewV1AuthorizeArgsWithOpts(t *testing.T) {
+
+	cgrEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+		APIOpts: map[string]interface{}{
+			utils.OptsAPIKey:  "testkey",
+			utils.OptsRouteID: "testrouteid",
+		},
+	}
+	expected := &V1AuthorizeArgs{
+		AuthorizeResources: true,
+		GetAttributes:      true,
+		CGREvent:           cgrEv,
+		ForceDuration:      true,
+	}
+	cgrArgs, _ := utils.GetRoutePaginatorFromOpts(cgrEv.APIOpts)
+	rply := NewV1AuthorizeArgs(true, nil, false, nil, false, nil, true, false,
+		false, false, false, cgrEv, cgrArgs, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", utils.ToJSON(expected), utils.ToJSON(rply))
+	}
+	expected = &V1AuthorizeArgs{
+		GetAttributes:      true,
+		AuthorizeResources: false,
+		GetMaxUsage:        true,
+		ProcessThresholds:  false,
+		ProcessStats:       true,
+		GetRoutes:          false,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		CGREvent:           cgrEv,
+		ForceDuration:      true,
+	}
+	rply = NewV1AuthorizeArgs(true, nil, false, nil, true, nil, false, true,
+		false, true, true, cgrEv, cgrArgs, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", utils.ToJSON(expected), utils.ToJSON(rply))
+	}
+}
+
+func TestSessionSNewV1AuthorizeArgsWithOpts2(t *testing.T) {
+
+	cgrEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "Event",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Destination:  "1002",
+		},
+		APIOpts: map[string]interface{}{
+			utils.OptsRouteID: "testrouteid",
+		},
+	}
+	expected := &V1AuthorizeArgs{
+		AuthorizeResources: true,
+		GetAttributes:      true,
+		CGREvent:           cgrEv,
+		ForceDuration:      true,
+	}
+	cgrArgs, _ := utils.GetRoutePaginatorFromOpts(cgrEv.APIOpts)
+	rply := NewV1AuthorizeArgs(true, nil, false, nil, false, nil, true, false, false,
+		false, false, cgrEv, cgrArgs, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", utils.ToJSON(expected), utils.ToJSON(rply))
+	}
+	expected = &V1AuthorizeArgs{
+		GetAttributes:      true,
+		AuthorizeResources: false,
+		GetMaxUsage:        true,
+		ProcessThresholds:  false,
+		ProcessStats:       true,
+		GetRoutes:          false,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		CGREvent:           cgrEv,
+		ForceDuration:      true,
+	}
+	rply = NewV1AuthorizeArgs(true, nil, false, nil, true, nil, false, true, false,
+		true, true, cgrEv, cgrArgs, true, "")
+	if !reflect.DeepEqual(expected, rply) {
+		t.Errorf("Expecting %+v, received: %+v", utils.ToJSON(expected), utils.ToJSON(rply))
+	}
+}
+
 func TestSessionSGetIndexedFilters(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	mpStr := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	sS := NewSessionS(cfg, engine.NewDataManager(mpStr, config.CgrConfig().CacheCfg(), nil), nil, nil)
+	mpStr := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	sS := NewSessionS(cfg, engine.NewDataManager(mpStr, config.CgrConfig().CacheCfg(), nil), nil)
 	expIndx := map[string][]string{}
 	expUindx := []*engine.FilterRule{
 		{
@@ -1390,7 +1786,7 @@ func TestSessionSGetIndexedFilters(t *testing.T) {
 		t.Error(err)
 	}
 	fltrs := []string{"*string:~*req.ToR:*voice"}
-	if rplyindx, rplyUnindx := sS.getIndexedFilters(context.Background(), "", fltrs); !reflect.DeepEqual(expIndx, rplyindx) {
+	if rplyindx, rplyUnindx := sS.getIndexedFilters("", fltrs); !reflect.DeepEqual(expIndx, rplyindx) {
 		t.Errorf("Expected %s , received: %s", utils.ToJSON(expIndx), utils.ToJSON(rplyindx))
 	} else if !reflect.DeepEqual(expUindx, rplyUnindx) {
 		t.Errorf("Expected %s , received: %s", utils.ToJSON(expUindx), utils.ToJSON(rplyUnindx))
@@ -1398,24 +1794,28 @@ func TestSessionSGetIndexedFilters(t *testing.T) {
 	cfg.SessionSCfg().SessionIndexes = utils.StringSet{
 		"ToR": {},
 	}
-	sS = NewSessionS(cfg, engine.NewDataManager(mpStr, config.CgrConfig().CacheCfg(), nil), nil, nil)
+	sS = NewSessionS(cfg, engine.NewDataManager(mpStr, config.CgrConfig().CacheCfg(), nil), nil)
 	expIndx = map[string][]string{(utils.ToR): {utils.MetaVoice}}
 	expUindx = nil
-	if rplyindx, rplyUnindx := sS.getIndexedFilters(context.Background(), "", fltrs); !reflect.DeepEqual(expIndx, rplyindx) {
+	if rplyindx, rplyUnindx := sS.getIndexedFilters("", fltrs); !reflect.DeepEqual(expIndx, rplyindx) {
 		t.Errorf("Expected %s , received: %s", utils.ToJSON(expIndx), utils.ToJSON(rplyindx))
 	} else if !reflect.DeepEqual(expUindx, rplyUnindx) {
 		t.Errorf("Expected %s , received: %s", utils.ToJSON(expUindx), utils.ToJSON(rplyUnindx))
 	}
 	//t2
-	mpStr.SetFilterDrv(context.TODO(), &engine.Filter{
+	mpStr.SetFilterDrv(&engine.Filter{
 		Tenant: "cgrates.org",
 		ID:     "FLTR1",
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Now().Add(-2 * time.Hour),
+			ExpiryTime:     time.Now().Add(-time.Hour),
+		},
 	})
-	sS = NewSessionS(cfg, engine.NewDataManager(mpStr, config.CgrConfig().CacheCfg(), nil), nil, nil)
+	sS = NewSessionS(cfg, engine.NewDataManager(mpStr, config.CgrConfig().CacheCfg(), nil), nil)
 	expIndx = map[string][]string{}
 	expUindx = nil
 	fltrs = []string{"FLTR1", "FLTR2"}
-	if rplyindx, rplyUnindx := sS.getIndexedFilters(context.Background(), "cgrates.org", fltrs); !reflect.DeepEqual(expIndx, rplyindx) {
+	if rplyindx, rplyUnindx := sS.getIndexedFilters("cgrates.org", fltrs); !reflect.DeepEqual(expIndx, rplyindx) {
 		t.Errorf("Expected %s , received: %s", utils.ToJSON(expIndx), utils.ToJSON(rplyindx))
 	} else if !reflect.DeepEqual(expUindx, rplyUnindx) {
 		t.Errorf("Expected %s , received: %s", utils.ToJSON(expUindx), utils.ToJSON(rplyUnindx))
@@ -1423,7 +1823,6 @@ func TestSessionSGetIndexedFilters(t *testing.T) {
 
 }
 
-/*
 func TestSessionSgetSessionIDsMatchingIndexes(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.SessionSCfg().SessionIndexes = utils.StringSet{
@@ -1454,15 +1853,18 @@ func TestSessionSgetSessionIDsMatchingIndexes(t *testing.T) {
 	})
 	// Index first session
 	session := &Session{
-		CGRID:      GetSetOptsOriginID(sEv),
+		CGRID:      GetSetCGRID(sEv),
 		EventStart: sEv,
 		SRuns: []*SRun{
 			{
 				Event: sEv,
+				CD: &engine.CallDescriptor{
+					RunID: "RunID",
+				},
 			},
 		},
 	}
-	cgrID := GetSetOptsOriginID(sEv)
+	cgrID := GetSetCGRID(sEv)
 	sS.indexSession(session, false)
 	indx := map[string][]string{"ToR": {utils.MetaVoice, utils.MetaData}}
 	expCGRIDs := []string{cgrID}
@@ -1495,11 +1897,17 @@ func TestSessionSgetSessionIDsMatchingIndexes(t *testing.T) {
 	session.SRuns = []*SRun{
 		{
 			Event: sEv,
+			CD: &engine.CallDescriptor{
+				RunID: "RunID",
+			},
 		},
 		{
 			Event: engine.NewMapEvent(map[string]interface{}{
 				utils.EventName: "TEST_EVENT",
 				utils.ToR:       "*voice"}),
+			CD: &engine.CallDescriptor{
+				RunID: "RunID2",
+			},
 		},
 	}
 	cfg.SessionSCfg().SessionIndexes = utils.StringSet{
@@ -1534,7 +1942,7 @@ func TestNewSessionS(t *testing.T) {
 	eOut := &SessionS{
 		cgrCfg:        cgrCGF,
 		dm:            nil,
-		biJClnts:      make(map[birpc.ClientConnector]string),
+		biJClnts:      make(map[rpcclient.ClientConnector]string),
 		biJIDs:        make(map[string]*biJClient),
 		aSessions:     make(map[string]*Session),
 		aSessionsIdx:  make(map[string]map[string]map[string]utils.StringSet),
@@ -1596,11 +2004,138 @@ func TestV1InitSessionArgsParseFlags(t *testing.T) {
 	}
 
 }
-*/
+
+func TestV1TerminateSessionArgsParseFlags(t *testing.T) {
+	v1TerminateSsArgs := new(V1TerminateSessionArgs)
+	eOut := new(V1TerminateSessionArgs)
+	//empty check
+	strArg := ""
+	v1TerminateSsArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1TerminateSsArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v", eOut, v1TerminateSsArgs)
+	}
+	//normal check -> without *dispatchers
+	eOut = &V1TerminateSessionArgs{
+		TerminateSession:  true,
+		ReleaseResources:  true,
+		ProcessThresholds: true,
+		ThresholdIDs:      []string{"tr1", "tr2", "tr3"},
+		ProcessStats:      true,
+		StatIDs:           []string{"st1", "st2", "st3"},
+		ForceDuration:     true,
+	}
+
+	strArg = "*accounts;*resources;*routes;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3;*fd"
+	v1TerminateSsArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1TerminateSsArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1TerminateSsArgs))
+	}
+	// //normal check -> with *dispatchers
+	eOut = &V1TerminateSessionArgs{
+		TerminateSession:  true,
+		ReleaseResources:  true,
+		ProcessThresholds: true,
+		ThresholdIDs:      []string{"tr1", "tr2", "tr3"},
+		ProcessStats:      true,
+		StatIDs:           []string{"st1", "st2", "st3"},
+		ForceDuration:     true,
+	}
+
+	strArg = "*accounts;*resources;;*dispatchers;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3;*fd"
+	v1TerminateSsArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1TerminateSsArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1TerminateSsArgs))
+	}
+
+}
+
+func TestV1ProcessMessageArgsParseFlags(t *testing.T) {
+	v1ProcessMsgArgs := new(V1ProcessMessageArgs)
+	v1ProcessMsgArgs.CGREvent = new(utils.CGREvent)
+	eOut := new(V1ProcessMessageArgs)
+	eOut.CGREvent = new(utils.CGREvent)
+	//empty check
+	strArg := ""
+	v1ProcessMsgArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1ProcessMsgArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v", eOut, v1ProcessMsgArgs)
+	}
+	//normal check -> without *dispatchers
+	eOut = &V1ProcessMessageArgs{
+		Debit:              true,
+		AllocateResources:  true,
+		GetRoutes:          true,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		GetAttributes:      true,
+		AttributeIDs:       []string{"Attr1", "Attr2"},
+		ProcessThresholds:  true,
+		ThresholdIDs:       []string{"tr1", "tr2", "tr3"},
+		ProcessStats:       true,
+		StatIDs:            []string{"st1", "st2", "st3"},
+		CGREvent:           eOut.CGREvent,
+	}
+
+	strArg = "*accounts;*resources;*routes;*routes_ignore_errors;*routes_event_cost;*attributes:Attr1&Attr2;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3"
+	v1ProcessMsgArgs = new(V1ProcessMessageArgs)
+	v1ProcessMsgArgs.CGREvent = new(utils.CGREvent)
+	v1ProcessMsgArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1ProcessMsgArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1ProcessMsgArgs))
+	}
+
+	//normal check -> with *dispatchers
+	eOut = &V1ProcessMessageArgs{
+		Debit:              true,
+		AllocateResources:  true,
+		GetRoutes:          true,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      utils.MetaEventCost,
+		GetAttributes:      true,
+		AttributeIDs:       []string{"Attr1", "Attr2"},
+		ProcessThresholds:  true,
+		ThresholdIDs:       []string{"tr1", "tr2", "tr3"},
+		ProcessStats:       true,
+		StatIDs:            []string{"st1", "st2", "st3"},
+		CGREvent:           eOut.CGREvent,
+		ForceDuration:      true,
+	}
+
+	strArg = "*accounts;*resources;*dispatchers;*routes;*routes_ignore_errors;*routes_event_cost;*attributes:Attr1&Attr2;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3;*fd"
+	v1ProcessMsgArgs = new(V1ProcessMessageArgs)
+	v1ProcessMsgArgs.CGREvent = new(utils.CGREvent)
+	v1ProcessMsgArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1ProcessMsgArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1ProcessMsgArgs))
+	}
+
+	eOut = &V1ProcessMessageArgs{
+		Debit:              true,
+		AllocateResources:  true,
+		GetRoutes:          true,
+		RoutesIgnoreErrors: true,
+		RoutesMaxCost:      "100",
+		GetAttributes:      true,
+		AttributeIDs:       []string{"Attr1", "Attr2"},
+		ProcessThresholds:  true,
+		ThresholdIDs:       []string{"tr1", "tr2", "tr3"},
+		ProcessStats:       true,
+		StatIDs:            []string{"st1", "st2", "st3"},
+		CGREvent:           eOut.CGREvent,
+	}
+
+	strArg = "*accounts;*resources;*dispatchers;*routes;*routes_ignore_errors;*routes_maxcost:100;*attributes:Attr1&Attr2;*thresholds:tr1&tr2&tr3;*stats:st1&st2&st3"
+	v1ProcessMsgArgs = new(V1ProcessMessageArgs)
+	v1ProcessMsgArgs.CGREvent = new(utils.CGREvent)
+	v1ProcessMsgArgs.ParseFlags(strArg, utils.InfieldSep)
+	if !reflect.DeepEqual(eOut, v1ProcessMsgArgs) {
+		t.Errorf("Expecting %+v,\n received: %+v\n", utils.ToJSON(eOut), utils.ToJSON(v1ProcessMsgArgs))
+	}
+}
 
 func TestSessionSgetSession(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	sS := NewSessionS(cfg, nil, nil, nil)
+	sS := NewSessionS(cfg, nil, nil)
 	sSEv := engine.NewMapEvent(map[string]interface{}{
 		utils.EventName:    "TEST_EVENT",
 		utils.ToR:          "*voice",
@@ -1620,14 +2155,15 @@ func TestSessionSgetSession(t *testing.T) {
 		utils.OriginHost:   "127.0.0.1",
 	})
 	s := &Session{
+		CGRID:      "session1",
 		EventStart: sSEv,
 		SRuns: []*SRun{
 			{
 				Event: sSEv,
+				CD: &engine.CallDescriptor{
+					RunID: utils.MetaDefault,
+				},
 			},
-		},
-		OptsStart: map[string]interface{}{
-			utils.MetaOriginID: "session1",
 		},
 	}
 	//register the session
@@ -1641,7 +2177,6 @@ func TestSessionSgetSession(t *testing.T) {
 
 }
 
-/*
 func TestSessionSfilterSessions(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.SessionSCfg().SessionIndexes = utils.StringSet{
@@ -1673,20 +2208,26 @@ func TestSessionSfilterSessions(t *testing.T) {
 	sr2 := sEv.Clone()
 	// Index first session
 	session := &Session{
-		CGRID:      GetSetOptsOriginID(sEv),
+		CGRID:      GetSetCGRID(sEv),
 		EventStart: sEv,
 		SRuns: []*SRun{
 			{
 				Event: sEv,
+				CD: &engine.CallDescriptor{
+					RunID: "RunID",
+				},
 			},
 			{
 				Event: sr2,
+				CD: &engine.CallDescriptor{
+					RunID: "RunID2",
+				},
 			},
 		},
 	}
 	sr2[utils.ToR] = utils.MetaSMS
 	sr2[utils.Subject] = "subject2"
-	sr2[utils.MetaOriginID] = GetSetOptsOriginID(sEv)
+	sr2[utils.CGRID] = GetSetCGRID(sEv)
 	sS.registerSession(session, false)
 	st, err := utils.IfaceAsTime("2015-11-09T14:21:24Z", "")
 	if err != nil {
@@ -1811,6 +2352,7 @@ func TestSessionSfilterSessions(t *testing.T) {
 		t.Errorf("Expected %s or %s, received: %s", utils.ToJSON(eses1), utils.ToJSON(eses2), utils.ToJSON(sess[0]))
 	}
 }
+
 func TestSessionSfilterSessionsCount(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.SessionSCfg().SessionIndexes = utils.StringSet{
@@ -1842,19 +2384,25 @@ func TestSessionSfilterSessionsCount(t *testing.T) {
 	sr2 := sEv.Clone()
 	// Index first session
 	session := &Session{
-		CGRID:      GetSetOptsOriginID(sEv),
+		CGRID:      GetSetCGRID(sEv),
 		EventStart: sEv,
 		SRuns: []*SRun{
 			{
 				Event: sEv,
+				CD: &engine.CallDescriptor{
+					RunID: "RunID",
+				},
 			},
 			{
 				Event: sr2,
+				CD: &engine.CallDescriptor{
+					RunID: "RunID2",
+				},
 			},
 		},
 	}
 	sEv[utils.ToR] = utils.MetaData
-	sr2[utils.MetaOriginID] = GetSetOptsOriginID(sEv)
+	sr2[utils.CGRID] = GetSetCGRID(sEv)
 	sS.registerSession(session, false)
 	fltrs := &utils.SessionFilter{Filters: []string{fmt.Sprintf("*string:~*req.ToR:%s|%s", utils.MetaVoice, utils.MetaData)}}
 
@@ -1902,11 +2450,10 @@ func TestSessionSfilterSessionsCount(t *testing.T) {
 		t.Errorf("Expected %v , received: %s", 2, utils.ToJSON(noSess))
 	}
 }
-*/
 
 func TestBiRPCv1STIRAuthenticate(t *testing.T) {
 	sS := new(SessionS)
-	sS.cfg = config.CgrConfig()
+	sS.cgrCfg = config.CgrConfig()
 	pubkeyBuf := []byte(`-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAESt8sEh55Yc579vLHjFRWVQO27p4Y
 aa+jqv4dwkr/FLEcN1zC76Y/IniI65fId55hVJvN3ORuzUqYEtzD3irmsw==
@@ -1916,7 +2463,7 @@ aa+jqv4dwkr/FLEcN1zC76Y/IniI65fId55hVJvN3ORuzUqYEtzD3irmsw==
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Cache.Set(context.TODO(), utils.CacheSTIR, "https://www.example.org/cert.cer", pubKey,
+	if err := engine.Cache.Set(utils.CacheSTIR, "https://www.example.org/cert.cer", pubKey,
 		nil, true, utils.NonTransactional); err != nil {
 		t.Errorf("Expecting: nil, received: %s", err)
 	}
@@ -1947,7 +2494,7 @@ aa+jqv4dwkr/FLEcN1zC76Y/IniI65fId55hVJvN3ORuzUqYEtzD3irmsw==
 
 func TestBiRPCv1STIRIdentity(t *testing.T) {
 	sS := new(SessionS)
-	sS.cfg = config.CgrConfig()
+	sS.cgrCfg = config.CgrConfig()
 	payload := &utils.PASSporTPayload{
 		Dest:   utils.PASSporTDestinationsIdentity{Tn: []string{"1002"}},
 		IAT:    1587019822,
@@ -1974,11 +2521,11 @@ aa+jqv4dwkr/FLEcN1zC76Y/IniI65fId55hVJvN3ORuzUqYEtzD3irmsw==
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Cache.Set(context.TODO(), utils.CacheSTIR, "https://www.example.org/cert.cer", pubKey,
+	if err := engine.Cache.Set(utils.CacheSTIR, "https://www.example.org/cert.cer", pubKey,
 		nil, true, utils.NonTransactional); err != nil {
 		t.Errorf("Expecting: nil, received: %s", err)
 	}
-	if err := engine.Cache.Set(context.TODO(), utils.CacheSTIR, "https://www.example.org/private.pem", nil,
+	if err := engine.Cache.Set(utils.CacheSTIR, "https://www.example.org/private.pem", nil,
 		nil, true, utils.NonTransactional); err != nil {
 		t.Errorf("Expecting: nil, received: %s", err)
 	}
@@ -1992,7 +2539,7 @@ aa+jqv4dwkr/FLEcN1zC76Y/IniI65fId55hVJvN3ORuzUqYEtzD3irmsw==
 	}, &rcv); err == nil {
 		t.Error("Expected error")
 	}
-	if err := engine.Cache.Set(context.TODO(), utils.CacheSTIR, "https://www.example.org/private.pem", prvKey,
+	if err := engine.Cache.Set(utils.CacheSTIR, "https://www.example.org/private.pem", prvKey,
 		nil, true, utils.NonTransactional); err != nil {
 		t.Errorf("Expecting: nil, received: %s", err)
 	}
@@ -2003,12 +2550,11 @@ aa+jqv4dwkr/FLEcN1zC76Y/IniI65fId55hVJvN3ORuzUqYEtzD3irmsw==
 		OverwriteIAT:   true,
 	}, &rcv); err != nil {
 		t.Error(err)
-	} else if err := AuthStirShaken(context.Background(), rcv, "1001", "", "1002", "", utils.NewStringSet([]string{utils.MetaAny}), -1); err != nil {
+	} else if err := AuthStirShaken(rcv, "1001", "", "1002", "", utils.NewStringSet([]string{utils.MetaAny}), -1); err != nil {
 		t.Fatal(err)
 	}
 }
 
-/*
 type mockConnWarnDisconnect1 struct {
 	*testRPCClientConnection
 }
@@ -2028,7 +2574,7 @@ func (mk *mockConnWarnDisconnect2) Call(method string, args interface{}, rply in
 func TestWarnSession(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.GeneralCfg().NodeID = "ClientConnIdtest"
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 
 	sessions := NewSessionS(cfg, dm, nil)
@@ -2057,7 +2603,7 @@ func (c clMock) Call(m string, a interface{}, r interface{}) error {
 func TestInitSession(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.SessionSCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
-	clientConect := make(chan birpc.ClientConnector, 1)
+	clientConect := make(chan rpcclient.ClientConnector, 1)
 	clientConect <- clMock(func(_ string, args interface{}, reply interface{}) error {
 		rply, cancast := reply.(*[]*engine.ChrgSProcessEventReply)
 		if !cancast {
@@ -2073,7 +2619,7 @@ func TestInitSession(t *testing.T) {
 		}
 		return nil
 	})
-	conMng := engine.NewConnManager(cfg, map[string]chan birpc.ClientConnector{
+	conMng := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
 		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): clientConect,
 	})
 	sS := NewSessionS(cfg, nil, conMng)
@@ -2098,7 +2644,7 @@ func TestInitSession(t *testing.T) {
 		CGRID:  "c72b7074ef9375cd19ab7bbceb530e99808c3194",
 		Tenant: "cgrates.org",
 		EventStart: engine.MapEvent{
-			utils.MetaOriginID:        "c72b7074ef9375cd19ab7bbceb530e99808c3194",
+			utils.CGRID:        "c72b7074ef9375cd19ab7bbceb530e99808c3194",
 			utils.Category:     "call",
 			utils.ToR:          utils.MetaVoice,
 			utils.OriginID:     "TestTerminate",
@@ -2112,7 +2658,7 @@ func TestInitSession(t *testing.T) {
 			utils.Usage:        2 * time.Second,
 		},
 		DebitInterval: 0,
-		chargeable:    true,
+		Chargeable:    true,
 	}
 	s.SRuns = nil
 	if !reflect.DeepEqual(exp, s) {
@@ -2127,10 +2673,10 @@ func TestSessionSAsBiRPC(t *testing.T) {
 func TestBiJClntID(t *testing.T) {
 	client := &mockConnWarnDisconnect1{}
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	sessions := NewSessionS(cfg, dm, nil)
-	sessions.biJClnts = map[birpc.ClientConnector]string{
+	sessions.biJClnts = map[rpcclient.ClientConnector]string{
 		client: "First_connector",
 	}
 	expected := "First_connector"
@@ -2138,4 +2684,525 @@ func TestBiJClntID(t *testing.T) {
 		t.Errorf("Expected %+v, received %+v", expected, rcv)
 	}
 }
-*/
+
+func TestBiRPCv1AuthorizeEventNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1AuthorizeArgs{
+		GetAttributes: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+
+	rply := &V1AuthorizeReply{
+		Attributes: new(engine.AttrSProcessEventReply),
+	}
+	if err := ss.BiRPCv1AuthorizeEvent(nil, args,
+		rply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1AuthorizeEventWithDigestNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1AuthorizeArgs{
+		GetAttributes: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+
+	rply := &V1AuthorizeReplyWithDigest{}
+	if err := ss.BiRPCv1AuthorizeEventWithDigest(nil, args,
+		rply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1InitiateSessionNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1InitSessionArgs{
+		GetAttributes: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+	reply := &V1InitSessionReply{
+		Attributes: new(engine.AttrSProcessEventReply),
+	}
+	if err := ss.BiRPCv1InitiateSession(nil, args, reply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1InitiateSessionWithDigestNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1InitSessionArgs{
+		GetAttributes: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+	reply := &V1InitReplyWithDigest{}
+	if err := ss.BiRPCv1InitiateSessionWithDigest(nil, args, reply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1UpdateSessionNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1UpdateSessionArgs{
+		GetAttributes: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+	rply := &V1UpdateSessionReply{}
+	if err := ss.BiRPCv1UpdateSession(nil, args, rply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1TerminateSessionNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.ChargerSCfg().Enabled = true
+	cfg.SessionSCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*[]*engine.ChrgSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = []*engine.ChrgSProcessEventReply{}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1TerminateSessionArgs{
+		TerminateSession: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+	var reply string
+	if err := ss.BiRPCv1TerminateSession(nil, args,
+		&reply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1ProcessMessageNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1ProcessMessageArgs{
+		GetAttributes: true,
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+	reply := &V1ProcessMessageReply{
+		Attributes: new(engine.AttrSProcessEventReply),
+	}
+	if err := ss.BiRPCv1ProcessMessage(nil, args,
+		reply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBiRPCv1ProcessEventNoTenant(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.AttributeSCfg().Enabled = true
+	cfg.SessionSCfg().AttrSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*engine.AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = engine.AttrSProcessEventReply{
+			CGREvent: &utils.CGREvent{
+				Tenant: "cgrates.org",
+				ID:     "TestBiRPCv1AuthorizeEventNoTenant",
+				Time:   utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1001",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.Attributes): chanClnt,
+	})
+	db := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(db, cfg.CacheCfg(), connMngr)
+	ss := NewSessionS(cfg, dm, connMngr)
+
+	args := &V1ProcessEventArgs{
+		Flags: []string{utils.MetaAttributes},
+		CGREvent: &utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1001",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+	}
+	reply := &V1ProcessEventReply{
+		Attributes: make(map[string]*engine.AttrSProcessEventReply),
+	}
+	if err := ss.BiRPCv1ProcessEvent(nil, args, reply); err != nil {
+		t.Error(err)
+	}
+}

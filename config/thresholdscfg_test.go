@@ -20,39 +20,35 @@ package config
 import (
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestThresholdSCfgloadFromJsonCfgCase1(t *testing.T) {
 	cfgJSON := &ThresholdSJsonCfg{
-		Enabled:                  utils.BoolPointer(true),
-		Indexed_selects:          utils.BoolPointer(true),
-		Store_interval:           utils.StringPointer("2"),
-		String_indexed_fields:    &[]string{"*req.prefix"},
-		Prefix_indexed_fields:    &[]string{"*req.index1"},
-		Suffix_indexed_fields:    &[]string{"*req.index1"},
-		Exists_indexed_fields:    &[]string{"*req.index1"},
-		Notexists_indexed_fields: &[]string{"*req.index1"},
-		Nested_fields:            utils.BoolPointer(true),
-		Actions_conns:            &[]string{utils.MetaInternal},
-		Opts:                     &ThresholdsOptsJson{},
+		Enabled:               utils.BoolPointer(true),
+		Indexed_selects:       utils.BoolPointer(true),
+		Store_interval:        utils.StringPointer("2"),
+		String_indexed_fields: &[]string{"*req.prefix"},
+		Prefix_indexed_fields: &[]string{"*req.index1"},
+		Suffix_indexed_fields: &[]string{"*req.index1"},
+		Nested_fields:         utils.BoolPointer(true),
+		Opts: &ThresholdsOptsJson{
+			ProfileIDs:           &[]string{},
+			ProfileIgnoreFilters: utils.BoolPointer(false),
+		},
 	}
 	expected := &ThresholdSCfg{
-		Enabled:                true,
-		IndexedSelects:         true,
-		StoreInterval:          2,
-		StringIndexedFields:    &[]string{"*req.prefix"},
-		PrefixIndexedFields:    &[]string{"*req.index1"},
-		SuffixIndexedFields:    &[]string{"*req.index1"},
-		ExistsIndexedFields:    &[]string{"*req.index1"},
-		NotExistsIndexedFields: &[]string{"*req.index1"},
-		NestedFields:           true,
-		ActionSConns:           []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaActions)},
+		Enabled:             true,
+		IndexedSelects:      true,
+		StoreInterval:       2,
+		StringIndexedFields: &[]string{"*req.prefix"},
+		PrefixIndexedFields: &[]string{"*req.index1"},
+		SuffixIndexedFields: &[]string{"*req.index1"},
+		NestedFields:        true,
 		Opts: &ThresholdsOpts{
-			ProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
+			ProfileIDs:           []string{},
+			ProfileIgnoreFilters: false,
 		},
 	}
 	jsonCfg := NewDefaultCGRConfig()
@@ -61,45 +57,11 @@ func TestThresholdSCfgloadFromJsonCfgCase1(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, jsonCfg.thresholdSCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsonCfg.thresholdSCfg))
 	}
-
-	cfgJSON = nil
-	if err = jsonCfg.thresholdSCfg.loadFromJSONCfg(cfgJSON); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestThresholdSLoadFromJsonOpts(t *testing.T) {
-	thrsOpt := &ThresholdsOpts{
-		ProfileIDs: []*utils.DynamicStringSliceOpt{
-			{
-				Tenant: "cgrates.org",
-				Value:  []string{"thsd_p1"},
-			},
-		},
-		ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-			{
-				Tenant: "cgrates.org",
-				Value:  true,
-			},
-		},
-	}
-	exp := &ThresholdsOpts{
-		ProfileIDs: []*utils.DynamicStringSliceOpt{
-			{
-				Tenant: "cgrates.org",
-				Value:  []string{"thsd_p1"},
-			},
-		},
-		ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-			{
-				Tenant: "cgrates.org",
-				Value:  true,
-			},
-		},
-	}
-	thrsOpt.loadFromJSONCfg(nil)
-	if !reflect.DeepEqual(exp, thrsOpt) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(thrsOpt))
+	var optsCfg *ThresholdsOpts
+	var jsonOpt *ThresholdsOptsJson
+	optsCfg.loadFromJSONCfg(jsonOpt)
+	if reflect.DeepEqual(nil, optsCfg) {
+		t.Error("expected nil")
 	}
 }
 
@@ -119,23 +81,20 @@ func TestThresholdSCfgAsMapInterfaceCase1(t *testing.T) {
 		"thresholds": {},		
 }`
 	eMap := map[string]interface{}{
-		utils.EnabledCfg:                false,
-		utils.StoreIntervalCfg:          "",
-		utils.IndexedSelectsCfg:         true,
-		utils.PrefixIndexedFieldsCfg:    []string{},
-		utils.SuffixIndexedFieldsCfg:    []string{},
-		utils.ExistsIndexedFieldsCfg:    []string{},
-		utils.NotExistsIndexedFieldsCfg: []string{},
-		utils.NestedFieldsCfg:           false,
-		utils.ActionSConnsCfg:           []string{},
+		utils.EnabledCfg:             false,
+		utils.StoreIntervalCfg:       "",
+		utils.IndexedSelectsCfg:      true,
+		utils.PrefixIndexedFieldsCfg: []string{},
+		utils.SuffixIndexedFieldsCfg: []string{},
+		utils.NestedFieldsCfg:        false,
 		utils.OptsCfg: map[string]interface{}{
-			utils.MetaProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			utils.MetaProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
+			utils.MetaProfileIDs:              []string{},
+			utils.MetaProfileIgnoreFiltersCfg: false,
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.thresholdSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.thresholdSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expextec %+v \n, recevied %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -149,32 +108,26 @@ func TestThresholdSCfgAsMapInterfaceCase2(t *testing.T) {
             "string_indexed_fields": ["*req.string"],
 			"prefix_indexed_fields": ["*req.prefix","*req.indexed","*req.fields"],	
             "suffix_indexed_fields": ["*req.suffix_indexed_fields1", "*req.suffix_indexed_fields2"],		
-			"exists_indexed_fields": ["*req.prefix","*req.indexed","*req.fields"],	
-            "notexists_indexed_fields": [],	
 			"nested_fields": true,					
-			"actions_conns": ["*internal"],
 		},		
 }`
 	eMap := map[string]interface{}{
-		utils.EnabledCfg:                true,
-		utils.StoreIntervalCfg:          "96h0m0s",
-		utils.IndexedSelectsCfg:         false,
-		utils.StringIndexedFieldsCfg:    []string{"*req.string"},
-		utils.PrefixIndexedFieldsCfg:    []string{"*req.prefix", "*req.indexed", "*req.fields"},
-		utils.SuffixIndexedFieldsCfg:    []string{"*req.suffix_indexed_fields1", "*req.suffix_indexed_fields2"},
-		utils.ExistsIndexedFieldsCfg:    []string{"*req.prefix", "*req.indexed", "*req.fields"},
-		utils.NotExistsIndexedFieldsCfg: []string{},
-		utils.NestedFieldsCfg:           true,
-		utils.ActionSConnsCfg:           []string{utils.MetaInternal},
+		utils.EnabledCfg:             true,
+		utils.StoreIntervalCfg:       "96h0m0s",
+		utils.IndexedSelectsCfg:      false,
+		utils.StringIndexedFieldsCfg: []string{"*req.string"},
+		utils.PrefixIndexedFieldsCfg: []string{"*req.prefix", "*req.indexed", "*req.fields"},
+		utils.SuffixIndexedFieldsCfg: []string{"*req.suffix_indexed_fields1", "*req.suffix_indexed_fields2"},
+		utils.NestedFieldsCfg:        true,
 		utils.OptsCfg: map[string]interface{}{
-			utils.MetaProfileIDs:           []*utils.DynamicStringSliceOpt{},
-			utils.MetaProfileIgnoreFilters: []*utils.DynamicBoolOpt{},
+			utils.MetaProfileIDs:              []string{},
+			utils.MetaProfileIgnoreFiltersCfg: false,
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.thresholdSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
-		t.Errorf("Expected %+v \n, recevied %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
+	} else if rcv := cgrCfg.thresholdSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
+		t.Errorf("Expextec %+v \n, recevied %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
 func TestThresholdSCfgClone(t *testing.T) {
@@ -186,7 +139,9 @@ func TestThresholdSCfgClone(t *testing.T) {
 		PrefixIndexedFields: &[]string{"*req.index1"},
 		SuffixIndexedFields: &[]string{"*req.index1"},
 		NestedFields:        true,
-		Opts:                &ThresholdsOpts{},
+		Opts: &ThresholdsOpts{
+			ProfileIDs: []string{},
+		},
 	}
 	rcv := ban.Clone()
 	if !reflect.DeepEqual(ban, rcv) {
@@ -200,133 +155,5 @@ func TestThresholdSCfgClone(t *testing.T) {
 	}
 	if (*rcv.SuffixIndexedFields)[0] = ""; (*ban.SuffixIndexedFields)[0] != "*req.index1" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffThresholdSJsonCfg(t *testing.T) {
-	var d *ThresholdSJsonCfg
-
-	v1 := &ThresholdSCfg{
-		Enabled:             false,
-		IndexedSelects:      false,
-		StoreInterval:       1 * time.Second,
-		StringIndexedFields: &[]string{"req.index1"},
-		PrefixIndexedFields: &[]string{"req.index2"},
-		SuffixIndexedFields: &[]string{"req.index3"},
-		ActionSConns:        []string{},
-		NestedFields:        false,
-		Opts: &ThresholdsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.org",
-					Value:  []string{"thsr_p1"},
-				},
-			},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-				{
-					Tenant: "cgrates.org",
-					Value:  false,
-				},
-			},
-		},
-	}
-
-	v2 := &ThresholdSCfg{
-		Enabled:             true,
-		IndexedSelects:      true,
-		StoreInterval:       2 * time.Second,
-		StringIndexedFields: &[]string{"req.index11"},
-		PrefixIndexedFields: &[]string{"req.index22"},
-		SuffixIndexedFields: &[]string{"req.index33"},
-		ActionSConns:        []string{"*internal"},
-		NestedFields:        true,
-		Opts: &ThresholdsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  []string{"thsr_p2"},
-				},
-			},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  true,
-				},
-			},
-		},
-	}
-
-	expected := &ThresholdSJsonCfg{
-		Enabled:               utils.BoolPointer(true),
-		Indexed_selects:       utils.BoolPointer(true),
-		Store_interval:        utils.StringPointer("2s"),
-		String_indexed_fields: &[]string{"req.index11"},
-		Prefix_indexed_fields: &[]string{"req.index22"},
-		Suffix_indexed_fields: &[]string{"req.index33"},
-		Actions_conns:         &[]string{"*internal"},
-		Nested_fields:         utils.BoolPointer(true),
-		Opts: &ThresholdsOptsJson{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  []string{"thsr_p2"},
-				},
-			},
-			ProfileIgnoreFilters: []*utils.DynamicBoolOpt{
-				{
-					Tenant: "cgrates.net",
-					Value:  true,
-				},
-			},
-		},
-	}
-
-	rcv := diffThresholdSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &ThresholdSJsonCfg{
-		Opts: &ThresholdsOptsJson{},
-	}
-	rcv = diffThresholdSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestThresholdSCloneSection(t *testing.T) {
-	thrsCfg := &ThresholdSCfg{
-		Enabled:             false,
-		IndexedSelects:      false,
-		StoreInterval:       1 * time.Second,
-		StringIndexedFields: &[]string{"req.index1"},
-		PrefixIndexedFields: &[]string{"req.index2"},
-		SuffixIndexedFields: &[]string{"req.index3"},
-		ActionSConns:        []string{},
-		NestedFields:        false,
-		Opts: &ThresholdsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{},
-		},
-	}
-
-	exp := &ThresholdSCfg{
-		Enabled:             false,
-		IndexedSelects:      false,
-		StoreInterval:       1 * time.Second,
-		StringIndexedFields: &[]string{"req.index1"},
-		PrefixIndexedFields: &[]string{"req.index2"},
-		SuffixIndexedFields: &[]string{"req.index3"},
-		ActionSConns:        []string{},
-		NestedFields:        false,
-		Opts: &ThresholdsOpts{
-			ProfileIDs: []*utils.DynamicStringSliceOpt{},
-		},
-	}
-
-	rcv := thrsCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

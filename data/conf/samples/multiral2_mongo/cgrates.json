@@ -20,7 +20,13 @@
 	"db_port": 27017,
 },
 
-"rates": {
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
+
+"rals": {
 	"enabled": true,
 },
 

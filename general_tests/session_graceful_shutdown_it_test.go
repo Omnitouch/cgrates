@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
+	"net/rpc"
 	"os/exec"
 	"path"
 	"reflect"
@@ -28,22 +29,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/apis"
-	"github.com/Omnitouch/cgrates/sessions"
+	v1 "github.com/cgrates/cgrates/apier/v1"
 
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	smgRplcCfgPath1, smgRplcCfgPath2 string
 	smgRplcCfgDIR1, smgRplcCfgDIR2   string
 	smgRplCfg1, smgRplCfg2           *config.CGRConfig
-	smgRplcRPC1, smgRplcRPC2         *birpc.Client
+	smgRplcRPC1, smgRplcRPC2         *rpc.Client
 	testEngine1, testEngine2         *exec.Cmd
 	sTestsSession1                   = []func(t *testing.T){
 		testSessionSRplcInitCfg,
@@ -86,21 +86,23 @@ func TestSessionSRplcGracefulShutdown(t *testing.T) {
 // Init Config
 func testSessionSRplcInitCfg(t *testing.T) {
 	smgRplcCfgPath1 = path.Join(*dataDir, "conf", "samples", "sessions_replication", smgRplcCfgDIR1)
-	if smgRplCfg1, err = config.NewCGRConfigFromPath(context.Background(), smgRplcCfgPath1); err != nil {
+	if smgRplCfg1, err = config.NewCGRConfigFromPath(smgRplcCfgPath1); err != nil {
 		t.Fatal(err)
 	}
 	smgRplcCfgPath2 = path.Join(*dataDir, "conf", "samples", "sessions_replication", smgRplcCfgDIR2)
-	if smgRplCfg2, err = config.NewCGRConfigFromPath(context.Background(), smgRplcCfgPath2); err != nil {
+	if smgRplCfg2, err = config.NewCGRConfigFromPath(smgRplcCfgPath2); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // Remove data in both rating and accounting db
 func testSessionSRplcResetDB(t *testing.T) {
-	if err := engine.InitDataDB(smgRplCfg1); err != nil {
+	if err := engine.InitDataDb(smgRplCfg1); err != nil {
 		t.Fatal(err)
 	}
-
+	if err := engine.InitStorDb(smgRplCfg1); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Start CGR Engine
@@ -127,51 +129,43 @@ func testSessionSRplcApierRpcConn(t *testing.T) {
 func testSessionSRplcApierGetActiveSessionsNotFound(t *testing.T) {
 	aSessions1 := make([]*sessions.ExternalSession, 0)
 	expected := "NOT_FOUND"
-	if err := smgRplcRPC1.Call(context.Background(), utils.SessionSv1GetActiveSessions, &utils.SessionFilter{}, &aSessions1); err == nil || err.Error() != expected {
+	if err := smgRplcRPC1.Call(utils.SessionSv1GetActiveSessions, &utils.SessionFilter{}, &aSessions1); err == nil || err.Error() != expected {
 		t.Error(err)
 	}
 	aSessions2 := make([]*sessions.ExternalSession, 0)
-	if err := smgRplcRPC2.Call(context.Background(), utils.SessionSv1GetActiveSessions, &utils.SessionFilter{}, &aSessions2); err == nil || err.Error() != expected {
+	if err := smgRplcRPC2.Call(utils.SessionSv1GetActiveSessions, &utils.SessionFilter{}, &aSessions2); err == nil || err.Error() != expected {
 		t.Error(err)
 	}
 }
 
 func testSessionSRplcApierSetChargerS(t *testing.T) {
-	chargerProfile1 := &apis.ChargerWithAPIOpts{
+	chargerProfile1 := &v1.ChargerWithAPIOpts{
 		ChargerProfile: &engine.ChargerProfile{
 			Tenant:       "cgrates.org",
 			ID:           "Default",
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{"*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 20,
-				},
-			},
+			Weight:       20,
 		},
 	}
 	var result1 string
-	if err := smgRplcRPC1.Call(context.Background(), utils.AdminSv1SetChargerProfile, chargerProfile1, &result1); err != nil {
+	if err := smgRplcRPC1.Call(utils.APIerSv1SetChargerProfile, chargerProfile1, &result1); err != nil {
 		t.Error(err)
 	} else if result1 != utils.OK {
 		t.Error("Unexpected reply returned", result1)
 	}
 
-	chargerProfile2 := &apis.ChargerWithAPIOpts{
+	chargerProfile2 := &v1.ChargerWithAPIOpts{
 		ChargerProfile: &engine.ChargerProfile{
 			Tenant:       "cgrates.org",
 			ID:           "Default",
 			RunID:        utils.MetaDefault,
 			AttributeIDs: []string{"*none"},
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 20,
-				},
-			},
+			Weight:       20,
 		},
 	}
 	var result2 string
-	if err := smgRplcRPC2.Call(context.Background(), utils.AdminSv1SetChargerProfile, chargerProfile2, &result2); err != nil {
+	if err := smgRplcRPC2.Call(utils.APIerSv1SetChargerProfile, chargerProfile2, &result2); err != nil {
 		t.Error(err)
 	} else if result2 != utils.OK {
 		t.Error("Unexpected reply returned", result2)
@@ -179,28 +173,21 @@ func testSessionSRplcApierSetChargerS(t *testing.T) {
 }
 
 func testSessionSRplcApierGetInitateSessions(t *testing.T) {
-	smgRplCfg1.SessionSCfg().Opts.Initiate = []*utils.DynamicBoolOpt{
-		{
-			Value:  true,
+	args := &sessions.V1InitSessionArgs{
+		InitSession: true,
+		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
-		},
-	}
-	args := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "TestSSv1ItInitiateSession",
-		Event: map[string]interface{}{
-			utils.Tenant:      "cgrates.org",
-			utils.RequestType: utils.MetaNone,
-
-			utils.OriginID: "testSessionRplORIGINID",
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaOriginID:    "testSessionRploriginID",
-			utils.OptsSesInitiate: true,
+			ID:     "TestSSv1ItInitiateSession",
+			Event: map[string]interface{}{
+				utils.Tenant:      "cgrates.org",
+				utils.RequestType: utils.MetaNone,
+				utils.CGRID:       "testSessionRplCGRID",
+				utils.OriginID:    "testSessionRplORIGINID",
+			},
 		},
 	}
 	var rply sessions.V1InitSessionReply
-	if err := smgRplcRPC2.Call(context.Background(), utils.SessionSv1InitiateSession,
+	if err := smgRplcRPC2.Call(utils.SessionSv1InitiateSession,
 		args, &rply); err != nil {
 		t.Error(err)
 	}
@@ -209,7 +196,7 @@ func testSessionSRplcApierGetInitateSessions(t *testing.T) {
 func testSessionSRplcApierGetActiveSessions(t *testing.T) {
 	expected := []*sessions.ExternalSession{
 		{
-			//CGRID:         "testSessionRplCGRID",
+			CGRID:         "testSessionRplCGRID",
 			RunID:         "*default",
 			ToR:           "",
 			OriginID:      "testSessionRplORIGINID",
@@ -236,11 +223,11 @@ func testSessionSRplcApierGetActiveSessions(t *testing.T) {
 		},
 	}
 	aSessions2 := make([]*sessions.ExternalSession, 0)
-	if err := smgRplcRPC2.Call(context.Background(), utils.SessionSv1GetActiveSessions, &utils.SessionFilter{}, &aSessions2); err != nil {
+	if err := smgRplcRPC2.Call(utils.SessionSv1GetActiveSessions, &utils.SessionFilter{}, &aSessions2); err != nil {
 		t.Error(err)
 	}
 	if !reflect.DeepEqual(&aSessions2, &expected) {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ToJSON(&expected), utils.ToJSON(&aSessions2))
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ToJSON(&aSessions2), utils.ToJSON(&expected))
 
 	}
 }
@@ -248,8 +235,8 @@ func testSessionSRplcApierGetActiveSessions(t *testing.T) {
 func testSessionSRplcApierGetPassiveSessions(t *testing.T) {
 	expected := []*sessions.ExternalSession{
 		{
-			//CGRID:         "testSessionRplCGRID",
-			RunID:         "",
+			CGRID:         "testSessionRplCGRID",
+			RunID:         "*default",
 			ToR:           "",
 			OriginID:      "testSessionRplORIGINID",
 			OriginHost:    "",
@@ -275,11 +262,11 @@ func testSessionSRplcApierGetPassiveSessions(t *testing.T) {
 		},
 	}
 	aSessions2 := make([]*sessions.ExternalSession, 0)
-	if err := smgRplcRPC1.Call(context.Background(), utils.SessionSv1GetPassiveSessions, &utils.SessionFilter{}, &aSessions2); err != nil {
+	if err := smgRplcRPC1.Call(utils.SessionSv1GetPassiveSessions, &utils.SessionFilter{}, &aSessions2); err != nil {
 		t.Error(err)
 	}
 	if !reflect.DeepEqual(&aSessions2, &expected) {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ToJSON(&expected), utils.ToJSON(&aSessions2))
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ToJSON(&aSessions2), utils.ToJSON(&expected))
 
 	}
 }
@@ -298,8 +285,8 @@ func testSessionSRplcApierStopSession2(t *testing.T) {
 func testSessionSRplcApierGetPassiveSessionsAfterStop(t *testing.T) {
 	expected := []*sessions.ExternalSession{
 		{
-			//CGRID:         "testSessionRplCGRID",
-			RunID:         "",
+			CGRID:         "testSessionRplCGRID",
+			RunID:         "*default",
 			ToR:           "",
 			OriginID:      "testSessionRplORIGINID",
 			OriginHost:    "",
@@ -325,11 +312,11 @@ func testSessionSRplcApierGetPassiveSessionsAfterStop(t *testing.T) {
 		},
 	}
 	aSessions2 := make([]*sessions.ExternalSession, 0)
-	if err := smgRplcRPC1.Call(context.Background(), utils.SessionSv1GetPassiveSessions, &utils.SessionFilter{}, &aSessions2); err != nil {
+	if err := smgRplcRPC1.Call(utils.SessionSv1GetPassiveSessions, &utils.SessionFilter{}, &aSessions2); err != nil {
 		t.Error(err)
 	}
 	if !reflect.DeepEqual(&aSessions2, &expected) {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ToJSON(&expected), utils.ToJSON(&aSessions2))
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ToJSON(&aSessions2), utils.ToJSON(&expected))
 
 	}
 }

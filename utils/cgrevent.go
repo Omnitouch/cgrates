@@ -27,6 +27,7 @@ import (
 type CGREvent struct {
 	Tenant  string
 	ID      string
+	Time    *time.Time // event time
 	Event   map[string]interface{}
 	APIOpts map[string]interface{}
 	clnb    bool //rpcclonable
@@ -49,6 +50,15 @@ func (ev *CGREvent) CheckMandatoryFields(fldNames []string) error {
 // FieldAsString returns a field as string instance
 func (ev *CGREvent) FieldAsString(fldName string) (val string, err error) {
 	iface, has := ev.Event[fldName]
+	if !has {
+		return "", ErrNotFound
+	}
+	return IfaceAsString(iface), nil
+}
+
+// OptAsString returns an option as string
+func (ev *CGREvent) OptAsString(optName string) (val string, err error) {
+	iface, has := ev.APIOpts[optName]
 	if !has {
 		return "", ErrNotFound
 	}
@@ -84,6 +94,38 @@ func (ev *CGREvent) FieldAsDuration(fldName string) (d time.Duration, err error)
 	return IfaceAsDuration(iface)
 }
 
+// OptAsDuration returns an option as Duration instance
+func (ev *CGREvent) OptAsDuration(optName string) (d time.Duration, err error) {
+	iface, has := ev.APIOpts[optName]
+	if !has {
+		err = ErrNotFound
+		return
+	}
+	return IfaceAsDuration(iface)
+}
+
+// FieldAsFloat64 returns a field as float64 instance
+func (ev *CGREvent) FieldAsFloat64(fldName string) (f float64, err error) {
+	iface, has := ev.Event[fldName]
+	if !has {
+		return f, ErrNotFound
+	}
+	return IfaceAsFloat64(iface)
+}
+
+// FieldAsInt64 returns a field as int64 instance
+func (ev *CGREvent) FieldAsInt64(fldName string) (f int64, err error) {
+	iface, has := ev.Event[fldName]
+	if !has {
+		return f, ErrNotFound
+	}
+	return IfaceAsInt64(iface)
+}
+
+func (ev *CGREvent) TenantID() string {
+	return ConcatenatedKey(ev.Tenant, ev.ID)
+}
+
 func (ev *CGREvent) Clone() (clned *CGREvent) {
 	clned = &CGREvent{
 		Tenant:  ev.Tenant,
@@ -91,43 +133,68 @@ func (ev *CGREvent) Clone() (clned *CGREvent) {
 		Event:   make(map[string]interface{}), // a bit forced but safe
 		APIOpts: make(map[string]interface{}),
 	}
+	if ev.Time != nil {
+		clned.Time = TimePointer(*ev.Time)
+	}
 	for k, v := range ev.Event {
 		clned.Event[k] = v
 	}
-	if ev.APIOpts != nil {
-		for opt, val := range ev.APIOpts {
-			clned.APIOpts[opt] = val
-		}
+	for opt, val := range ev.APIOpts {
+		clned.APIOpts[opt] = val
 	}
 	return
 }
 
 // AsDataProvider returns the CGREvent as MapStorage with *opts and *req paths set
-func (cgrEv *CGREvent) AsDataProvider() (ev MapStorage) {
+func (cgrEv *CGREvent) AsDataProvider() (ev DataProvider) {
 	return MapStorage{
 		MetaOpts: cgrEv.APIOpts,
 		MetaReq:  cgrEv.Event,
 	}
 }
 
-// CGREventWithRateProfile is used to get the rates prom a specific RatePRofileID that is matching our Event
-type CGREventWithRateProfile struct {
-	RateProfileID string
-	*CGREvent
-}
-
-type EventsWithOpts struct {
+// EventWithFlags is used where flags are needed to mark processing
+type EventWithFlags struct {
+	Flags []string
 	Event map[string]interface{}
-	Opts  map[string]interface{}
 }
 
-// CGREventWithEeIDs is the CGREventWithOpts with EventExporterIDs
-type CGREventWithEeIDs struct {
-	EeIDs []string
-	*CGREvent
+// GetRoutePaginatorFromOpts will consume supplierPaginator if present
+func GetRoutePaginatorFromOpts(ev map[string]interface{}) (args Paginator, err error) {
+	if ev == nil {
+		return
+	}
+	//check if we have suppliersLimit in event and in case it has add it in args
+	limitIface, hasRoutesLimit := ev[OptsRoutesLimit]
+	if hasRoutesLimit {
+		delete(ev, OptsRoutesLimit)
+		var limit int64
+		if limit, err = IfaceAsInt64(limitIface); err != nil {
+			return
+		}
+		args = Paginator{
+			Limit: IntPointer(int(limit)),
+		}
+	}
+	//check if we have offset in event and in case it has add it in args
+	offsetIface, hasRoutesOffset := ev[OptsRoutesOffset]
+	if !hasRoutesOffset {
+		return
+	}
+	delete(ev, OptsRoutesOffset)
+	var offset int64
+	if offset, err = IfaceAsInt64(offsetIface); err != nil {
+		return
+	}
+	if !hasRoutesLimit { //in case we don't have limit, but we have offset we need to initialize the struct
+		args = Paginator{
+			Offset: IntPointer(int(offset)),
+		}
+		return
+	}
+	args.Offset = IntPointer(int(offset))
+	return
 }
-
-func (CGREventWithEeIDs) RPCClone() {} // disable rpcClonable from CGREvent
 
 // NMAsCGREvent builds a CGREvent considering Time as time.Now()
 // and Event as linear map[string]interface{} with joined paths
@@ -140,10 +207,10 @@ func NMAsCGREvent(nM *OrderedNavigableMap, tnt string, pathSep string, opts MapS
 	if el == nil {
 		return
 	}
-
 	cgrEv = &CGREvent{
 		Tenant:  tnt,
 		ID:      UUIDSha1Prefix(),
+		Time:    TimePointer(time.Now()),
 		Event:   make(map[string]interface{}),
 		APIOpts: opts,
 	}

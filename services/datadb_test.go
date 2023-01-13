@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // TestDataDBCoverage for cover testing
@@ -35,7 +35,7 @@ func TestDataDBCoverage(t *testing.T) {
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	cM := engine.NewConnManager(cfg)
+	cM := engine.NewConnManager(cfg, nil)
 	db := NewDataDBService(cfg, cM, srvDep)
 	if db.IsRunning() {
 		t.Errorf("Expected service to be down")
@@ -54,30 +54,93 @@ func TestDataDBCoverage(t *testing.T) {
 		Name: "10",
 		User: "cgrates",
 		Opts: &config.DataDBOpts{
-			MongoQueryTimeout: 10 * time.Second,
-			RedisClusterSync:  5 * time.Second,
+			RedisMaxConns:           10,
+			RedisConnectAttempts:    20,
+			RedisSentinel:           "",
+			RedisCluster:            false,
+			RedisClusterSync:        5 * time.Second,
+			RedisClusterOndownDelay: 0,
+			RedisConnectTimeout:     0,
+			RedisReadTimeout:        0,
+			RedisWriteTimeout:       0,
+			MongoQueryTimeout:       10 * time.Second,
+			RedisTLS:                false,
 		},
 		RmtConns: []string{},
 		RplConns: []string{},
-		Items: map[string]*config.ItemOpts{
-			utils.MetaAccounts:           {},
-			utils.MetaActions:            {},
-			utils.MetaCronExp:            {},
-			utils.MetaResourceProfile:    {},
-			utils.MetaStatQueues:         {},
-			utils.MetaResources:          {},
-			utils.MetaStatQueueProfiles:  {},
-			utils.MetaThresholds:         {},
-			utils.MetaThresholdProfiles:  {},
-			utils.MetaFilters:            {},
-			utils.MetaRouteProfiles:      {},
-			utils.MetaAttributeProfiles:  {},
-			utils.MetaDispatcherHosts:    {},
-			utils.MetaChargerProfiles:    {},
-			utils.MetaDispatcherProfiles: {},
-			utils.MetaLoadIDs:            {},
-			utils.MetaRateProfiles:       {},
-			utils.MetaActionProfiles:     {},
+		Items: map[string]*config.ItemOpt{
+			utils.MetaAccounts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaReverseDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDestinations: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRatingProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActions: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAccountActionPlans: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaActionTriggers: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaSharedGroups: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaTimings: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResourceProfile: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueues: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaResources: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaStatQueueProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholds: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaThresholdProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaFilters: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaRouteProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaAttributeProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherHosts: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaChargerProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaDispatcherProfiles: {
+				Replicate: false,
+				Remote:    false},
+			utils.MetaLoadIDs: {
+				Replicate: false,
+				Remote:    false},
 		},
 	}
 	db.oldDBCfg = oldcfg
@@ -85,7 +148,18 @@ func TestDataDBCoverage(t *testing.T) {
 	if !reflect.DeepEqual(serviceName, utils.DataDB) {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.DataDB, serviceName)
 	}
-	if shouldRun := db.ShouldRun(); !shouldRun {
-		t.Errorf("\nExpecting <true>,\n Received <%+v>", shouldRun)
+	shouldRun := db.ShouldRun()
+	if !reflect.DeepEqual(shouldRun, false) {
+		t.Errorf("\nExpecting <false>,\n Received <%+v>", shouldRun)
 	}
+	getDMChan := db.GetDMChan()
+	if !reflect.DeepEqual(getDMChan, db.dbchan) {
+		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", db.dbchan, getDMChan)
+	}
+	db.dm = &engine.DataManager{}
+	getDM := db.GetDM()
+	if !reflect.DeepEqual(getDM, db.dm) {
+		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", db.dm, getDM)
+	}
+
 }

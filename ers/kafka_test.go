@@ -23,10 +23,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestKafkasetOpts(t *testing.T) {
@@ -38,6 +38,7 @@ func TestKafkasetOpts(t *testing.T) {
 		groupID: "new",
 		maxWait: time.Second,
 	}
+
 	if err := k.setOpts(&config.EventReaderOpts{
 		KafkaTopic:   utils.StringPointer("cdrs"),
 		KafkaGroupID: utils.StringPointer("new"),
@@ -104,7 +105,7 @@ func TestKafkaERServe(t *testing.T) {
 	rdrEvents := make(chan *erEvent, 1)
 	rdrExit := make(chan struct{}, 1)
 	rdrErr := make(chan error, 1)
-	rdr, err := NewKafkaER(cfg, 0, rdrEvents, make(chan *erEvent, 1), rdrErr, fltrS, rdrExit, nil)
+	rdr, err := NewKafkaER(cfg, 0, rdrEvents, make(chan *erEvent, 1), rdrErr, fltrS, rdrExit)
 	if err != nil {
 		t.Error(err)
 	}
@@ -187,6 +188,7 @@ func TestKafkaERProcessMessage(t *testing.T) {
 	select {
 	case data := <-rdr.rdrEvents:
 		expEvent.ID = data.cgrEvent.ID
+		expEvent.Time = data.cgrEvent.Time
 		if !reflect.DeepEqual(data.cgrEvent, expEvent) {
 			t.Errorf("Expected %v but received %v", utils.ToJSON(expEvent), utils.ToJSON(data.cgrEvent))
 		}
@@ -222,7 +224,7 @@ func TestKafkaERProcessMessageError1(t *testing.T) {
 
 func TestKafkaERProcessMessageError2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	fltrs := engine.NewFilterS(cfg, nil, dm)
 	rdr := &KafkaER{

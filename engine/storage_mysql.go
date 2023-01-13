@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -36,24 +36,27 @@ func NewMySQLStorage(host, port, name, user, password string,
 	connectString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&loc=%s&parseTime=true&sql_mode='ALLOW_INVALID_DATES'",
 		user, password, host, port, name, location)
 	db, err := gorm.Open(mysql.Open(connectString+AppendToMysqlDSNOpts(dsnParams)), &gorm.Config{AllowGlobalUpdate: true})
+
 	if err != nil {
 		return nil, err
 	}
+
 	mySQLStorage := new(MySQLStorage)
-	if mySQLStorage.DB, err = db.DB(); err != nil {
+	if mySQLStorage.Db, err = db.DB(); err != nil {
 		return nil, err
 	}
-	if mySQLStorage.DB.Ping(); err != nil {
+	if mySQLStorage.Db.Ping(); err != nil {
 		return nil, err
 	}
-	mySQLStorage.DB.SetMaxIdleConns(maxIdleConn)
-	mySQLStorage.DB.SetMaxOpenConns(maxConn)
-	mySQLStorage.DB.SetConnMaxLifetime(connMaxLifetime)
+	mySQLStorage.Db.SetMaxIdleConns(maxIdleConn)
+	mySQLStorage.Db.SetMaxOpenConns(maxConn)
+	mySQLStorage.Db.SetConnMaxLifetime(connMaxLifetime)
 	//db.LogMode(true)
 	mySQLStorage.db = db
 	return &SQLStorage{
-		DB:      mySQLStorage.DB,
+		Db:      mySQLStorage.Db,
 		db:      mySQLStorage.db,
+		StorDB:  mySQLStorage,
 		SQLImpl: mySQLStorage,
 	}, nil
 }

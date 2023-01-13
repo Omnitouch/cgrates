@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package registrarc
 
 import (
+	"net/rpc"
 	"os/exec"
 	"path"
 	"reflect"
@@ -30,12 +31,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/loaders"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -47,7 +45,7 @@ var (
 	rpcsDir     string
 	rpcsCfgPath string
 	rpcsCfg     *config.CGRConfig
-	rpcsRPC     *birpc.Client
+	rpcsRPC     *rpc.Client
 
 	rpchTest = []func(t *testing.T){
 		testRPCInitCfg,
@@ -85,13 +83,16 @@ func testRPCInitCfg(t *testing.T) {
 	rpcCfgPath = path.Join(*dataDir, "conf", "samples", "registrarc", rpcDir)
 	rpcsCfgPath = path.Join(*dataDir, "conf", "samples", "registrarc", rpcsDir)
 	var err error
-	if rpcsCfg, err = config.NewCGRConfigFromPath(context.Background(), rpcsCfgPath); err != nil {
+	if rpcsCfg, err = config.NewCGRConfigFromPath(rpcsCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testRPCInitDB(t *testing.T) {
-	if err := engine.InitDataDB(rpcsCfg); err != nil {
+	if err := engine.InitDataDb(rpcsCfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.InitStorDb(rpcsCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -109,12 +110,9 @@ func testRPCStartEngine(t *testing.T) {
 
 func testRPCLoadData(t *testing.T) {
 	var reply string
-	if err := rpcsRPC.Call(context.Background(), utils.LoaderSv1Run, &loaders.ArgsProcessFolder{
-		APIOpts: map[string]interface{}{utils.MetaCache: utils.MetaReload},
-	}, &reply); err != nil {
+	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "testit")}
+	if err := rpcsRPC.Call(utils.APIerSv1LoadTariffPlanFromFolder, attrs, &reply); err != nil {
 		t.Error(err)
-	} else if reply != utils.OK {
-		t.Error("Unexpected reply returned", reply)
 	}
 	time.Sleep(100 * time.Millisecond)
 }
@@ -129,7 +127,7 @@ func testRPCChargerSNoAttr(t *testing.T) {
 	}
 	expErr := utils.NewErrServerError(rpcclient.ErrDisconnected).Error()
 	var rply []*engine.ChrgSProcessEventReply
-	if err := rpcsRPC.Call(context.Background(), utils.ChargerSv1ProcessEvent, cgrEv, &rply); err == nil || err.Error() != expErr {
+	if err := rpcsRPC.Call(utils.ChargerSv1ProcessEvent, cgrEv, &rply); err == nil || err.Error() != expErr {
 		t.Errorf("Expected error: %s,received: %v", expErr, err)
 	}
 }
@@ -154,81 +152,56 @@ func testRPCChargerSWithAttr(t *testing.T) {
 	processedEv := []*engine.ChrgSProcessEventReply{
 		{
 			ChargerSProfile: "CustomerCharges",
-			AlteredFields: []*engine.FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-			},
+			AlteredFields:   []string{"*req.RunID"},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				Event: map[string]interface{}{
 					"Account": "1010",
+					"RunID":   "CustomerCharges",
 				},
 				APIOpts: map[string]interface{}{
-					"*chargeID":        "908bd346b2203977a829c917ba25d1cd784842be",
-					"*attrProcessRuns": 1.,
-					"*subsys":          "*chargers",
-					"*runID":           "CustomerCharges",
+					utils.OptsAttributesProcessRuns: 1.,
+					"*subsys":                       "*chargers",
 				},
 			},
 		}, {
-			ChargerSProfile: "Raw",
-			AlteredFields: []*engine.FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-				{
-					MatchedProfileID: "*constant:*req.RequestType:*none",
-					Fields:           []string{"*req.RequestType"},
-				},
-			},
+			ChargerSProfile:    "Raw",
+			AttributeSProfiles: []string{"*constant:*req.RequestType:*none"},
+			AlteredFields:      []string{"*req.RunID", "*req.RequestType"},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				Event: map[string]interface{}{
 					"Account":     "1010",
 					"RequestType": "*none",
+					"RunID":       "raw",
 				},
 				APIOpts: map[string]interface{}{
-					"*chargeID":        "ce15802a8c5e8e9db0ffaf10130ef265296e9ea4",
-					"*attrProcessRuns": 1.,
-					"*subsys":          "*chargers",
-					"*runID":           "raw",
-					"*attrProfileIDs":  []interface{}{"*constant:*req.RequestType:*none"},
-					"*context":         "*chargers",
+					utils.OptsAttributesProcessRuns: 1.,
+					utils.OptsAttributesProfileIDs:  []interface{}{"*constant:*req.RequestType:*none"},
+					"*subsys":                       "*chargers",
 				},
 			},
 		}, {
-			ChargerSProfile: "SupplierCharges", AlteredFields: []*engine.FieldsAltered{
-				{
-					MatchedProfileID: utils.MetaDefault,
-					Fields:           []string{utils.MetaOptsRunID, utils.MetaOpts + utils.NestingSep + utils.MetaChargeID, utils.MetaOpts + utils.NestingSep + utils.MetaSubsys},
-				},
-				{
-					MatchedProfileID: "cgrates.org:ATTR_SUPPLIER1",
-					Fields:           []string{"*req.Subject"},
-				},
-			},
+			ChargerSProfile:    "SupplierCharges",
+			AttributeSProfiles: []string{"cgrates.org:ATTR_SUPPLIER1"},
+			AlteredFields:      []string{"*req.RunID", "*req.Subject"},
 			CGREvent: &utils.CGREvent{
 				Tenant: "cgrates.org",
 				Event: map[string]interface{}{
 					"Account": "1010",
+					"RunID":   "SupplierCharges",
 					"Subject": "SUPPLIER1",
 				},
 				APIOpts: map[string]interface{}{
-					"*chargeID":        "c0766c230f77b0ee496629be7efa0db24e208cfe",
-					"*context":         "*chargers",
-					"*attrProcessRuns": 1.,
-					"*subsys":          "*chargers",
-					"*runID":           "SupplierCharges",
-					"*attrProfileIDs":  []interface{}{"ATTR_SUPPLIER1"},
+					utils.OptsAttributesProcessRuns: 1.,
+					"*attrProfileIDs":               []interface{}{"ATTR_SUPPLIER1"},
+					"*subsys":                       "*chargers",
 				},
 			},
 		},
 	}
 	var rply []*engine.ChrgSProcessEventReply
-	if err := rpcsRPC.Call(context.Background(), utils.ChargerSv1ProcessEvent, cgrEv, &rply); err != nil {
+	if err := rpcsRPC.Call(utils.ChargerSv1ProcessEvent, cgrEv, &rply); err != nil {
 		t.Fatal(err)
 	}
 	sort.Slice(rply, func(i, j int) bool {

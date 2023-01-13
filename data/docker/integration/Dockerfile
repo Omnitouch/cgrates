@@ -30,9 +30,9 @@ RUN apt-get install -y mongodb-org postgresql rabbitmq-server
 
 WORKDIR /kafka
 
-RUN wget "https://archive.apache.org/dist/kafka/2.1.1/kafka_2.11-2.1.1.tgz" 
-RUN tar -xvzf ./kafka_2.11-2.1.1.tgz --strip 1
-RUN rm kafka_2.11-2.1.1.tgz
+RUN wget "https://archive.apache.org/dist/kafka/2.1.0/kafka_2.11-2.1.0.tgz" 
+RUN tar -xvzf ./kafka_2.11-2.1.0.tgz --strip 1
+RUN rm kafka_2.11-2.1.0.tgz
 COPY ./conf/server.properties /kafka/config/server.properties
 WORKDIR /
 

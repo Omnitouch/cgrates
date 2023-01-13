@@ -23,8 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // Guardian is the global package variable
@@ -33,7 +32,7 @@ var Guardian = &GuardianLocker{
 	refs:  make(map[string]*refObj)}
 
 type itemLock struct {
-	lk  chan struct{}
+	lk  chan struct{} //better with  mutex
 	cnt int64
 }
 
@@ -142,25 +141,26 @@ func (gl *GuardianLocker) unlockWithReference(refID string) (lkIDs []string) {
 }
 
 // Guard executes the handler between locks
-func (gl *GuardianLocker) Guard(ctx *context.Context, handler func(*context.Context) error, timeout time.Duration, lockIDs ...string) (err error) {
+func (gl *GuardianLocker) Guard(handler func() error, timeout time.Duration, lockIDs ...string) (err error) { // do we need the interface here as a reply?
 	for _, lockID := range lockIDs {
 		gl.lockItem(lockID)
 	}
 	errChan := make(chan error, 1)
-	if timeout > 0 { // wait with timeout
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel() // stop the context at the end of function
-	}
 	go func() {
-		errChan <- handler(ctx)
+		errChan <- handler()
 	}()
-
-	select {
-	case err = <-errChan:
+	if timeout > 0 { // wait with timeout
+		tm := time.NewTimer(timeout)
+		select {
+		case err = <-errChan:
+			close(errChan)
+			tm.Stop()
+		case <-tm.C:
+			utils.Logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: %+v", lockIDs))
+		}
+	} else { // a bit dangerous but wait till handler finishes
+		err = <-errChan
 		close(errChan)
-	case <-ctx.Done(): // ignore context error but log it
-		utils.Logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: <%+v> because: <%s> ", lockIDs, ctx.Err()))
 	}
 	for _, lockID := range lockIDs {
 		gl.unlockItem(lockID)
@@ -180,28 +180,4 @@ func (gl *GuardianLocker) UnguardIDs(refID string) []string {
 		return gl.unlockWithReference(refID)
 	}
 	return nil
-}
-
-type AttrRemoteLockWithAPIOpts struct {
-	APIOpts map[string]interface{}
-	Tenant  string
-	utils.AttrRemoteLock
-}
-
-type AttrRemoteUnlockWithAPIOpts struct {
-	APIOpts map[string]interface{}
-	Tenant  string
-	RefID   string
-}
-
-// RemoteLock will lock a key from remote
-func (gl *GuardianLocker) V1RemoteLock(_ *context.Context, attr *AttrRemoteLockWithAPIOpts, reply *string) (err error) {
-	*reply = gl.GuardIDs(attr.ReferenceID, attr.Timeout, attr.LockIDs...)
-	return
-}
-
-// RemoteUnlock will unlock a key from remote based on reference ID
-func (gl *GuardianLocker) V1RemoteUnlock(_ *context.Context, refID *AttrRemoteUnlockWithAPIOpts, reply *[]string) (err error) {
-	*reply = gl.UnguardIDs(refID.RefID)
-	return
 }

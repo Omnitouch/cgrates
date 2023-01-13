@@ -22,21 +22,21 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewRadiusAgent returns the Radius Agent
 func NewRadiusAgent(cfg *config.CGRConfig, filterSChan chan *engine.FilterS,
-	connMgr *engine.ConnManager,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &RadiusAgent{
 		cfg:         cfg,
 		filterSChan: filterSChan,
+		shdChan:     shdChan,
 		connMgr:     connMgr,
 		srvDep:      srvDep,
 	}
@@ -47,6 +47,7 @@ type RadiusAgent struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	filterSChan chan *engine.FilterS
+	shdChan     *utils.SyncedChan
 	stopChan    chan struct{}
 
 	rad     *agents.RadiusAgent
@@ -59,15 +60,13 @@ type RadiusAgent struct {
 }
 
 // Start should handle the sercive start
-func (rad *RadiusAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (rad *RadiusAgent) Start() (err error) {
 	if rad.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, rad.filterSChan); err != nil {
-		return
-	}
+	filterS := <-rad.filterSChan
+	rad.filterSChan <- filterS
 
 	rad.Lock()
 	defer rad.Unlock()
@@ -82,21 +81,21 @@ func (rad *RadiusAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (
 	}
 	rad.stopChan = make(chan struct{})
 
-	go rad.listenAndServe(rad.rad, shtDwn)
+	go rad.listenAndServe(rad.rad)
 
 	return
 }
 
-func (rad *RadiusAgent) listenAndServe(r *agents.RadiusAgent, shtDwn context.CancelFunc) (err error) {
+func (rad *RadiusAgent) listenAndServe(r *agents.RadiusAgent) (err error) {
 	if err = r.ListenAndServe(rad.stopChan); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<%s> error: <%s>", utils.RadiusAgent, err.Error()))
-		shtDwn()
+		rad.shdChan.CloseOnce()
 	}
 	return
 }
 
 // Reload handles the change of config
-func (rad *RadiusAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (rad *RadiusAgent) Reload() (err error) {
 	if rad.lnet == rad.cfg.RadiusAgentCfg().ListenNet &&
 		rad.lauth == rad.cfg.RadiusAgentCfg().ListenAuth &&
 		rad.lacct == rad.cfg.RadiusAgentCfg().ListenAcct {
@@ -104,7 +103,7 @@ func (rad *RadiusAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc) 
 	}
 
 	rad.shutdown()
-	return rad.Start(ctx, shtDwn)
+	return rad.Start()
 }
 
 // Shutdown stops the service

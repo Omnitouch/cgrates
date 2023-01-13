@@ -19,9 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewVirtualEE(cfg *config.EventExporterCfg, dc *utils.SafeMapStorage) *VirtualEE {
@@ -37,13 +36,12 @@ type VirtualEE struct {
 	dc  *utils.SafeMapStorage
 }
 
-func (vEe *VirtualEE) Cfg() *config.EventExporterCfg                                { return vEe.cfg }
-func (vEe *VirtualEE) Connect() error                                               { return nil }
-func (vEe *VirtualEE) ExportEvent(*context.Context, interface{}, interface{}) error { return nil }
-func (vEe *VirtualEE) Close() error                                                 { return nil }
-func (vEe *VirtualEE) GetMetrics() *utils.SafeMapStorage                            { return vEe.dc }
-func (vEe *VirtualEE) ExtraData(*utils.CGREvent) interface{}                        { return nil }
-func (vEe *VirtualEE) PrepareMap(mp *utils.CGREvent) (interface{}, error)           { return nil, nil }
+func (vEe *VirtualEE) Cfg() *config.EventExporterCfg                   { return vEe.cfg }
+func (vEe *VirtualEE) Connect() error                                  { return nil }
+func (vEe *VirtualEE) ExportEvent(interface{}, string) error           { return nil }
+func (vEe *VirtualEE) Close() error                                    { return nil }
+func (vEe *VirtualEE) GetMetrics() *utils.SafeMapStorage               { return vEe.dc }
+func (vEe *VirtualEE) PrepareMap(*utils.CGREvent) (interface{}, error) { return nil, nil }
 func (vEe *VirtualEE) PrepareOrderMap(*utils.OrderedNavigableMap) (interface{}, error) {
 	return nil, nil
 }

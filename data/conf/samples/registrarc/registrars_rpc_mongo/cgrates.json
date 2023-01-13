@@ -21,7 +21,11 @@
 },
 
 
-
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
 
 
 "rpc_conns": {
@@ -38,18 +42,8 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 },
 
-"loaders": [
-	{
-		"id": "*default",
-		"enabled": true,
-		"tenant": "cgrates.org",
-		"lockfile_path": ".cgr.lck",
-		"tp_in_dir": "/usr/share/cgrates/tariffplans/testit",
-		"tp_out_dir": "",
-	},
-],
 }

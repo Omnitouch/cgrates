@@ -24,11 +24,11 @@ import (
 	"net/rpc"
 	"path"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -40,19 +40,17 @@ var (
 	SessionsDataTests = []func(t *testing.T){
 		testSessionsDataInitCfg,
 		testSessionsDataResetDataDb,
+		testSessionsDataResetStorDb,
 		testSessionsDataStartEngine,
 		testSessionsDataApierRpcConn,
-		/*
-			testSessionsDataTPFromFolder,
-			testSessionsDataLastUsedData,
-			testSessionsDataLastUsedMultipleUpdates,
-			testSessionsDataTTLExpired,
-			testSessionsDataTTLExpMultiUpdates,
-			testSessionsDataMultipleDataNoUsage,
-			testSessionsDataTTLUsageProtection,
-			testSessionsDataTTLLastUsage,
-
-		*/
+		testSessionsDataTPFromFolder,
+		testSessionsDataLastUsedData,
+		testSessionsDataLastUsedMultipleUpdates,
+		testSessionsDataTTLExpired,
+		testSessionsDataTTLExpMultiUpdates,
+		testSessionsDataMultipleDataNoUsage,
+		testSessionsDataTTLUsageProtection,
+		testSessionsDataTTLLastUsage,
 		testSessionsDataTTKillEngine,
 	}
 )
@@ -80,7 +78,7 @@ func TestSessionsData(t *testing.T) {
 func testSessionsDataInitCfg(t *testing.T) {
 	dataCfgPath = path.Join(*dataDir, "conf", "samples", dataCfgDIR)
 	var err error
-	dataCfg, err = config.NewCGRConfigFromPath(context.Background(), dataCfgPath)
+	dataCfg, err = config.NewCGRConfigFromPath(dataCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -88,7 +86,14 @@ func testSessionsDataInitCfg(t *testing.T) {
 
 // Remove data in both rating and accounting db
 func testSessionsDataResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(dataCfg); err != nil {
+	if err := engine.InitDataDb(dataCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testSessionsDataResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(dataCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -108,8 +113,6 @@ func testSessionsDataApierRpcConn(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-/*
 
 // Load the tariff plan, creating accounts and their balances
 func testSessionsDataTPFromFolder(t *testing.T) {
@@ -1154,8 +1157,6 @@ func testSessionsDataTTLLastUsage(t *testing.T) {
 		}
 	}
 }
-
-*/
 
 func testSessionsDataTTKillEngine(t *testing.T) {
 	if err := engine.KillEngine(100); err != nil {

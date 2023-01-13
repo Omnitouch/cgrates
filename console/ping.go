@@ -21,7 +21,7 @@ package console
 import (
 	"strings"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
@@ -71,18 +71,16 @@ func (self *CmdApierPing) RpcMethod() string {
 		return utils.DispatcherSv1Ping
 	case utils.AnalyzerSLow:
 		return utils.AnalyzerSv1Ping
+	case utils.SchedulerSLow:
+		return utils.SchedulerSv1Ping
+	case utils.RALsLow:
+		return utils.RALsV1Ping
 	case utils.ReplicatorLow:
 		return utils.ReplicatorSv1Ping
-	// case utils.ApierSLow:
-	// return utils.APIerSv1Ping
+	case utils.ApierSLow:
+		return utils.APIerSv1Ping
 	case utils.EEsLow:
 		return utils.EeSv1Ping
-	case utils.RateSLow:
-		return utils.RateSv1Ping
-	case utils.AccountSLow:
-		return utils.AccountSv1Ping
-	case utils.ActionSLow:
-		return utils.ActionSv1Ping
 	default:
 	}
 	return self.rpcMethod

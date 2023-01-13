@@ -11,8 +11,17 @@
 	"db_type": "*internal",	
 },
 
-"rates": {
-	"enabled": true,
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+"rals": {
+	"enabled": true,					// enable Rater service: <true|false>
+},
+
+"schedulers": {
+	"enabled": true,					// start Scheduler service: <true|false>
 },
 
 "cdrs": {
@@ -31,14 +40,15 @@
 "sessions": {
 	"enabled": true,
 	"debit_interval": "1ms",					// interval to perform debits on.
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

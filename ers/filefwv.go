@@ -28,11 +28,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewFWVFileER(cfg *config.CGRConfig, cfgIdx int,
@@ -84,6 +83,36 @@ func (rdr *FWVFileER) Config() *config.EventReaderCfg {
 	return rdr.cgrCfg.ERsCfg().Readers[rdr.cfgIdx]
 }
 
+func (rdr *FWVFileER) serveDefault() {
+	tm := time.NewTimer(0)
+	for {
+		// Not automated, process and sleep approach
+		select {
+		case <-rdr.rdrExit:
+			tm.Stop()
+			utils.Logger.Info(
+				fmt.Sprintf("<%s> stop monitoring path <%s>",
+					utils.ERs, rdr.rdrDir))
+			return
+		case <-tm.C:
+		}
+		filesInDir, _ := os.ReadDir(rdr.rdrDir)
+		for _, file := range filesInDir {
+			if !strings.HasSuffix(file.Name(), utils.FWVSuffix) { // hardcoded file extension for xml event reader
+				continue // used in order to filter the files from directory
+			}
+			go func(fileName string) {
+				if err := rdr.processFile(rdr.rdrDir, fileName); err != nil {
+					utils.Logger.Warning(
+						fmt.Sprintf("<%s> processing file %s, error: %s",
+							utils.ERs, fileName, err.Error()))
+				}
+			}(file.Name())
+		}
+		tm.Reset(rdr.Config().RunDelay)
+	}
+}
+
 func (rdr *FWVFileER) Serve() (err error) {
 	switch rdr.Config().RunDelay {
 	case time.Duration(0): // 0 disables the automatic read, maybe done per API
@@ -92,35 +121,7 @@ func (rdr *FWVFileER) Serve() (err error) {
 		return utils.WatchDir(rdr.rdrDir, rdr.processFile,
 			utils.ERs, rdr.rdrExit)
 	default:
-		go func() {
-			tm := time.NewTimer(0)
-			for {
-				// Not automated, process and sleep approach
-				select {
-				case <-rdr.rdrExit:
-					tm.Stop()
-					utils.Logger.Info(
-						fmt.Sprintf("<%s> stop monitoring path <%s>",
-							utils.ERs, rdr.rdrDir))
-					return
-				case <-tm.C:
-				}
-				filesInDir, _ := os.ReadDir(rdr.rdrDir)
-				for _, file := range filesInDir {
-					if !strings.HasSuffix(file.Name(), utils.FWVSuffix) { // hardcoded file extension for xml event reader
-						continue // used in order to filter the files from directory
-					}
-					go func(fileName string) {
-						if err := rdr.processFile(rdr.rdrDir, fileName); err != nil {
-							utils.Logger.Warning(
-								fmt.Sprintf("<%s> processing file %s, error: %s",
-									utils.ERs, fileName, err.Error()))
-						}
-					}(file.Name())
-				}
-				tm.Reset(rdr.Config().RunDelay)
-			}
-		}()
+		go rdr.serveDefault()
 	}
 	return
 }
@@ -202,7 +203,7 @@ func (rdr *FWVFileER) processFile(fPath, fName string) (err error) {
 			utils.FirstNonEmpty(rdr.Config().Timezone,
 				rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 			rdr.fltrS, map[string]utils.DataProvider{utils.MetaHdr: rdr.headerDP, utils.MetaTrl: rdr.trailerDP}) // create an AgentRequest
-		if pass, err := rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+		if pass, err := rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 			agReq); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> reading file: <%s> row <%d>, ignoring due to filter error: <%s>",
@@ -301,9 +302,9 @@ func (rdr *FWVFileER) processTrailer(file *os.File, rowNr, evsPosted int, absPat
 		utils.FirstNonEmpty(rdr.Config().Timezone,
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, map[string]utils.DataProvider{utils.MetaTrl: rdr.trailerDP}) // create an AgentRequest
-	if pass, err := rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err := rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
-		return nil
+		return err
 	}
 	if err := agReq.SetFields(trailerFields); err != nil {
 		utils.Logger.Warning(
@@ -346,9 +347,9 @@ func (rdr *FWVFileER) createHeaderMap(record string, rowNr, evsPosted int, absPa
 		utils.FirstNonEmpty(rdr.Config().Timezone,
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, map[string]utils.DataProvider{utils.MetaHdr: rdr.headerDP}) // create an AgentRequest
-	if pass, err := rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err := rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
-		return nil
+		return err
 	}
 	if err := agReq.SetFields(hdrFields); err != nil {
 		utils.Logger.Warning(

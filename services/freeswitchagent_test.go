@@ -22,10 +22,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestFreeSwitchAgentCoverage for cover testing
@@ -35,15 +36,20 @@ func TestFreeSwitchAgentCoverage(t *testing.T) {
 	cfg.SessionSCfg().ListenBijson = ""
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
+	cacheSChan := make(chan rpcclient.ClientConnector, 1)
+	cacheSChan <- chS
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 
-	srv := NewFreeswitchAgent(cfg, nil, srvDep)
+	srv := NewFreeswitchAgent(cfg, shdChan, nil, srvDep)
 
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
 	srv2 := FreeswitchAgent{
 		cfg:     cfg,
+		shdChan: shdChan,
 		fS:      &agents.FSsessions{},
 		connMgr: nil,
 		srvDep:  srvDep,

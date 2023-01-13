@@ -17,6 +17,9 @@
 },
 
 
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
 
 
 "schedulers": {
@@ -104,7 +107,7 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },

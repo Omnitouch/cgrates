@@ -22,19 +22,22 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
 func TestDfGeneralJsonCfg(t *testing.T) {
 	eCfg := &GeneralJsonCfg{
 		Node_id:                utils.StringPointer(""),
+		Logger:                 utils.StringPointer(utils.MetaSysLog),
+		Log_level:              utils.IntPointer(utils.LOGLEVEL_INFO),
 		Rounding_decimals:      utils.IntPointer(5),
 		Dbdata_encoding:        utils.StringPointer("*msgpack"),
 		Tpexport_dir:           utils.StringPointer("/var/spool/cgrates/tpe"),
+		Poster_attempts:        utils.IntPointer(3),
+		Failed_posts_dir:       utils.StringPointer("/var/spool/cgrates/failed_posts"),
+		Failed_posts_ttl:       utils.StringPointer("5s"),
 		Default_request_type:   utils.StringPointer(utils.MetaRated),
 		Default_category:       utils.StringPointer("call"),
 		Default_tenant:         utils.StringPointer("cgrates.org"),
@@ -50,18 +53,12 @@ func TestDfGeneralJsonCfg(t *testing.T) {
 		Digest_equal:           utils.StringPointer(":"),
 		Rsr_separator:          utils.StringPointer(";"),
 		Max_parallel_conns:     utils.IntPointer(100),
-		Decimal_max_scale:      utils.IntPointer(0),
-		Decimal_min_scale:      utils.IntPointer(0),
-		Decimal_precision:      utils.IntPointer(0),
-		Decimal_rounding_mode:  utils.StringPointer("*toNearestEven"),
-		Opts:                   &GeneralOptsJson{},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	gCfg := new(GeneralJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), GeneralJSON, gCfg); err != nil {
+	if gCfg, err := dfCgrJSONCfg.GeneralJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, gCfg) {
 		t.Errorf("expecting: %s, \nreceived: %s", utils.ToIJSON(eCfg), utils.ToIJSON(gCfg))
@@ -73,15 +70,13 @@ func TestDfCoreSJsonCfg(t *testing.T) {
 		Caps:                utils.IntPointer(0),
 		Caps_strategy:       utils.StringPointer(utils.MetaBusy),
 		Caps_stats_interval: utils.StringPointer("0"),
-		Ees_conns:           utils.SliceStringPointer([]string{}),
 		Shutdown_timeout:    utils.StringPointer("1s"),
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	gCfg := new(CoreSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), CoreSJSON, gCfg); err != nil {
+	if gCfg, err := dfCgrJSONCfg.CoreSCfgJson(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, gCfg) {
 		t.Errorf("expecting: %s, \nreceived: %s", utils.ToIJSON(eCfg), utils.ToIJSON(gCfg))
@@ -90,7 +85,37 @@ func TestDfCoreSJsonCfg(t *testing.T) {
 
 func TestCacheJsonCfg(t *testing.T) {
 	eCfg := &CacheJsonCfg{
-		Partitions: map[string]*CacheParamJsonCfg{
+		Partitions: &map[string]*CacheParamJsonCfg{
+			utils.CacheDestinations: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheReverseDestinations: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheRatingPlans: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheRatingProfiles: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheActions: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheActionPlans: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheAccountActionPlans: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheActionTriggers: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheSharedGroups: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
+			utils.CacheTimings: {Limit: utils.IntPointer(-1),
+				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
+				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
 			utils.CacheResourceProfiles: {Limit: utils.IntPointer(-1),
 				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
 				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
@@ -127,15 +152,6 @@ func TestCacheJsonCfg(t *testing.T) {
 			utils.CacheDispatcherProfiles: {Limit: utils.IntPointer(-1),
 				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
 				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheRateProfiles: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheActionProfiles: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheAccounts: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
 			utils.CacheDispatcherHosts: {Limit: utils.IntPointer(-1),
 				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
 				Precache: utils.BoolPointer(false), Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
@@ -158,18 +174,6 @@ func TestCacheJsonCfg(t *testing.T) {
 				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
 				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
 			utils.CacheDispatcherFilterIndexes: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheRateProfilesFilterIndexes: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheRateFilterIndexes: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheActionProfilesFilterIndexes: {Limit: utils.IntPointer(-1),
-				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
-				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
-			utils.CacheAccountsFilterIndexes: {Limit: utils.IntPointer(-1),
 				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
 				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
 			utils.CacheReverseFilterIndexes: {Limit: utils.IntPointer(-1),
@@ -215,6 +219,7 @@ func TestCacheJsonCfg(t *testing.T) {
 				Ttl: utils.StringPointer(""), Static_ttl: utils.BoolPointer(false),
 				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false),
 			},
+
 			utils.MetaAPIBan: {Limit: utils.IntPointer(-1),
 				Ttl: utils.StringPointer("2m"), Static_ttl: utils.BoolPointer(false),
 				Remote: utils.BoolPointer(false), Replicate: utils.BoolPointer(false)},
@@ -230,8 +235,7 @@ func TestCacheJsonCfg(t *testing.T) {
 		t.Error(err)
 	}
 
-	gCfg := new(CacheJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), CacheJSON, gCfg); err != nil {
+	if gCfg, err := dfCgrJSONCfg.CacheJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, gCfg) {
 		t.Errorf("expected: %s\n, received: %s", utils.ToJSON(eCfg), utils.ToJSON(gCfg))
@@ -251,8 +255,7 @@ func TestDfListenJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(ListenJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), ListenJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.ListenJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", cfg)
@@ -275,229 +278,251 @@ func TestDfDataDbJsonCfg(t *testing.T) {
 		Opts: &DBOptsJson{
 			RedisMaxConns:           utils.IntPointer(10),
 			RedisConnectAttempts:    utils.IntPointer(20),
-			RedisCACertificate:      utils.StringPointer(utils.EmptyString),
-			RedisClientCertificate:  utils.StringPointer(utils.EmptyString),
-			RedisClientKey:          utils.StringPointer(utils.EmptyString),
-			RedisCluster:            utils.BoolPointer(false),
-			RedisTLS:                utils.BoolPointer(false),
 			RedisSentinel:           utils.StringPointer(utils.EmptyString),
-			MongoQueryTimeout:       utils.StringPointer("10s"),
+			RedisCluster:            utils.BoolPointer(false),
+			RedisClusterSync:        utils.StringPointer("5s"),
 			RedisClusterOndownDelay: utils.StringPointer("0"),
 			RedisConnectTimeout:     utils.StringPointer("0"),
 			RedisReadTimeout:        utils.StringPointer("0"),
 			RedisWriteTimeout:       utils.StringPointer("0"),
-			RedisClusterSync:        utils.StringPointer("5s"),
+			MongoQueryTimeout:       utils.StringPointer("10s"),
+			RedisTLS:                utils.BoolPointer(false),
+			RedisClientCertificate:  utils.StringPointer(utils.EmptyString),
+			RedisClientKey:          utils.StringPointer(utils.EmptyString),
+			RedisCACertificate:      utils.StringPointer(utils.EmptyString),
 		},
-		Items: map[string]*ItemOptsJson{
+		Items: &map[string]*ItemOptJson{
 			utils.MetaAccounts: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaReverseDestinations: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaDestinations: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaRatingPlans: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaRatingProfiles: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaActions: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaActionPlans: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaAccountActionPlans: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaActionTriggers: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaSharedGroups: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.MetaTimings: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaResourceProfile: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaStatQueues: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaResources: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaStatQueueProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaThresholds: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaThresholdProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaFilters: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaRouteProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaAttributeProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaDispatcherHosts: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
-			},
-			utils.MetaRateProfiles: {
+				Limit:      utils.IntPointer(-1),
 				Ttl:        utils.StringPointer(utils.EmptyString),
 				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.MetaActionProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
 			},
 			utils.MetaChargerProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaDispatcherProfiles: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.MetaLoadIDs: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheResourceFilterIndexes: {
+				Limit:      utils.IntPointer(-1),
 				Ttl:        utils.StringPointer(utils.EmptyString),
 				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheStatFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheThresholdFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheRouteFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheAttributeFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheChargerFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheDispatcherFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheRateProfilesFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheActionProfilesFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheAccountsFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
 			},
 			utils.CacheVersions: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+
+			utils.CacheResourceFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheStatFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheThresholdFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheRouteFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheAttributeFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheChargerFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheDispatcherFilterIndexes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
 			},
 			utils.CacheReverseFilterIndexes: {
-				Ttl:        utils.StringPointer(utils.EmptyString),
-				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
 				Replicate:  utils.BoolPointer(false),
 				Remote:     utils.BoolPointer(false),
-			},
-			utils.CacheRateFilterIndexes: {
+				Limit:      utils.IntPointer(-1),
 				Ttl:        utils.StringPointer(utils.EmptyString),
 				Static_ttl: utils.BoolPointer(false),
-				Limit:      utils.IntPointer(-1),
-				Replicate:  utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
 			},
 		},
 	}
@@ -505,11 +530,255 @@ func TestDfDataDbJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(DbJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), DataDBJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.DbJsonCfg(DATADB_JSN); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %s, \nreceived: %s", utils.ToJSON(eCfg), utils.ToJSON(cfg))
+	}
+}
+
+func TestDfStorDBJsonCfg(t *testing.T) {
+	eCfg := &DbJsonCfg{
+		Db_type:               utils.StringPointer("*mysql"),
+		Db_host:               utils.StringPointer("127.0.0.1"),
+		Db_port:               utils.IntPointer(3306),
+		Db_name:               utils.StringPointer("cgrates"),
+		Db_user:               utils.StringPointer("cgrates"),
+		Db_password:           utils.StringPointer(""),
+		String_indexed_fields: &[]string{},
+		Prefix_indexed_fields: &[]string{},
+		Opts: &DBOptsJson{
+			SQLMaxOpenConns:    utils.IntPointer(100),
+			SQLMaxIdleConns:    utils.IntPointer(10),
+			MongoQueryTimeout:  utils.StringPointer("10s"),
+			SQLConnMaxLifetime: utils.StringPointer("0"),
+			MySQLDSNParams:     make(map[string]string),
+			PgSSLMode:          utils.StringPointer(utils.PostgresSSLModeDisable),
+			MySQLLocation:      utils.StringPointer("Local"),
+		},
+		Items: &map[string]*ItemOptJson{
+			utils.CacheTBLTPTimings: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPDestinations: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPRates: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPDestinationRates: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPRatingPlans: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPRatingProfiles: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPSharedGroups: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPActions: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPActionTriggers: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPAccountActions: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPResources: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPStats: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPThresholds: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPFilters: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheSessionCostsTBL: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPActionPlans: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPRoutes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPAttributes: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPChargers: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPDispatchers: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheTBLTPDispatcherHosts: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheCDRsTBL: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+			utils.CacheVersions: {
+				Replicate:  utils.BoolPointer(false),
+				Remote:     utils.BoolPointer(false),
+				Limit:      utils.IntPointer(-1),
+				Ttl:        utils.StringPointer(utils.EmptyString),
+				Static_ttl: utils.BoolPointer(false),
+			},
+		},
+	}
+	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
+	if err != nil {
+		t.Error(err)
+	}
+	if cfg, err := dfCgrJSONCfg.DbJsonCfg(STORDB_JSN); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(eCfg, cfg) {
+		t.Errorf("Expected : %+v,\n Received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
+	}
+}
+
+func TestDfRalsJsonCfg(t *testing.T) {
+	eCfg := &RalsJsonCfg{
+		Enabled:                    utils.BoolPointer(false),
+		Thresholds_conns:           &[]string{},
+		Stats_conns:                &[]string{},
+		Rp_subject_prefix_matching: utils.BoolPointer(false),
+		Remove_expired:             utils.BoolPointer(true),
+		Max_computed_usage: &map[string]string{
+			utils.MetaAny:   "189h",
+			utils.MetaVoice: "72h",
+			utils.MetaData:  "107374182400",
+			utils.MetaSMS:   "10000",
+			utils.MetaMMS:   "10000",
+		},
+		Max_increments: utils.IntPointer(1000000),
+		Balance_rating_subject: &map[string]string{
+			utils.MetaAny:   "*zero1ns",
+			utils.MetaVoice: "*zero1s",
+		},
+	}
+	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
+	if err != nil {
+		t.Error(err)
+	}
+	if cfg, err := dfCgrJSONCfg.RalsJsonCfg(); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(eCfg, cfg) {
+		t.Errorf("Received: %+v", cfg)
+	}
+}
+
+func TestDfSchedulerJsonCfg(t *testing.T) {
+	eCfg := &SchedulerJsonCfg{
+		Enabled:                 utils.BoolPointer(false),
+		Cdrs_conns:              &[]string{},
+		Thresholds_conns:        &[]string{},
+		Stats_conns:             &[]string{},
+		Filters:                 &[]string{},
+		Dynaprepaid_actionplans: &[]string{},
+	}
+	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
+	if err != nil {
+		t.Error(err)
+	}
+	if cfg, err := dfCgrJSONCfg.SchedulerJsonCfg(); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(eCfg, cfg) {
+		t.Errorf("Expected: %s ,received: %s", utils.ToJSON(eCfg), utils.ToJSON(cfg))
 	}
 }
 
@@ -517,27 +786,25 @@ func TestDfCdrsJsonCfg(t *testing.T) {
 	eCfg := &CdrsJsonCfg{
 		Enabled:              utils.BoolPointer(false),
 		Extra_fields:         &[]string{},
+		Store_cdrs:           utils.BoolPointer(true),
 		Session_cost_retries: utils.IntPointer(5),
 		Chargers_conns:       &[]string{},
+		Rals_conns:           &[]string{},
 		Attributes_conns:     &[]string{},
 		Thresholds_conns:     &[]string{},
 		Stats_conns:          &[]string{},
 		Online_cdr_exports:   &[]string{},
-		Actions_conns:        &[]string{},
+		Scheduler_conns:      &[]string{},
 		Ees_conns:            &[]string{},
-		Rates_conns:          &[]string{},
-		Accounts_conns:       &[]string{},
-		Opts:                 &CdrsOptsJson{},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(CdrsJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), CDRsJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.CdrsJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Errorf("Received: %+v", utils.ToJSON(cfg))
+		t.Errorf("Received: %+v", cfg)
 	}
 }
 
@@ -547,23 +814,23 @@ func TestSmgJsonCfg(t *testing.T) {
 		Listen_bijson:         utils.StringPointer("127.0.0.1:2014"),
 		Listen_bigob:          utils.StringPointer(""),
 		Chargers_conns:        &[]string{},
+		Rals_conns:            &[]string{},
 		Cdrs_conns:            &[]string{},
 		Resources_conns:       &[]string{},
 		Thresholds_conns:      &[]string{},
 		Stats_conns:           &[]string{},
 		Routes_conns:          &[]string{},
 		Attributes_conns:      &[]string{},
-		Actions_conns:         &[]string{},
-		Rates_conns:           &[]string{},
-		Accounts_conns:        &[]string{},
 		Replication_conns:     &[]string{},
+		Debit_interval:        utils.StringPointer("0s"),
 		Store_session_costs:   utils.BoolPointer(false),
+		Session_ttl:           utils.StringPointer("0s"),
 		Session_indexes:       &[]string{},
 		Client_protocol:       utils.Float64Pointer(1.0),
 		Channel_sync_interval: utils.StringPointer("0"),
 		Terminate_attempts:    utils.IntPointer(5),
 		Alterable_fields:      &[]string{},
-		Default_usage: map[string]string{
+		Default_usage: &map[string]string{
 			utils.MetaAny:   "3h",
 			utils.MetaVoice: "3h",
 			utils.MetaData:  "1048576",
@@ -576,17 +843,16 @@ func TestSmgJsonCfg(t *testing.T) {
 			Privatekey_path:     utils.StringPointer(""),
 			Publickey_path:      utils.StringPointer(""),
 		},
-		Opts: &SessionsOptsJson{},
+		Scheduler_conns: &[]string{},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(SessionSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), SessionSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.SessionSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Errorf("Expected %v \n but Received \n %v ", utils.ToJSON(eCfg), utils.ToJSON(cfg))
+		t.Error("Received: ", cfg)
 	}
 }
 
@@ -614,8 +880,7 @@ func TestFsAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(FreeswitchAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), FreeSWITCHAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.FreeswitchAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", cfg)
@@ -640,8 +905,7 @@ func TestKamAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(KamAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), KamailioAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.KamAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expecting: %s \n, received: %s: ",
@@ -659,9 +923,9 @@ func TestAsteriskAgentJsonCfg(t *testing.T) {
 				Address:                utils.StringPointer("127.0.0.1:8088"),
 				User:                   utils.StringPointer("cgrates"),
 				Password:               utils.StringPointer("CGRateS.org"),
-				Max_reconnect_interval: utils.StringPointer(utils.EmptyString),
 				Connect_attempts:       utils.IntPointer(3),
 				Reconnects:             utils.IntPointer(5),
+				Max_reconnect_interval: utils.StringPointer(utils.EmptyString),
 			},
 		},
 	}
@@ -669,8 +933,7 @@ func TestAsteriskAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(AsteriskAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), AsteriskAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.AsteriskAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expecting: %s, received: %s ", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -699,8 +962,7 @@ func TestDiameterAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(DiameterAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), DiameterAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.DiameterAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %s, \n\nreceived: %s", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -713,12 +975,12 @@ func TestRadiusAgentJsonCfg(t *testing.T) {
 		Listen_net:  utils.StringPointer("udp"),
 		Listen_auth: utils.StringPointer("127.0.0.1:1812"),
 		Listen_acct: utils.StringPointer("127.0.0.1:1813"),
-		Client_secrets: map[string]string{
+		Client_secrets: utils.MapStringStringPointer(map[string]string{
 			utils.MetaDefault: "CGRateS.org",
-		},
-		Client_dictionaries: map[string]string{
+		}),
+		Client_dictionaries: utils.MapStringStringPointer(map[string]string{
 			utils.MetaDefault: "/usr/share/cgrates/radius/dict/",
-		},
+		}),
 		Sessions_conns:     &[]string{utils.MetaInternal},
 		Request_processors: &[]*ReqProcessorJsnCfg{},
 	}
@@ -726,8 +988,7 @@ func TestRadiusAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(RadiusAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), RadiusAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.RadiusAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		rcv := *cfg.Request_processors
@@ -741,8 +1002,7 @@ func TestHttpAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new([]*HttpAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), HTTPAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.HttpAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -762,8 +1022,7 @@ func TestDNSAgentJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(DNSAgentJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), DNSAgentJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.DNSAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -772,49 +1031,49 @@ func TestDNSAgentJsonCfg(t *testing.T) {
 
 func TestDfAttributeServJsonCfg(t *testing.T) {
 	eCfg := &AttributeSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Stats_conns:              &[]string{},
-		Resources_conns:          &[]string{},
-		Accounts_conns:           &[]string{},
-		Indexed_selects:          utils.BoolPointer(true),
-		String_indexed_fields:    nil,
-		Prefix_indexed_fields:    &[]string{},
-		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
-		Nested_fields:            utils.BoolPointer(false),
-		Opts:                     &AttributesOptsJson{},
+		Enabled:               utils.BoolPointer(false),
+		Stats_conns:           &[]string{},
+		Resources_conns:       &[]string{},
+		Apiers_conns:          &[]string{},
+		Indexed_selects:       utils.BoolPointer(true),
+		String_indexed_fields: nil,
+		Prefix_indexed_fields: &[]string{},
+		Suffix_indexed_fields: &[]string{},
+		Nested_fields:         utils.BoolPointer(false),
+		Any_context:           utils.BoolPointer(true),
+		Opts: &AttributesOptsJson{
+			ProcessRuns:          utils.IntPointer(1),
+			ProfileRuns:          utils.IntPointer(0),
+			ProfileIDs:           &[]string{},
+			ProfileIgnoreFilters: utils.BoolPointer(false),
+		},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(AttributeSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), AttributeSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.AttributeServJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", utils.ToJSON(eCfg), utils.ToJSON(cfg))
+		t.Error("Received: ", utils.ToJSON(cfg))
 	}
 }
 
 func TestDfChargerServJsonCfg(t *testing.T) {
 	eCfg := &ChargerSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Indexed_selects:          utils.BoolPointer(true),
-		Attributes_conns:         &[]string{},
-		String_indexed_fields:    nil,
-		Prefix_indexed_fields:    &[]string{},
-		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
-		Nested_fields:            utils.BoolPointer(false),
+		Enabled:               utils.BoolPointer(false),
+		Indexed_selects:       utils.BoolPointer(true),
+		Attributes_conns:      &[]string{},
+		String_indexed_fields: nil,
+		Prefix_indexed_fields: &[]string{},
+		Suffix_indexed_fields: &[]string{},
+		Nested_fields:         utils.BoolPointer(false),
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(ChargerSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), ChargerSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.ChargerServJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", utils.ToJSON(cfg))
@@ -825,14 +1084,13 @@ func TestDfFilterSJsonCfg(t *testing.T) {
 	eCfg := &FilterSJsonCfg{
 		Stats_conns:     &[]string{},
 		Resources_conns: &[]string{},
-		Accounts_conns:  &[]string{},
+		Apiers_conns:    &[]string{},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(FilterSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), FilterSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.FilterSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %s, received: %s", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -841,24 +1099,24 @@ func TestDfFilterSJsonCfg(t *testing.T) {
 
 func TestDfResourceLimiterSJsonCfg(t *testing.T) {
 	eCfg := &ResourceSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Indexed_selects:          utils.BoolPointer(true),
-		Thresholds_conns:         &[]string{},
-		Store_interval:           utils.StringPointer(""),
-		String_indexed_fields:    nil,
-		Prefix_indexed_fields:    &[]string{},
-		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
-		Nested_fields:            utils.BoolPointer(false),
-		Opts:                     &ResourcesOptsJson{},
+		Enabled:               utils.BoolPointer(false),
+		Indexed_selects:       utils.BoolPointer(true),
+		Thresholds_conns:      &[]string{},
+		Store_interval:        utils.StringPointer(""),
+		String_indexed_fields: nil,
+		Prefix_indexed_fields: &[]string{},
+		Suffix_indexed_fields: &[]string{},
+		Nested_fields:         utils.BoolPointer(false),
+		Opts: &ResourcesOptsJson{
+			UsageID: utils.StringPointer(utils.EmptyString),
+			Units:   utils.Float64Pointer(1),
+		},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(ResourceSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), ResourceSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.ResourceSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %s, received: %s", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -875,17 +1133,17 @@ func TestDfStatServiceJsonCfg(t *testing.T) {
 		String_indexed_fields:    nil,
 		Prefix_indexed_fields:    &[]string{},
 		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
 		Nested_fields:            utils.BoolPointer(false),
-		Opts:                     &StatsOptsJson{},
+		Opts: &StatsOptsJson{
+			ProfileIDs:           &[]string{},
+			ProfileIgnoreFilters: utils.BoolPointer(false),
+		},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(StatServJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), StatSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.StatSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", utils.ToJSON(cfg))
@@ -894,24 +1152,23 @@ func TestDfStatServiceJsonCfg(t *testing.T) {
 
 func TestDfThresholdSJsonCfg(t *testing.T) {
 	eCfg := &ThresholdSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Indexed_selects:          utils.BoolPointer(true),
-		Store_interval:           utils.StringPointer(""),
-		String_indexed_fields:    nil,
-		Prefix_indexed_fields:    &[]string{},
-		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
-		Nested_fields:            utils.BoolPointer(false),
-		Actions_conns:            &[]string{},
-		Opts:                     &ThresholdsOptsJson{},
+		Enabled:               utils.BoolPointer(false),
+		Indexed_selects:       utils.BoolPointer(true),
+		Store_interval:        utils.StringPointer(""),
+		String_indexed_fields: nil,
+		Prefix_indexed_fields: &[]string{},
+		Suffix_indexed_fields: &[]string{},
+		Nested_fields:         utils.BoolPointer(false),
+		Opts: &ThresholdsOptsJson{
+			ProfileIDs:           &[]string{},
+			ProfileIgnoreFilters: utils.BoolPointer(false),
+		},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(ThresholdSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), ThresholdSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.ThresholdSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -920,28 +1177,28 @@ func TestDfThresholdSJsonCfg(t *testing.T) {
 
 func TestDfRouteSJsonCfg(t *testing.T) {
 	eCfg := &RouteSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Indexed_selects:          utils.BoolPointer(true),
-		String_indexed_fields:    nil,
-		Prefix_indexed_fields:    &[]string{},
-		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
-		Attributes_conns:         &[]string{},
-		Resources_conns:          &[]string{},
-		Stats_conns:              &[]string{},
-		Rates_conns:              &[]string{},
-		Accounts_conns:           &[]string{},
-		Default_ratio:            utils.IntPointer(1),
-		Nested_fields:            utils.BoolPointer(false),
-		Opts:                     &RoutesOptsJson{},
+		Enabled:               utils.BoolPointer(false),
+		Indexed_selects:       utils.BoolPointer(true),
+		String_indexed_fields: nil,
+		Prefix_indexed_fields: &[]string{},
+		Suffix_indexed_fields: &[]string{},
+		Attributes_conns:      &[]string{},
+		Resources_conns:       &[]string{},
+		Stats_conns:           &[]string{},
+		Rals_conns:            &[]string{},
+		Default_ratio:         utils.IntPointer(1),
+		Nested_fields:         utils.BoolPointer(false),
+		Opts: &RoutesOptsJson{
+			Context:      utils.StringPointer(utils.MetaRoutes),
+			IgnoreErrors: utils.BoolPointer(false),
+			MaxCost:      utils.EmptyString,
+		},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(RouteSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), RouteSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.RouteSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -954,15 +1211,66 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 			ID:              utils.StringPointer(utils.MetaDefault),
 			Enabled:         utils.BoolPointer(false),
 			Tenant:          utils.StringPointer(""),
+			Dry_run:         utils.BoolPointer(false),
 			Run_delay:       utils.StringPointer("0"),
 			Lockfile_path:   utils.StringPointer(".cgr.lck"),
 			Caches_conns:    &[]string{utils.MetaInternal},
 			Field_separator: utils.StringPointer(","),
 			Tp_in_dir:       utils.StringPointer("/var/spool/cgrates/loader/in"),
 			Tp_out_dir:      utils.StringPointer("/var/spool/cgrates/loader/out"),
-			Action:          utils.StringPointer(utils.MetaStore),
-			Opts:            &LoaderJsonOptsCfg{WithIndex: utils.BoolPointer(true)},
 			Data: &[]*LoaderJsonDataType{
+				{
+					Type:      utils.StringPointer(utils.MetaAttributes),
+					File_name: utils.StringPointer(utils.AttributesCsv),
+					Fields: &[]*FcTemplateJsonCfg{
+						{Tag: utils.StringPointer("TenantID"),
+							Path:      utils.StringPointer(utils.Tenant),
+							Type:      utils.StringPointer(utils.MetaVariable),
+							Value:     utils.StringPointer("~*req.0"),
+							Mandatory: utils.BoolPointer(true)},
+						{Tag: utils.StringPointer("ProfileID"),
+							Path:      utils.StringPointer(utils.ID),
+							Type:      utils.StringPointer(utils.MetaVariable),
+							Value:     utils.StringPointer("~*req.1"),
+							Mandatory: utils.BoolPointer(true)},
+						{Tag: utils.StringPointer("Contexts"),
+							Path:  utils.StringPointer(utils.Contexts),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.2")},
+						{Tag: utils.StringPointer("FilterIDs"),
+							Path:  utils.StringPointer(utils.FilterIDs),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.3")},
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.4")},
+						{Tag: utils.StringPointer("AttributeFilterIDs"),
+							Path:  utils.StringPointer("AttributeFilterIDs"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.5")},
+						{Tag: utils.StringPointer("Path"),
+							Path:  utils.StringPointer(utils.Path),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.6")},
+						{Tag: utils.StringPointer("Type"),
+							Path:  utils.StringPointer("Type"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.7")},
+						{Tag: utils.StringPointer("Value"),
+							Path:  utils.StringPointer("Value"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.8")},
+						{Tag: utils.StringPointer("Blocker"),
+							Path:  utils.StringPointer("Blocker"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.9")},
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer(utils.Weight),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.10")},
+					},
+				},
 				{
 					Type:      utils.StringPointer(utils.MetaFilters),
 					File_name: utils.StringPointer(utils.FiltersCsv),
@@ -978,67 +1286,21 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Value:     utils.StringPointer("~*req.1"),
 							Mandatory: utils.BoolPointer(true)},
 						{Tag: utils.StringPointer("Type"),
-							Path:       utils.StringPointer("Rules.Type"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Value:      utils.StringPointer("~*req.2"),
-							New_branch: utils.BoolPointer(true)},
+							Path:  utils.StringPointer("Type"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.2")},
 						{Tag: utils.StringPointer("Element"),
-							Path:  utils.StringPointer("Rules.Element"),
+							Path:  utils.StringPointer("Element"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
 						{Tag: utils.StringPointer("Values"),
-							Path:  utils.StringPointer("Rules.Values"),
+							Path:  utils.StringPointer("Values"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.4")},
-					},
-				},
-				{
-					Type:      utils.StringPointer(utils.MetaAttributes),
-					File_name: utils.StringPointer(utils.AttributesCsv),
-					Fields: &[]*FcTemplateJsonCfg{
-						{Tag: utils.StringPointer("TenantID"),
-							Path:      utils.StringPointer(utils.Tenant),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.0"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("ProfileID"),
-							Path:      utils.StringPointer(utils.ID),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.1"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("FilterIDs"),
-							Path:  utils.StringPointer(utils.FilterIDs),
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer(utils.Weights),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("Blockers"),
-							Path:  utils.StringPointer("Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
-						{Tag: utils.StringPointer("AttributeFilterIDs"),
-							Path:       utils.StringPointer("Attributes.FilterIDs"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Value:      utils.StringPointer("~*req.5"),
-							New_branch: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("AttributeBlockers"),
-							Path:  utils.StringPointer("Attributes.Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.6")},
-						{Tag: utils.StringPointer("Path"),
-							Path:  utils.StringPointer("Attributes." + utils.Path),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.7")},
-						{Tag: utils.StringPointer("Type"),
-							Path:  utils.StringPointer("Attributes.Type"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.8")},
-						{Tag: utils.StringPointer("Value"),
-							Path:  utils.StringPointer("Attributes.Value"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.9")},
+							Value: utils.StringPointer("~*req.5")},
 					},
 				},
 				{
@@ -1059,8 +1321,8 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("FilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
 						{Tag: utils.StringPointer("TTL"),
@@ -1083,10 +1345,14 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("Stored"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.8")},
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer("Weight"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.9")},
 						{Tag: utils.StringPointer("ThresholdIDs"),
 							Path:  utils.StringPointer("ThresholdIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.9")},
+							Value: utils.StringPointer("~*req.10")},
 					},
 				},
 				{
@@ -1107,45 +1373,45 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("FilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("Blockers"),
-							Path:  utils.StringPointer("Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("QueueLength"),
 							Path:  utils.StringPointer("QueueLength"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.5")},
+							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("TTL"),
 							Path:  utils.StringPointer("TTL"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.6")},
+							Value: utils.StringPointer("~*req.5")},
 						{Tag: utils.StringPointer("MinItems"),
 							Path:  utils.StringPointer("MinItems"),
 							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.6")},
+						{Tag: utils.StringPointer("MetricIDs"),
+							Path:  utils.StringPointer("MetricIDs"),
+							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.7")},
+						{Tag: utils.StringPointer("MetricFilterIDs"),
+							Path:  utils.StringPointer("MetricFilterIDs"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.8")},
+						{Tag: utils.StringPointer("Blocker"),
+							Path:  utils.StringPointer("Blocker"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.9")},
 						{Tag: utils.StringPointer("Stored"),
 							Path:  utils.StringPointer("Stored"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.8")},
-						{Tag: utils.StringPointer("ThresholdIDs"),
-							Path:  utils.StringPointer("ThresholdIDs"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.9")},
-						{Tag: utils.StringPointer("MetricIDs"),
-							Path:       utils.StringPointer("Metrics.MetricID"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Value:      utils.StringPointer("~*req.10"),
-							New_branch: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("MetricFilterIDs"),
-							Path:  utils.StringPointer("Metrics.FilterIDs"),
+							Value: utils.StringPointer("~*req.10")},
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer("Weight"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.11")},
-						{Tag: utils.StringPointer("MetricBlockers"),
-							Path:  utils.StringPointer("Metrics.Blockers"),
+
+						{Tag: utils.StringPointer("ThresholdIDs"),
+							Path:  utils.StringPointer("ThresholdIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.12")},
 					},
@@ -1168,8 +1434,8 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("FilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
 						{Tag: utils.StringPointer("MaxHits"),
@@ -1188,14 +1454,18 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("Blocker"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.7")},
-						{Tag: utils.StringPointer("ActionProfileIDs"),
-							Path:  utils.StringPointer("ActionProfileIDs"),
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer("Weight"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.8")},
+						{Tag: utils.StringPointer("ActionIDs"),
+							Path:  utils.StringPointer("ActionIDs"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.9")},
 						{Tag: utils.StringPointer("Async"),
 							Path:  utils.StringPointer("Async"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.9")},
+							Value: utils.StringPointer("~*req.10")},
 					},
 				},
 				{
@@ -1216,57 +1486,56 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("FilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("Blockers"),
-							Path:  utils.StringPointer("Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("Sorting"),
 							Path:  utils.StringPointer("Sorting"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.5")},
+							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("SortingParameters"),
 							Path:  utils.StringPointer("SortingParameters"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.6")},
+							Value: utils.StringPointer("~*req.5")},
 						{Tag: utils.StringPointer("RouteID"),
-							Path:       utils.StringPointer("Routes.ID"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Value:      utils.StringPointer("~*req.7"),
-							New_branch: utils.BoolPointer(true)},
+							Path:  utils.StringPointer("RouteID"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.6")},
 						{Tag: utils.StringPointer("RouteFilterIDs"),
-							Path:  utils.StringPointer("Routes.FilterIDs"),
+							Path:  utils.StringPointer("RouteFilterIDs"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.7")},
+						{Tag: utils.StringPointer("RouteAccountIDs"),
+							Path:  utils.StringPointer("RouteAccountIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.8")},
-						{Tag: utils.StringPointer("RouteAccountIDs"),
-							Path:  utils.StringPointer("Routes.AccountIDs"),
+						{Tag: utils.StringPointer("RouteRatingPlanIDs"),
+							Path:  utils.StringPointer("RouteRatingPlanIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.9")},
-						{Tag: utils.StringPointer("RouteRateProfileIDs"),
-							Path:  utils.StringPointer("Routes.RateProfileIDs"),
+						{Tag: utils.StringPointer("RouteResourceIDs"),
+							Path:  utils.StringPointer("RouteResourceIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.10")},
-						{Tag: utils.StringPointer("RouteResourceIDs"),
-							Path:  utils.StringPointer("Routes.ResourceIDs"),
+						{Tag: utils.StringPointer("RouteStatIDs"),
+							Path:  utils.StringPointer("RouteStatIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.11")},
-						{Tag: utils.StringPointer("RouteStatIDs"),
-							Path:  utils.StringPointer("Routes.StatIDs"),
+						{Tag: utils.StringPointer("RouteWeight"),
+							Path:  utils.StringPointer("RouteWeight"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.12")},
-						{Tag: utils.StringPointer("RouteWeights"),
-							Path:  utils.StringPointer("Routes.Weights"),
+						{Tag: utils.StringPointer("RouteBlocker"),
+							Path:  utils.StringPointer("RouteBlocker"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.13")},
-						{Tag: utils.StringPointer("RouteBlockers"),
-							Path:  utils.StringPointer("Routes.Blockers"),
+						{Tag: utils.StringPointer("RouteParameters"),
+							Path:  utils.StringPointer("RouteParameters"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.14")},
-						{Tag: utils.StringPointer("RouteParameters"),
-							Path:  utils.StringPointer("Routes.RouteParameters"),
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer("Weight"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.15")},
 					},
@@ -1289,20 +1558,20 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Path:  utils.StringPointer("FilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("Blockers"),
-							Path:  utils.StringPointer("Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("RunID"),
 							Path:  utils.StringPointer("RunID"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.5")},
+							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("AttributeIDs"),
 							Path:  utils.StringPointer("AttributeIDs"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.5")},
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer("Weight"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.6")},
 					},
@@ -1321,43 +1590,50 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 							Type:      utils.StringPointer(utils.MetaVariable),
 							Value:     utils.StringPointer("~*req.1"),
 							Mandatory: utils.BoolPointer(true)},
+						{Tag: utils.StringPointer("Contexts"),
+							Path:  utils.StringPointer("Contexts"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.2")},
 						{Tag: utils.StringPointer("FilterIDs"),
 							Path:  utils.StringPointer("FilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weight"),
-							Path:  utils.StringPointer("Weight"),
-							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.3")},
+						{Tag: utils.StringPointer("ActivationInterval"),
+							Path:  utils.StringPointer("ActivationInterval"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.4")},
 						{Tag: utils.StringPointer("Strategy"),
 							Path:  utils.StringPointer("Strategy"),
 							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
-						{Tag: utils.StringPointer("StrategyParameters"),
-							Path:  utils.StringPointer("StrategyParams"),
-							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.5")},
+						{Tag: utils.StringPointer("StrategyParameters"),
+							Path:  utils.StringPointer("StrategyParameters"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.6")},
 						{Tag: utils.StringPointer("ConnID"),
-							Path:       utils.StringPointer("Hosts.ID"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Value:      utils.StringPointer("~*req.6"),
-							New_branch: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("ConnFilterIDs"),
-							Path:  utils.StringPointer("Hosts.FilterIDs"),
+							Path:  utils.StringPointer("ConnID"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.7")},
-						{Tag: utils.StringPointer("ConnWeight"),
-							Path:  utils.StringPointer("Hosts.Weight"),
+						{Tag: utils.StringPointer("ConnFilterIDs"),
+							Path:  utils.StringPointer("ConnFilterIDs"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.8")},
-						{Tag: utils.StringPointer("ConnBlocker"),
-							Path:  utils.StringPointer("Hosts.Blocker"),
+						{Tag: utils.StringPointer("ConnWeight"),
+							Path:  utils.StringPointer("ConnWeight"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.9")},
-						{Tag: utils.StringPointer("ConnParameters"),
-							Path:  utils.StringPointer("Hosts.Params"),
+						{Tag: utils.StringPointer("ConnBlocker"),
+							Path:  utils.StringPointer("ConnBlocker"),
 							Type:  utils.StringPointer(utils.MetaVariable),
 							Value: utils.StringPointer("~*req.10")},
+						{Tag: utils.StringPointer("ConnParameters"),
+							Path:  utils.StringPointer("ConnParameters"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.11")},
+						{Tag: utils.StringPointer("Weight"),
+							Path:  utils.StringPointer("Weight"),
+							Type:  utils.StringPointer(utils.MetaVariable),
+							Value: utils.StringPointer("~*req.12")},
 					},
 				},
 				{
@@ -1429,255 +1705,6 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 						},
 					},
 				},
-				{
-					Type:      utils.StringPointer(utils.MetaRateProfiles),
-					File_name: utils.StringPointer(utils.RatesCsv),
-					Fields: &[]*FcTemplateJsonCfg{
-						{Tag: utils.StringPointer(utils.Tenant),
-							Path:      utils.StringPointer(utils.Tenant),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.0"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer(utils.ID),
-							Path:      utils.StringPointer(utils.ID),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.1"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("FilterIDs"),
-							Path:  utils.StringPointer("FilterIDs"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("MinCost"),
-							Path:  utils.StringPointer("MinCost"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
-						{Tag: utils.StringPointer("MaxCost"),
-							Path:  utils.StringPointer("MaxCost"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.5")},
-						{Tag: utils.StringPointer("MaxCostStrategy"),
-							Path:  utils.StringPointer("MaxCostStrategy"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.6")},
-						{Tag: utils.StringPointer("RateFilterIDs"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].FilterIDs"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.8")},
-						{Tag: utils.StringPointer("RateActivationTimes"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].ActivationTimes"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.9")},
-						{Tag: utils.StringPointer("RateWeights"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].Weights"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.10")},
-						{Tag: utils.StringPointer("RateBlocker"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].Blocker"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.11")},
-						{Tag: utils.StringPointer("RateIntervalStart"),
-							Path:       utils.StringPointer("Rates[<~*req.7>].IntervalRates.IntervalStart"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Filters:    &[]string{"*notempty:~*req.7:"},
-							Value:      utils.StringPointer("~*req.12"),
-							New_branch: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("RateFixedFee"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].IntervalRates.FixedFee"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.13")},
-						{Tag: utils.StringPointer("RateRecurrentFee"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].IntervalRates.RecurrentFee"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.14")},
-						{Tag: utils.StringPointer("RateUnit"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].IntervalRates.Unit"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.15")},
-						{Tag: utils.StringPointer("RateIncrement"),
-							Path:    utils.StringPointer("Rates[<~*req.7>].IntervalRates.Increment"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.7:"},
-							Value:   utils.StringPointer("~*req.16")},
-					},
-				},
-				{
-					Type:      utils.StringPointer(utils.MetaActionProfiles),
-					File_name: utils.StringPointer(utils.ActionsCsv),
-					Fields: &[]*FcTemplateJsonCfg{
-						{Tag: utils.StringPointer(utils.Tenant),
-							Path:      utils.StringPointer(utils.Tenant),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.0"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer(utils.ID),
-							Path:      utils.StringPointer(utils.ID),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.1"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("FilterIDs"),
-							Path:  utils.StringPointer("FilterIDs"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("Blockers"),
-							Path:  utils.StringPointer("Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
-						{Tag: utils.StringPointer("Schedule"),
-							Path:  utils.StringPointer("Schedule"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.5")},
-						{Tag: utils.StringPointer("TargetIDs"),
-							Path:  utils.StringPointer("Targets[<~*req.6>]"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.7")},
-						{Tag: utils.StringPointer("ActionFilterIDs"),
-							Path:    utils.StringPointer("Actions[<~*req.8>].FilterIDs"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.8:"},
-							Value:   utils.StringPointer("~*req.9")},
-						{Tag: utils.StringPointer("ActionTTL"),
-							Path:    utils.StringPointer("Actions[<~*req.8>].TTL"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.8:"},
-							Value:   utils.StringPointer("~*req.10")},
-						{Tag: utils.StringPointer("ActionType"),
-							Path:    utils.StringPointer("Actions[<~*req.8>].Type"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.8:"},
-							Value:   utils.StringPointer("~*req.11")},
-						{Tag: utils.StringPointer("ActionOpts"),
-							Path:    utils.StringPointer("Actions[<~*req.8>].Opts"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.8:"},
-							Value:   utils.StringPointer("~*req.12")},
-						{Tag: utils.StringPointer("ActionPath"),
-							Path:       utils.StringPointer("Actions[<~*req.8>].Diktats.Path"),
-							Type:       utils.StringPointer(utils.MetaVariable),
-							Filters:    &[]string{"*notempty:~*req.8:"},
-							Value:      utils.StringPointer("~*req.13"),
-							New_branch: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("ActionValue"),
-							Path:    utils.StringPointer("Actions[<~*req.8>].Diktats.Value"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.8:"},
-							Value:   utils.StringPointer("~*req.14")},
-					},
-				},
-				{
-					Type:      utils.StringPointer(utils.MetaAccounts),
-					File_name: utils.StringPointer(utils.AccountsCsv),
-					Fields: &[]*FcTemplateJsonCfg{
-						{Tag: utils.StringPointer(utils.Tenant),
-							Path:      utils.StringPointer(utils.Tenant),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.0"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer(utils.ID),
-							Path:      utils.StringPointer(utils.ID),
-							Type:      utils.StringPointer(utils.MetaVariable),
-							Value:     utils.StringPointer("~*req.1"),
-							Mandatory: utils.BoolPointer(true)},
-						{Tag: utils.StringPointer("FilterIDs"),
-							Path:  utils.StringPointer("FilterIDs"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.2")},
-						{Tag: utils.StringPointer("Weights"),
-							Path:  utils.StringPointer("Weights"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.3")},
-						{Tag: utils.StringPointer("Blockers"),
-							Path:  utils.StringPointer("Blockers"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.4")},
-						{Tag: utils.StringPointer("Opts"),
-							Path:  utils.StringPointer("Opts"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.5")},
-						{Tag: utils.StringPointer("BalanceFilterIDs"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].FilterIDs"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.7")},
-						{Tag: utils.StringPointer("BalanceWeights"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].Weights"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.8")},
-						{Tag: utils.StringPointer("BalanceBlockers"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].Blockers"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.9")},
-						{Tag: utils.StringPointer("BalanceType"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].Type"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.10")},
-						{Tag: utils.StringPointer("BalanceUnits"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].Units"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.11")},
-						{Tag: utils.StringPointer("BalanceUnitFactors"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].UnitFactors"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.12")},
-						{Tag: utils.StringPointer("BalanceOpts"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].Opts"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.13")},
-						{Tag: utils.StringPointer("BalanceCostIncrements"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].CostIncrements"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.14")},
-						{Tag: utils.StringPointer("BalanceAttributeIDs"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].AttributeIDs"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.15")},
-						{Tag: utils.StringPointer("BalanceRateProfileIDs"),
-							Path:    utils.StringPointer("Balances[<~*req.6>].RateProfileIDs"),
-							Type:    utils.StringPointer(utils.MetaVariable),
-							Filters: &[]string{"*notempty:~*req.6:"},
-							Value:   utils.StringPointer("~*req.16")},
-						{Tag: utils.StringPointer("ThresholdIDs"),
-							Path:  utils.StringPointer("ThresholdIDs"),
-							Type:  utils.StringPointer(utils.MetaVariable),
-							Value: utils.StringPointer("~*req.17")},
-					},
-				},
-			},
-			Cache: map[string]*CacheParamJsonCfg{
-				utils.MetaFilters:         {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaAttributes:      {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaResources:       {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaStats:           {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaThresholds:      {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaRoutes:          {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaChargers:        {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaDispatchers:     {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaDispatcherHosts: {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaRateProfiles:    {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaActionProfiles:  {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
-				utils.MetaAccounts:        {Limit: utils.IntPointer(-1), Ttl: utils.StringPointer("5s"), Static_ttl: utils.BoolPointer(false)},
 			},
 		},
 	}
@@ -1685,12 +1712,29 @@ func TestDfLoaderJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new([]*LoaderJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), LoaderSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.LoaderJsonCfg(); err != nil {
 		t.Error(err)
-	} else if !reflect.DeepEqual(eCfg, *cfg) {
-		t.Errorf("Expecting: %s,\nreceived: %s ",
+	} else if !reflect.DeepEqual(eCfg, cfg) {
+		t.Errorf("Expecting: %s \n but received \n Received: %s ",
 			utils.ToJSON(eCfg), utils.ToJSON(cfg))
+	}
+}
+
+func TestDfMailerJsonCfg(t *testing.T) {
+	eCfg := &MailerJsonCfg{
+		Server:        utils.StringPointer("localhost"),
+		Auth_user:     utils.StringPointer("cgrates"),
+		Auth_password: utils.StringPointer("CGRateS.org"),
+		From_address:  utils.StringPointer("cgr-mailer@localhost.localdomain"),
+	}
+	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
+	if err != nil {
+		t.Error(err)
+	}
+	if cfg, err := dfCgrJSONCfg.MailerJsonCfg(); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(eCfg, cfg) {
+		t.Error("Received: ", cfg)
 	}
 }
 
@@ -1706,7 +1750,7 @@ func TestDfSureTaxJsonCfg(t *testing.T) {
 		Response_group:          utils.StringPointer("03"),
 		Response_type:           utils.StringPointer("D4"),
 		Regulatory_code:         utils.StringPointer("03"),
-		Client_tracking:         utils.StringPointer(utils.DynamicDataPrefix + utils.MetaOpts + utils.NestingSep + utils.MetaOriginID),
+		Client_tracking:         utils.StringPointer(utils.DynamicDataPrefix + utils.MetaReq + utils.NestingSep + utils.CGRID),
 		Customer_number:         utils.StringPointer("~*req.Subject"),
 		Orig_number:             utils.StringPointer("~*req.Subject"),
 		Term_number:             utils.StringPointer("~*req.Destination"),
@@ -1727,8 +1771,7 @@ func TestDfSureTaxJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(SureTaxJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), SureTaxJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.SureTaxJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", cfg)
@@ -1739,14 +1782,13 @@ func TestDfHttpJsonCfg(t *testing.T) {
 	eCfg := &HTTPJsonCfg{
 		Json_rpc_url:        utils.StringPointer("/jsonrpc"),
 		Registrars_url:      utils.StringPointer("/registrar"),
-		Prometheus_url:      utils.StringPointer("/prometheus"),
 		Ws_url:              utils.StringPointer("/ws"),
 		Freeswitch_cdrs_url: utils.StringPointer("/freeswitch_json"),
 		Http_Cdrs:           utils.StringPointer("/cdr_http"),
 		Use_basic_auth:      utils.BoolPointer(false),
 		Auth_users:          utils.MapStringStringPointer(map[string]string{}),
 		Client_opts: &HTTPClientOptsJson{
-			SkipTLSVerification:   utils.BoolPointer(false),
+			SkipTLSVerify:         utils.BoolPointer(false),
 			TLSHandshakeTimeout:   utils.StringPointer("10s"),
 			DisableKeepAlives:     utils.BoolPointer(false),
 			DisableCompression:    utils.BoolPointer(false),
@@ -1766,8 +1808,7 @@ func TestDfHttpJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(HTTPJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), HTTPJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.HttpJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %s ,received: %s", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1776,23 +1817,20 @@ func TestDfHttpJsonCfg(t *testing.T) {
 
 func TestDfDispatcherSJsonCfg(t *testing.T) {
 	eCfg := &DispatcherSJsonCfg{
-		Enabled:                  utils.BoolPointer(false),
-		Indexed_selects:          utils.BoolPointer(true),
-		String_indexed_fields:    nil,
-		Prefix_indexed_fields:    &[]string{},
-		Suffix_indexed_fields:    &[]string{},
-		Exists_indexed_fields:    &[]string{},
-		Notexists_indexed_fields: &[]string{},
-		Attributes_conns:         &[]string{},
-		Nested_fields:            utils.BoolPointer(false),
-		Opts:                     &DispatchersOptsJson{},
+		Enabled:               utils.BoolPointer(false),
+		Indexed_selects:       utils.BoolPointer(true),
+		String_indexed_fields: nil,
+		Prefix_indexed_fields: &[]string{},
+		Suffix_indexed_fields: &[]string{},
+		Attributes_conns:      &[]string{},
+		Nested_fields:         utils.BoolPointer(false),
+		Any_subsystem:         utils.BoolPointer(true),
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(DispatcherSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), DispatcherSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.DispatcherSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("expecting: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1808,7 +1846,7 @@ func TestDfLoaderCfg(t *testing.T) {
 		Disable_reverse:  utils.BoolPointer(false),
 		Field_separator:  utils.StringPointer(","),
 		Caches_conns:     &[]string{utils.MetaLocalHost},
-		Actions_conns:    &[]string{utils.MetaLocalHost},
+		Scheduler_conns:  &[]string{utils.MetaLocalHost},
 		Gapi_credentials: &cred,
 		Gapi_token:       &tok,
 	}
@@ -1816,11 +1854,10 @@ func TestDfLoaderCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(LoaderCfgJson)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), LoaderJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.LoaderCfgJson(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Errorf("Expected: %s, received: %+v", utils.ToJSON(*eCfg), utils.ToJSON(cfg))
+		t.Errorf("Expected1: %s, received: %+v", utils.ToJSON(*eCfg), utils.ToJSON(cfg))
 	}
 }
 
@@ -1834,29 +1871,35 @@ func TestDfMigratorCfg(t *testing.T) {
 		Out_dataDB_password: utils.StringPointer(""),
 		Out_dataDB_encoding: utils.StringPointer("msgpack"),
 
-		Users_filters: &[]string{},
+		Out_storDB_type:     utils.StringPointer("mysql"),
+		Out_storDB_host:     utils.StringPointer("127.0.0.1"),
+		Out_storDB_port:     utils.StringPointer("3306"),
+		Out_storDB_name:     utils.StringPointer("cgrates"),
+		Out_storDB_user:     utils.StringPointer("cgrates"),
+		Out_storDB_password: utils.StringPointer(""),
+		Users_filters:       &[]string{},
+		Out_storDB_opts:     &DBOptsJson{},
 		Out_dataDB_opts: &DBOptsJson{
 			RedisMaxConns:           utils.IntPointer(10),
 			RedisConnectAttempts:    utils.IntPointer(20),
+			RedisSentinel:           utils.StringPointer(utils.EmptyString),
+			RedisCluster:            utils.BoolPointer(false),
 			RedisClusterSync:        utils.StringPointer("5s"),
 			RedisClusterOndownDelay: utils.StringPointer("0"),
 			RedisConnectTimeout:     utils.StringPointer("0"),
 			RedisReadTimeout:        utils.StringPointer("0"),
 			RedisWriteTimeout:       utils.StringPointer("0"),
-			RedisCACertificate:      utils.StringPointer(utils.EmptyString),
+			RedisTLS:                utils.BoolPointer(false),
 			RedisClientCertificate:  utils.StringPointer(utils.EmptyString),
 			RedisClientKey:          utils.StringPointer(utils.EmptyString),
-			RedisCluster:            utils.BoolPointer(false),
-			RedisSentinel:           utils.StringPointer(utils.EmptyString),
-			RedisTLS:                utils.BoolPointer(false),
+			RedisCACertificate:      utils.StringPointer(utils.EmptyString),
 		},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(MigratorCfgJson)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), MigratorJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.MigratorCfgJson(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1877,8 +1920,7 @@ func TestDfTlsCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(TlsJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), TlsJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.TlsCfgJson(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1891,16 +1933,13 @@ func TestDfAnalyzerCfg(t *testing.T) {
 		Cleanup_interval: utils.StringPointer("1h"),
 		Db_path:          utils.StringPointer("/var/spool/cgrates/analyzers"),
 		Index_type:       utils.StringPointer(utils.MetaScorch),
-		Ees_conns:        &[]string{},
 		Ttl:              utils.StringPointer("24h"),
-		Opts:             &AnalyzerSOptsJson{},
 	}
 	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(AnalyzerSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), AnalyzerSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.AnalyzerCfgJson(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1908,10 +1947,10 @@ func TestDfAnalyzerCfg(t *testing.T) {
 }
 
 func TestDfApierCfg(t *testing.T) {
-	eCfg := &AdminSJsonCfg{
+	eCfg := &ApierJsonCfg{
 		Enabled:          utils.BoolPointer(false),
 		Caches_conns:     &[]string{utils.MetaInternal},
-		Actions_conns:    &[]string{},
+		Scheduler_conns:  &[]string{},
 		Attributes_conns: &[]string{},
 		Ees_conns:        &[]string{},
 	}
@@ -1919,8 +1958,7 @@ func TestDfApierCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(AdminSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), AdminSJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.ApierCfgJson(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v, received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1971,12 +2009,12 @@ func TestDfEventReaderCfg(t *testing.T) {
 				Cache_dump_fields:     &[]*FcTemplateJsonCfg{},
 				Partial_commit_fields: &[]*FcTemplateJsonCfg{},
 				Opts: &EventReaderOptsJson{
-					CSVFieldSeparator:   utils.StringPointer(","),
-					CSVHeaderDefineChar: utils.StringPointer(":"),
+					CSVFieldSeparator:   utils.StringPointer(utils.FieldsSep),
+					CSVHeaderDefineChar: utils.StringPointer(utils.InInFieldSep),
 					CSVRowLength:        utils.IntPointer(0),
-					XMLRootPath:         utils.StringPointer(utils.EmptyString),
-					PartialCacheAction:  utils.StringPointer(utils.MetaNone),
 					PartialOrderField:   utils.StringPointer("~*req.AnswerTime"),
+					PartialCacheAction:  utils.StringPointer(utils.MetaNone),
+					XMLRootPath:         utils.StringPointer(utils.EmptyString),
 					NATSSubject:         utils.StringPointer("cgrates_cdrs"),
 				},
 			},
@@ -1987,8 +2025,7 @@ func TestDfEventReaderCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(ERsJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), ERsJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.ERsJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v, \nreceived: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
@@ -1999,7 +2036,7 @@ func TestDfEventExporterCfg(t *testing.T) {
 	eCfg := &EEsJsonCfg{
 		Enabled:          utils.BoolPointer(false),
 		Attributes_conns: &[]string{},
-		Cache: map[string]*CacheParamJsonCfg{
+		Cache: &map[string]*CacheParamJsonCfg{
 			utils.MetaFileCSV: {
 				Limit:      utils.IntPointer(-1),
 				Ttl:        utils.StringPointer("5s"),
@@ -2017,13 +2054,11 @@ func TestDfEventExporterCfg(t *testing.T) {
 				Attribute_ids:       &[]string{},
 				Flags:               &[]string{},
 				Synchronous:         utils.BoolPointer(false),
-				Blocker:             utils.BoolPointer(false),
 				Attempts:            utils.IntPointer(1),
 				Fields:              &[]*FcTemplateJsonCfg{},
 				Opts:                &EventExporterOptsJson{},
 				Concurrent_requests: utils.IntPointer(0),
 				Failed_posts_dir:    utils.StringPointer("/var/spool/cgrates/failed_posts"),
-				Efs_conns:           &[]string{utils.MetaInternal},
 			},
 		},
 	}
@@ -2031,48 +2066,15 @@ func TestDfEventExporterCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := new(EEsJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), EEsJSON, cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.EEsJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v, \nreceived: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
 	}
 }
 
-func TestDfRateSJsonCfg(t *testing.T) {
-	eCfg := &RateSJsonCfg{
-		Enabled:                       utils.BoolPointer(false),
-		Indexed_selects:               utils.BoolPointer(true),
-		String_indexed_fields:         nil,
-		Prefix_indexed_fields:         &[]string{},
-		Suffix_indexed_fields:         &[]string{},
-		Exists_indexed_fields:         &[]string{},
-		Notexists_indexed_fields:      &[]string{},
-		Nested_fields:                 utils.BoolPointer(false),
-		Rate_indexed_selects:          utils.BoolPointer(true),
-		Rate_string_indexed_fields:    nil,
-		Rate_prefix_indexed_fields:    &[]string{},
-		Rate_suffix_indexed_fields:    &[]string{},
-		Rate_exists_indexed_fields:    &[]string{},
-		Rate_notexists_indexed_fields: &[]string{},
-		Rate_nested_fields:            utils.BoolPointer(false),
-		Verbosity:                     utils.IntPointer(1000),
-		Opts:                          &RatesOptsJson{},
-	}
-	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
-	if err != nil {
-		t.Error(err)
-	}
-	cfg := new(RateSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), RateSJSON, cfg); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Error("Received: ", utils.ToJSON(cfg))
-	}
-}
-
 func TestDfTemplateSJsonCfg(t *testing.T) {
-	eCfg := FcTemplatesJsonCfg{
+	eCfg := map[string][]*FcTemplateJsonCfg{
 		"*errSip": {
 			{
 				Tag:       utils.StringPointer("Request"),
@@ -2324,85 +2326,9 @@ func TestDfTemplateSJsonCfg(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	cfg := make(FcTemplatesJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), TemplatesJSON, &cfg); err != nil {
+	if cfg, err := dfCgrJSONCfg.TemplateSJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Errorf("Expected: %+v \n,received: %+v", utils.ToJSON(eCfg), utils.ToJSON(cfg))
-	}
-}
-
-func TestDfActionSJsonCfg(t *testing.T) {
-	eCfg := &ActionSJsonCfg{
-		Enabled:                   utils.BoolPointer(false),
-		Cdrs_conns:                &[]string{},
-		Ees_conns:                 &[]string{},
-		Thresholds_conns:          &[]string{},
-		Stats_conns:               &[]string{},
-		Accounts_conns:            &[]string{},
-		Tenants:                   &[]string{},
-		Indexed_selects:           utils.BoolPointer(true),
-		String_indexed_fields:     nil,
-		Prefix_indexed_fields:     &[]string{},
-		Suffix_indexed_fields:     &[]string{},
-		Exists_indexed_fields:     &[]string{},
-		Notexists_indexed_fields:  &[]string{},
-		Nested_fields:             utils.BoolPointer(false),
-		Dynaprepaid_actionprofile: &[]string{},
-		Opts:                      &ActionsOptsJson{},
-	}
-	dfCgrJSONCfg, err := NewCgrJsonCfgFromBytes([]byte(CGRATES_CFG_JSON))
-	if err != nil {
-		t.Error(err)
-	}
-	cfg := new(ActionSJsonCfg)
-	if err := dfCgrJSONCfg.GetSection(context.Background(), ActionSJSON, cfg); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Errorf("\n Expected <%+v>,\nReceived:<%+v>", utils.ToJSON(eCfg), utils.ToJSON(cfg))
-	}
-}
-
-func TestSetSection(t *testing.T) {
-	jsn := `
-		{
-			"general": {
-				"Node_id":2,
-			},
-		}
-	`
-	jsnCfg, err := NewCgrJsonCfgFromBytes([]byte(jsn))
-	if err != nil {
-		t.Error(err)
-	}
-	payload := make(chan struct{})
-	errExpect := "json: unsupported type: chan struct {}"
-	if err := jsnCfg.SetSection(&context.Context{}, "general", payload); err == nil || err.Error() != errExpect {
-		t.Error(err)
-	}
-}
-
-func TestConfigJsonCloneSection(t *testing.T) {
-	s := Sections{
-		&CoreSCfg{
-			Caps:              2,
-			CapsStrategy:      "*busy",
-			CapsStatsInterval: 2 * time.Second,
-			ShutdownTimeout:   3 * time.Second,
-		},
-	}
-
-	exp := []Section{
-		&CoreSCfg{
-			Caps:              2,
-			CapsStrategy:      "*busy",
-			CapsStatsInterval: 2 * time.Second,
-			ShutdownTimeout:   3 * time.Second,
-		},
-	}
-
-	c := s.Clone()
-	if !reflect.DeepEqual(exp[0], c[0]) {
-		t.Errorf("Expected %v \n bu received \n %v", exp, c)
 	}
 }

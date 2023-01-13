@@ -23,7 +23,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -37,7 +37,7 @@ func NewRSRParsers(parsersRules string, rsrSeparator string) (prsrs RSRParsers, 
 		return
 	}
 	if count := strings.Count(parsersRules, utils.RSRConstSep); count%2 != 0 { // check if we have matching `
-		return nil, fmt.Errorf("Closed unspilit syntax")
+		return nil, fmt.Errorf("Unclosed unspilit syntax")
 	} else if count != 0 {
 		var splitedRule []string
 		for idx := strings.IndexByte(parsersRules, utils.RSRConstChar); idx != -1; idx = strings.IndexByte(parsersRules, utils.RSRConstChar) {
@@ -92,7 +92,7 @@ func NewRSRParsersFromSlice(parsersRules []string) (prsrs RSRParsers, err error)
 		if prsrs[i], err = NewRSRParser(rlStr); err != nil {
 			return nil, err
 		} else if prsrs[i] == nil {
-			return nil, fmt.Errorf("empty RSRParser in rule: <%s>", rlStr)
+			return nil, fmt.Errorf("emtpy RSRParser in rule: <%s>", rlStr)
 		}
 	}
 	return
@@ -167,22 +167,6 @@ func (prsrs RSRParsers) ParseDataProviderWithInterfaces(dP utils.DataProvider) (
 	return
 }
 
-// ParseDataProviderWithInterfaces will parse the dataprovider using DPDynamicInterface
-func (prsrs RSRParsers) ParseDataProviderWithInterfaces2(dP utils.DataProvider) (out interface{}, err error) {
-	for i, prsr := range prsrs {
-		outPrsr, err := prsr.ParseDataProviderWithInterfaces2(dP)
-		if err != nil {
-			return nil, err
-		}
-		if i == 0 {
-			out = outPrsr
-		} else {
-			out = utils.IfaceAsString(out) + utils.IfaceAsString(outPrsr)
-		}
-	}
-	return
-}
-
 // GetIfaceFromValues returns an interface for each RSRParser
 func (prsrs RSRParsers) GetIfaceFromValues(evNm utils.DataProvider) (iFaceVals []interface{}, err error) {
 	iFaceVals = make([]interface{}, len(prsrs))
@@ -204,14 +188,6 @@ func (prsrs RSRParsers) Clone() (cln RSRParsers) {
 	cln = make(RSRParsers, len(prsrs))
 	for i, prsr := range prsrs {
 		cln[i] = prsr.Clone()
-	}
-	return
-}
-
-func (prsrs RSRParsers) AsStringSlice() (v []string) {
-	v = make([]string, len(prsrs))
-	for i, val := range prsrs {
-		v[i] = val.Rules
 	}
 	return
 }
@@ -327,14 +303,6 @@ func (prsr *RSRParser) parseValue(value string) (out string, err error) {
 	return prsr.converters.ConvertString(value)
 }
 
-// parseValue the field value from a string
-func (prsr *RSRParser) parseValueInterface(value interface{}) (out interface{}, err error) {
-	for _, rsRule := range prsr.rsrRules {
-		value = rsRule.Process(utils.IfaceAsString(value))
-	}
-	return prsr.converters.ConvertInterface(value)
-}
-
 // ParseValue will parse the value out considering converters
 func (prsr *RSRParser) ParseValue(value interface{}) (out string, err error) {
 	out = prsr.path
@@ -385,26 +353,6 @@ func (prsr *RSRParser) ParseDataProviderWithInterfaces(dP utils.DataProvider) (o
 	return prsr.parseValue(utils.IfaceAsString(outIface))
 }
 
-// ParseDataProviderWithInterfaces will parse the dataprovider using DPDynamicInterface
-func (prsr *RSRParser) ParseDataProviderWithInterfaces2(dP utils.DataProvider) (out interface{}, err error) {
-	if prsr.dynRules != nil {
-		var dynPath string
-		if dynPath, err = prsr.dynRules.ParseDataProvider(dP); err != nil {
-			return
-		}
-		var dynRSR *RSRParser
-		if dynRSR, err = NewRSRParser(prsr.Rules[:prsr.dynIdxStart] + dynPath + prsr.Rules[prsr.dynIdxEnd:]); err != nil {
-			return
-		}
-		return dynRSR.ParseDataProviderWithInterfaces2(dP)
-	}
-	var outIface interface{}
-	if outIface, err = utils.DPDynamicInterface(prsr.path, dP); err != nil {
-		return
-	}
-	return prsr.parseValueInterface(outIface)
-}
-
 // CompileDynRule will return the compiled dynamic rule
 func (prsr *RSRParser) CompileDynRule(dP utils.DataProvider) (p string, err error) {
 	if prsr.dynRules == nil {
@@ -434,9 +382,11 @@ func (prsr RSRParser) Clone() (cln *RSRParser) {
 	}
 	if prsr.converters != nil {
 		cln.converters = make(utils.DataConverters, len(prsr.converters))
-		// we can't modify the convertor only overwrite it
-		// safe to copy it's value
-		copy(cln.converters, prsr.converters)
+		for i, cnv := range prsr.converters {
+			// we can't modify the convertor only overwirte it
+			// safe to coppy it's value
+			cln.converters[i] = cnv
+		}
 	}
 	return
 }

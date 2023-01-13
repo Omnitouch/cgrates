@@ -22,37 +22,28 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/loaders"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/loaders"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestLoaderSCoverage for cover testing
 func TestLoaderSCoverage(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
+	shdChan := utils.NewSyncedChan()
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	internalLoaderSChan := make(chan birpc.ClientConnector, 1)
-	cM := engine.NewConnManager(cfg)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	cfg.LoaderCfg()[0] = &config.LoaderSCfg{
-		ID:             "test_id",
-		Enabled:        true,
-		Tenant:         "",
-		RunDelay:       0,
-		LockFilePath:   "",
-		CacheSConns:    nil,
-		FieldSeparator: "",
-		TpInDir:        "",
-		TpOutDir:       "",
-		Data:           nil,
-	}
+	internalLoaderSChan := make(chan rpcclient.ClientConnector, 1)
+	rpcInternal := map[string]chan rpcclient.ClientConnector{}
+	cM := engine.NewConnManager(cfg, rpcInternal)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	srv := NewLoaderService(cfg, db,
 		filterSChan, server, internalLoaderSChan,
 		cM, anz, srvDep)
@@ -62,7 +53,20 @@ func TestLoaderSCoverage(t *testing.T) {
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
-	srv.ldrs = loaders.NewLoaderS(cfg, &engine.DataManager{},
+	srv.ldrs = loaders.NewLoaderService(&engine.DataManager{},
+		[]*config.LoaderSCfg{{
+			ID:             "test_id",
+			Enabled:        true,
+			Tenant:         "",
+			DryRun:         false,
+			RunDelay:       0,
+			LockFilePath:   "",
+			CacheSConns:    nil,
+			FieldSeparator: "",
+			TpInDir:        "",
+			TpOutDir:       "",
+			Data:           nil,
+		}}, "",
 		&engine.FilterS{}, nil)
 	if !srv.IsRunning() {
 		t.Errorf("Expected service to be running")
@@ -71,14 +75,16 @@ func TestLoaderSCoverage(t *testing.T) {
 	if !reflect.DeepEqual(serviceName, utils.LoaderS) {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", utils.LoaderS, serviceName)
 	}
-	if shouldRun := srv.ShouldRun(); !shouldRun {
+	shouldRun := srv.ShouldRun()
+	if !reflect.DeepEqual(shouldRun, false) {
 		t.Errorf("\nExpecting <false>,\n Received <%+v>", shouldRun)
 	}
 	if !reflect.DeepEqual(srv.GetLoaderS(), srv.ldrs) {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", srv.ldrs, srv.GetLoaderS())
 	}
 	srv.stopChan = make(chan struct{}, 1)
-	srv.connChan <- &testMockClients{}
+	chS := engine.NewCacheS(cfg, nil, nil)
+	srv.connChan <- chS
 	srv.Shutdown()
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")

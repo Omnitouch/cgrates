@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"net/rpc"
 	"os"
 	"os/exec"
 	"path"
@@ -32,11 +33,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 /*
@@ -52,7 +51,7 @@ import (
  *         	`./redis-trib.rb create --replicas 1 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005 127.0.0.1:7006`
  *
  * To run the tests you need to specify the `redisCluster` flag and have the redis stopped:
- *    	`go test github.com/Omnitouch/cgrates/general_tests -tags=integration -dbtype=*mysql -run=TestRedisCluster -redisCluster  -v`
+ *    	`go test github.com/cgrates/cgrates/general_tests -tags=integration -dbtype=*mysql -run=TestRedisCluster -redisCluster  -v`
  *
  * The configuration of the cluster is the following:
  *		- node1 127.0.0.1:7001 master
@@ -66,7 +65,7 @@ import (
 
 var (
 	clsrConfig *config.CGRConfig
-	clsrRPC    *birpc.Client
+	clsrRPC    *rpc.Client
 
 	clsrNodeCfgPath   = path.Join(*dataDir, "redisCluster", "node%v.conf")
 	clsrEngineCfgPath = path.Join(*dataDir, "conf", "samples", "redisCluster")
@@ -161,7 +160,7 @@ func testClsrCreateCluster(t *testing.T) {
 
 func testClsrInitConfig(t *testing.T) {
 	var err error
-	clsrConfig, err = config.NewCGRConfigFromPath(context.Background(), clsrEngineCfgPath)
+	clsrConfig, err = config.NewCGRConfigFromPath(clsrEngineCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -169,7 +168,7 @@ func testClsrInitConfig(t *testing.T) {
 }
 
 func testClsrFlushDb(t *testing.T) {
-	if err := engine.InitDataDB(clsrConfig); err != nil {
+	if err := engine.InitDataDb(clsrConfig); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -192,28 +191,25 @@ func testClsrSetGetAttribute(t *testing.T) {
 	alsPrf := &engine.AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ClsrTest",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*opts.*context:*sessions|*cdrs"},
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"*string:~*req.Account:1001"},
 		Attributes: []*engine.Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + utils.Subject,
 				Value: config.NewRSRParsersMustCompile("1001", utils.InfieldSep),
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20,
 	}
 	alsPrf.Compile()
 	var result string
-	if err := clsrRPC.Call(context.Background(), utils.AdminSv1SetAttributeProfile, alsPrf, &result); err != nil {
+	if err := clsrRPC.Call(utils.APIerSv1SetAttributeProfile, alsPrf, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
 	}
 	var reply *engine.AttributeProfile
-	if err := clsrRPC.Call(context.Background(), utils.AdminSv1GetAttributeProfile,
+	if err := clsrRPC.Call(utils.APIerSv1GetAttributeProfile,
 		&utils.TenantID{Tenant: "cgrates.org", ID: "ClsrTest"}, &reply); err != nil {
 		t.Fatal(err)
 	}
@@ -235,22 +231,19 @@ func testClsrSetGetAttribute2(t *testing.T) {
 	alsPrf := &engine.AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ClsrTest",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*opts.*context:*sessions|*cdrs"},
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"*string:~*req.Account:1001"},
 		Attributes: []*engine.Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + utils.Subject,
 				Value: config.NewRSRParsersMustCompile("1001", utils.InfieldSep),
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20,
 	}
 	alsPrf.Compile()
 	var reply *engine.AttributeProfile
-	if err := clsrRPC.Call(context.Background(), utils.AdminSv1GetAttributeProfile,
+	if err := clsrRPC.Call(utils.APIerSv1GetAttributeProfile,
 		&utils.TenantID{Tenant: "cgrates.org", ID: "ClsrTest"}, &reply); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +254,7 @@ func testClsrSetGetAttribute2(t *testing.T) {
 	// add another attribute
 	alsPrf.ID += "2"
 	var result string
-	if err := clsrRPC.Call(context.Background(), utils.AdminSv1SetAttributeProfile, alsPrf, &result); err != nil {
+	if err := clsrRPC.Call(utils.APIerSv1SetAttributeProfile, alsPrf, &result); err != nil {
 		t.Error(err)
 	} else if result != utils.OK {
 		t.Error("Unexpected reply returned", result)
@@ -283,22 +276,19 @@ func testClsrGetAttribute(t *testing.T) {
 	alsPrf := &engine.AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ClsrTest2",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*opts.*context:*sessions|*cdrs"},
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"*string:~*req.Account:1001"},
 		Attributes: []*engine.Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + utils.Subject,
 				Value: config.NewRSRParsersMustCompile("1001", utils.InfieldSep),
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20,
 	}
 	alsPrf.Compile()
 	var reply *engine.AttributeProfile
-	if err := clsrRPC.Call(context.Background(), utils.AdminSv1GetAttributeProfile,
+	if err := clsrRPC.Call(utils.APIerSv1GetAttributeProfile,
 		&utils.TenantID{Tenant: "cgrates.org", ID: "ClsrTest2"}, &reply); err != nil {
 		t.Fatal(err)
 	}

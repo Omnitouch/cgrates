@@ -29,10 +29,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewSQLEe(cfg *config.EventExporterCfg,
@@ -76,7 +75,7 @@ func (sqlEe *SQLEe) initDialector() (err error) {
 	if sqlEe.Cfg().Opts.SQLDBName != nil {
 		dbname = *sqlEe.Cfg().Opts.SQLDBName
 	}
-	ssl := utils.SQLDefaultPgSSLMode
+	ssl := utils.SQLDefaultSSLMode
 	if sqlEe.Cfg().Opts.PgSSLMode != nil {
 		ssl = *sqlEe.Cfg().Opts.PgSSLMode
 	}
@@ -132,7 +131,7 @@ func (sqlEe *SQLEe) Connect() (err error) {
 	return
 }
 
-func (sqlEe *SQLEe) ExportEvent(_ *context.Context, req, _ interface{}) error {
+func (sqlEe *SQLEe) ExportEvent(req interface{}, _ string) error {
 	sqlEe.reqs.get()
 	sqlEe.RLock()
 	defer func() {
@@ -159,9 +158,7 @@ func (sqlEe *SQLEe) Close() (err error) {
 
 func (sqlEe *SQLEe) GetMetrics() *utils.SafeMapStorage { return sqlEe.dc }
 
-func (sqlEe *SQLEe) ExtraData(ev *utils.CGREvent) interface{} { return nil }
-
-func (sqlEe *SQLEe) PrepareMap(mp *utils.CGREvent) (interface{}, error) { return nil, nil }
+func (sqlEe *SQLEe) PrepareMap(*utils.CGREvent) (interface{}, error) { return nil, nil }
 
 func (sqlEe *SQLEe) PrepareOrderMap(mp *utils.OrderedNavigableMap) (interface{}, error) {
 	var vals []interface{}

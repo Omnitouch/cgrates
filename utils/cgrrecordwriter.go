@@ -22,15 +22,15 @@ import (
 	"io"
 )
 
-// NopFlushWriter is a writer for one line, compatible with csv.Writer interface on Write
+// CgrRecordWriter is a writer for one line, compatible with csv.Writer interface on Write
 // Used in TP exporter
-type NopFlushWriter interface {
+type CgrRecordWriter interface {
 	Write([]string) error
 	Flush()
 }
 
-// NewNopFlushWriter return CgrRecordWriter that will replace csv.Writer
-func NewNopFlushWriter(w io.Writer) *CgrIORecordWriter {
+// NewCgrIORecordWriter return CgrRecordWriter that will replace csv.Writer
+func NewCgrIORecordWriter(w io.Writer) *CgrIORecordWriter {
 	return &CgrIORecordWriter{w: w}
 }
 

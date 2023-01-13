@@ -23,34 +23,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"runtime"
+	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
 var Cache *CacheS
 
 func init() {
-	Cache = NewCacheS(config.CgrConfig(), nil, nil, nil)
-
+	Cache = NewCacheS(config.CgrConfig(), nil, nil)
 	// Register objects for cache replication/remotes
-	// AttributeS
+	//AttributeS
 	gob.Register(new(AttributeProfile))
 	gob.Register(new(AttributeProfileWithAPIOpts))
-	// Threshold
+	// ThresholdS
 	gob.Register(new(Threshold))
 	gob.Register(new(ThresholdProfile))
 	gob.Register(new(ThresholdProfileWithAPIOpts))
 	gob.Register(new(ThresholdWithAPIOpts))
-	// Resource
+	// ResourceS
 	gob.Register(new(Resource))
 	gob.Register(new(ResourceProfile))
 	gob.Register(new(ResourceProfileWithAPIOpts))
 	gob.Register(new(ResourceWithAPIOpts))
-	// Stats
+	// StatS
 	gob.Register(new(StatQueue))
 	gob.Register(new(StatQueueProfile))
 	gob.Register(new(StatQueueProfileWithAPIOpts))
@@ -59,19 +59,17 @@ func init() {
 	// RouteS
 	gob.Register(new(RouteProfile))
 	gob.Register(new(RouteProfileWithAPIOpts))
-	// Filters
+	// FilterS
 	gob.Register(new(Filter))
 	gob.Register(new(FilterWithAPIOpts))
-	// Dispatcher
+	// DispatcherS
 	gob.Register(new(DispatcherHost))
 	gob.Register(new(DispatcherHostProfile))
 	gob.Register(new(DispatcherHostWithAPIOpts))
-	// RateProfiles
-	gob.Register(new(utils.RateProfile))
-	gob.Register(new(utils.RateProfileWithAPIOpts))
-	// ActionProfiles
-	gob.Register(new(ActionProfile))
-	gob.Register(new(ActionProfileWithAPIOpts))
+
+	// CDRs
+	gob.Register(new(EventCost))
+
 	// StatMetrics
 	gob.Register(new(StatASR))
 	gob.Register(new(StatACD))
@@ -83,6 +81,7 @@ func init() {
 	gob.Register(new(StatSum))
 	gob.Register(new(StatAverage))
 	gob.Register(new(StatDistinct))
+
 	// others
 	gob.Register([]interface{}{})
 	gob.Register([]map[string]interface{}{})
@@ -93,6 +92,7 @@ func init() {
 	gob.Register(time.Time{})
 	gob.Register(url.Values{})
 	gob.Register(json.RawMessage{})
+	gob.Register(BalanceSummaries{})
 
 	gob.Register(new(utils.ArgCacheReplicateSet))
 	gob.Register(new(utils.ArgCacheReplicateRemove))
@@ -101,7 +101,8 @@ func init() {
 }
 
 // NewCacheS initializes the Cache service and executes the precaching
-func NewCacheS(cfg *config.CGRConfig, dm *DataManager, connMgr *ConnManager, cpS *CapsStats) (c *CacheS) {
+func NewCacheS(cfg *config.CGRConfig, dm *DataManager, cpS *CapsStats) (c *CacheS) {
+	cfg.CacheCfg().AddTmpCaches()
 	tCache := cfg.CacheCfg().AsTransCacheConfig()
 	if len(cfg.CacheCfg().ReplicationConns) != 0 {
 		var reply string
@@ -111,7 +112,7 @@ func NewCacheS(cfg *config.CGRConfig, dm *DataManager, connMgr *ConnManager, cpS
 				continue
 			}
 			val.OnEvicted = func(itmID string, value interface{}) {
-				if err := connMgr.Call(context.TODO(), cfg.CacheCfg().ReplicationConns, utils.CacheSv1ReplicateRemove,
+				if err := connMgr.Call(cfg.CacheCfg().ReplicationConns, nil, utils.CacheSv1ReplicateRemove,
 					&utils.ArgCacheReplicateRemove{
 						CacheID: k,
 						ItemID:  itmID,
@@ -128,7 +129,6 @@ func NewCacheS(cfg *config.CGRConfig, dm *DataManager, connMgr *ConnManager, cpS
 	c = &CacheS{
 		cfg:     cfg,
 		dm:      dm,
-		connMgr: connMgr,
 		pcItems: make(map[string]chan struct{}),
 		tCache:  ltcache.NewTransCache(tCache),
 	}
@@ -142,27 +142,26 @@ func NewCacheS(cfg *config.CGRConfig, dm *DataManager, connMgr *ConnManager, cpS
 type CacheS struct {
 	cfg     *config.CGRConfig
 	dm      *DataManager
-	connMgr *ConnManager
 	pcItems map[string]chan struct{} // signal precaching
 	tCache  *ltcache.TransCache
 }
 
 // Set is an exported method from TransCache
 // handled Replicate functionality
-func (chS *CacheS) Set(ctx *context.Context, chID, itmID string, value interface{},
+func (chS *CacheS) Set(chID, itmID string, value interface{},
 	groupIDs []string, commit bool, transID string) (err error) {
 	chS.tCache.Set(chID, itmID, value, groupIDs, commit, transID)
-	return chS.ReplicateSet(ctx, chID, itmID, value)
+	return chS.ReplicateSet(chID, itmID, value)
 }
 
-// ReplicateSet replicate an item to ReplicationConns
-func (chS *CacheS) ReplicateSet(ctx *context.Context, chID, itmID string, value interface{}) (err error) {
+// ReplicateSet replicates an item to ReplicationConns
+func (chS *CacheS) ReplicateSet(chID, itmID string, value interface{}) (err error) {
 	if len(chS.cfg.CacheCfg().ReplicationConns) == 0 ||
 		!chS.cfg.CacheCfg().Partitions[chID].Replicate {
 		return
 	}
 	var reply string
-	return connMgr.Call(ctx, chS.cfg.CacheCfg().ReplicationConns, utils.CacheSv1ReplicateSet,
+	return connMgr.Call(chS.cfg.CacheCfg().ReplicationConns, nil, utils.CacheSv1ReplicateSet,
 		&utils.ArgCacheReplicateSet{
 			CacheID: chID,
 			ItemID:  itmID,
@@ -178,14 +177,15 @@ func (chS *CacheS) SetWithoutReplicate(chID, itmID string, value interface{},
 }
 
 // SetWithReplicate combines local set with replicate, receiving the arguments needed by dispatcher
-func (chS *CacheS) SetWithReplicate(ctx *context.Context, args *utils.ArgCacheReplicateSet) (err error) {
+func (chS *CacheS) SetWithReplicate(args *utils.ArgCacheReplicateSet) (err error) {
+	// normal cache set
 	chS.tCache.Set(args.CacheID, args.ItemID, args.Value, args.GroupIDs, true, utils.EmptyString)
 	if len(chS.cfg.CacheCfg().ReplicationConns) == 0 ||
 		!chS.cfg.CacheCfg().Partitions[args.CacheID].Replicate {
 		return
 	}
 	var reply string
-	return chS.connMgr.Call(ctx, chS.cfg.CacheCfg().ReplicationConns,
+	return connMgr.Call(chS.cfg.CacheCfg().ReplicationConns, nil,
 		utils.CacheSv1ReplicateSet, args, &reply)
 }
 
@@ -200,7 +200,7 @@ func (chS *CacheS) Get(chID, itmID string) (interface{}, bool) {
 }
 
 // GetWithRemote queries locally the cache, followed by remotes
-func (chS *CacheS) GetWithRemote(ctx *context.Context, args *utils.ArgsGetCacheItemWithAPIOpts) (itm interface{}, err error) {
+func (chS *CacheS) GetWithRemote(args *utils.ArgsGetCacheItemWithAPIOpts) (itm interface{}, err error) {
 	var has bool
 	if itm, has = chS.tCache.Get(args.CacheID, args.ItemID); has {
 		return
@@ -210,7 +210,7 @@ func (chS *CacheS) GetWithRemote(ctx *context.Context, args *utils.ArgsGetCacheI
 		return nil, utils.ErrNotFound
 	}
 	// item was not found locally, query from remote
-	if err = chS.connMgr.Call(ctx, chS.cfg.CacheCfg().RemoteConns,
+	if err = connMgr.Call(chS.cfg.CacheCfg().RemoteConns, nil,
 		utils.CacheSv1GetItem, args, &itm); err != nil &&
 		err.Error() == utils.ErrNotFound.Error() {
 		return nil, utils.ErrNotFound // correct the error coming as string type
@@ -224,9 +224,9 @@ func (chS *CacheS) GetItemIDs(chID, prfx string) (itmIDs []string) {
 }
 
 // Remove is an exported method from TransCache
-func (chS *CacheS) Remove(ctx *context.Context, chID, itmID string, commit bool, transID string) (err error) {
+func (chS *CacheS) Remove(chID, itmID string, commit bool, transID string) (err error) {
 	chS.tCache.Remove(chID, itmID, commit, transID)
-	return chS.ReplicateRemove(ctx, chID, itmID)
+	return chS.ReplicateRemove(chID, itmID)
 }
 
 // RemoveWithoutReplicate is an exported method from TransCache
@@ -237,6 +237,10 @@ func (chS *CacheS) RemoveWithoutReplicate(chID, itmID string, commit bool, trans
 // Clear is an exported method from TransCache
 func (chS *CacheS) Clear(chIDs []string) {
 	chS.tCache.Clear(chIDs)
+}
+
+func (chS *CacheS) RemoveGroup(cacheID, groupID string) {
+	chS.tCache.RemoveGroup(cacheID, groupID, true, utils.NonTransactional)
 }
 
 // BeginTransaction is an exported method from TransCache
@@ -265,29 +269,48 @@ func (chS *CacheS) GetPrecacheChannel(chID string) chan struct{} {
 }
 
 // Precache loads data from DataDB into cache at engine start
-func (chS *CacheS) Precache(ctx *context.Context, shutdown context.CancelFunc) {
+func (chS *CacheS) Precache() (err error) {
+	var wg sync.WaitGroup // wait for precache to finish
+	errChan := make(chan error)
+	doneChan := make(chan struct{})
 	for cacheID, cacheCfg := range chS.cfg.CacheCfg().Partitions {
 		if !cacheCfg.Precache {
 			close(chS.pcItems[cacheID]) // no need of precache
 			continue
 		}
+		wg.Add(1)
 		go func(cacheID string) {
-			err := chS.dm.CacheDataFromDB(ctx,
+			errCache := chS.dm.CacheDataFromDB(
 				utils.CacheInstanceToPrefix[cacheID],
 				[]string{utils.MetaAny},
 				false)
-			if err != nil && err != context.Canceled {
-				utils.Logger.Crit(fmt.Sprintf("<%s> precaching cacheID <%s>, got error: %s", utils.CacheS, cacheID, err))
-				shutdown()
-				return
+			if errCache != nil {
+				errChan <- fmt.Errorf("precaching cacheID <%s>, got error: %s", cacheID, errCache)
 			}
 			close(chS.pcItems[cacheID])
+			wg.Done()
 		}(cacheID)
 	}
+	runtime.Gosched() // switch context
+	go func() {       // report wg.Wait on doneChan
+		wg.Wait()
+		close(doneChan)
+	}()
+	select {
+	case err = <-errChan:
+	case <-doneChan:
+	}
+	return
 }
 
 // APIs start here
-func (chS *CacheS) V1GetItemIDs(_ *context.Context, args *utils.ArgsGetCacheItemIDsWithAPIOpts,
+
+// Call gives the ability of CacheS to be passed as internal RPC
+func (chS *CacheS) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	return utils.RPCCall(chS, serviceMethod, args, reply)
+}
+
+func (chS *CacheS) V1GetItemIDs(args *utils.ArgsGetCacheItemIDsWithAPIOpts,
 	reply *[]string) (err error) {
 	itmIDs := chS.tCache.GetItemIDs(args.CacheID, args.ItemIDPrefix)
 	if len(itmIDs) == 0 {
@@ -297,14 +320,14 @@ func (chS *CacheS) V1GetItemIDs(_ *context.Context, args *utils.ArgsGetCacheItem
 	return
 }
 
-func (chS *CacheS) V1HasItem(_ *context.Context, args *utils.ArgsGetCacheItemWithAPIOpts,
+func (chS *CacheS) V1HasItem(args *utils.ArgsGetCacheItemWithAPIOpts,
 	reply *bool) (err error) {
 	*reply = chS.tCache.HasItem(args.CacheID, args.ItemID)
 	return
 }
 
 // V1GetItem returns a single item from the cache
-func (chS *CacheS) V1GetItem(_ *context.Context, args *utils.ArgsGetCacheItemWithAPIOpts,
+func (chS *CacheS) V1GetItem(args *utils.ArgsGetCacheItemWithAPIOpts,
 	reply *interface{}) (err error) {
 	itmIface, has := chS.tCache.Get(args.CacheID, args.ItemID)
 	if !has {
@@ -315,17 +338,17 @@ func (chS *CacheS) V1GetItem(_ *context.Context, args *utils.ArgsGetCacheItemWit
 }
 
 // V1GetItemWithRemote queries the item from remote if not found locally
-func (chS *CacheS) V1GetItemWithRemote(ctx *context.Context, args *utils.ArgsGetCacheItemWithAPIOpts,
+func (chS *CacheS) V1GetItemWithRemote(args *utils.ArgsGetCacheItemWithAPIOpts,
 	reply *interface{}) (err error) {
 	var itmIface interface{}
-	if itmIface, err = chS.GetWithRemote(ctx, args); err != nil {
+	if itmIface, err = chS.GetWithRemote(args); err != nil {
 		return
 	}
 	*reply = itmIface
 	return
 }
 
-func (chS *CacheS) V1GetItemExpiryTime(_ *context.Context, args *utils.ArgsGetCacheItemWithAPIOpts,
+func (chS *CacheS) V1GetItemExpiryTime(args *utils.ArgsGetCacheItemWithAPIOpts,
 	reply *time.Time) (err error) {
 	expTime, has := chS.tCache.GetItemExpiryTime(args.CacheID, args.ItemID)
 	if !has {
@@ -335,14 +358,14 @@ func (chS *CacheS) V1GetItemExpiryTime(_ *context.Context, args *utils.ArgsGetCa
 	return
 }
 
-func (chS *CacheS) V1RemoveItem(_ *context.Context, args *utils.ArgsGetCacheItemWithAPIOpts,
+func (chS *CacheS) V1RemoveItem(args *utils.ArgsGetCacheItemWithAPIOpts,
 	reply *string) (err error) {
 	chS.tCache.Remove(args.CacheID, args.ItemID, true, utils.NonTransactional)
 	*reply = utils.OK
 	return
 }
 
-func (chS *CacheS) V1RemoveItems(_ *context.Context, args *utils.AttrReloadCacheWithAPIOpts,
+func (chS *CacheS) V1RemoveItems(args *utils.AttrReloadCacheWithAPIOpts,
 	reply *string) (err error) {
 	for cacheID, ids := range args.Map() {
 		for _, id := range ids {
@@ -353,21 +376,21 @@ func (chS *CacheS) V1RemoveItems(_ *context.Context, args *utils.AttrReloadCache
 	return
 }
 
-func (chS *CacheS) V1Clear(ctx *context.Context, args *utils.AttrCacheIDsWithAPIOpts,
+func (chS *CacheS) V1Clear(args *utils.AttrCacheIDsWithAPIOpts,
 	reply *string) (err error) {
 	chS.tCache.Clear(args.CacheIDs)
 	*reply = utils.OK
 	return
 }
 
-func (chS *CacheS) V1GetCacheStats(ctx *context.Context, args *utils.AttrCacheIDsWithAPIOpts,
+func (chS *CacheS) V1GetCacheStats(args *utils.AttrCacheIDsWithAPIOpts,
 	rply *map[string]*ltcache.CacheStats) (err error) {
 	cs := chS.tCache.GetCacheStats(args.CacheIDs)
 	*rply = cs
 	return
 }
 
-func (chS *CacheS) V1PrecacheStatus(_ *context.Context, args *utils.AttrCacheIDsWithAPIOpts, rply *map[string]string) (err error) {
+func (chS *CacheS) V1PrecacheStatus(args *utils.AttrCacheIDsWithAPIOpts, rply *map[string]string) (err error) {
 	if len(args.CacheIDs) == 0 {
 		args.CacheIDs = utils.CachePartitions.AsSlice()
 	}
@@ -387,13 +410,13 @@ func (chS *CacheS) V1PrecacheStatus(_ *context.Context, args *utils.AttrCacheIDs
 	return
 }
 
-func (chS *CacheS) V1HasGroup(_ *context.Context, args *utils.ArgsGetGroupWithAPIOpts,
+func (chS *CacheS) V1HasGroup(args *utils.ArgsGetGroupWithAPIOpts,
 	rply *bool) (err error) {
 	*rply = chS.tCache.HasGroup(args.CacheID, args.GroupID)
 	return
 }
 
-func (chS *CacheS) V1GetGroupItemIDs(_ *context.Context, args *utils.ArgsGetGroupWithAPIOpts,
+func (chS *CacheS) V1GetGroupItemIDs(args *utils.ArgsGetGroupWithAPIOpts,
 	rply *[]string) (err error) {
 	if has := chS.tCache.HasGroup(args.CacheID, args.GroupID); !has {
 		return utils.ErrNotFound
@@ -402,33 +425,33 @@ func (chS *CacheS) V1GetGroupItemIDs(_ *context.Context, args *utils.ArgsGetGrou
 	return
 }
 
-func (chS *CacheS) V1RemoveGroup(_ *context.Context, args *utils.ArgsGetGroupWithAPIOpts,
+func (chS *CacheS) V1RemoveGroup(args *utils.ArgsGetGroupWithAPIOpts,
 	rply *string) (err error) {
 	chS.tCache.RemoveGroup(args.CacheID, args.GroupID, true, utils.NonTransactional)
 	*rply = utils.OK
 	return
 }
 
-func (chS *CacheS) V1ReloadCache(ctx *context.Context, attrs *utils.AttrReloadCacheWithAPIOpts, reply *string) (err error) {
-	return chS.cacheDataFromDB(ctx, attrs, reply, true)
+func (chS *CacheS) V1ReloadCache(attrs *utils.AttrReloadCacheWithAPIOpts, reply *string) (err error) {
+	return chS.cacheDataFromDB(attrs, reply, true)
 }
 
-func (chS *CacheS) V1LoadCache(ctx *context.Context, attrs *utils.AttrReloadCacheWithAPIOpts, reply *string) (err error) {
-	return chS.cacheDataFromDB(ctx, attrs, reply, false)
+func (chS *CacheS) V1LoadCache(attrs *utils.AttrReloadCacheWithAPIOpts, reply *string) (err error) {
+	return chS.cacheDataFromDB(attrs, reply, false)
 }
 
-func (chS *CacheS) cacheDataFromDB(ctx *context.Context, attrs *utils.AttrReloadCacheWithAPIOpts, reply *string, mustBeCached bool) (err error) {
+func (chS *CacheS) cacheDataFromDB(attrs *utils.AttrReloadCacheWithAPIOpts, reply *string, mustBeCached bool) (err error) {
 	argCache := attrs.Map()
 	for key, ids := range argCache {
 		if prfx, has := utils.CacheInstanceToPrefix[key]; has {
-			if err = chS.dm.CacheDataFromDB(ctx, prfx, ids, mustBeCached); err != nil {
+			if err = chS.dm.CacheDataFromDB(prfx, ids, mustBeCached); err != nil {
 				return
 			}
 		}
 	}
 	//get loadIDs from database for all types
 	var loadIDs map[string]int64
-	if loadIDs, err = chS.dm.GetItemLoadIDs(ctx, utils.EmptyString, false); err != nil {
+	if loadIDs, err = chS.dm.GetItemLoadIDs(utils.EmptyString, false); err != nil {
 		if err != utils.ErrNotFound { // we can receive cache reload from LoaderS and we store the LoadID only after all Items was processed
 			return
 		}
@@ -456,7 +479,7 @@ func populateCacheLoadIDs(loadIDs map[string]int64, attrs map[string][]string) (
 }
 
 // V1ReplicateSet receives an item via replication to store in the cache
-func (chS *CacheS) V1ReplicateSet(_ *context.Context, args *utils.ArgCacheReplicateSet, reply *string) (err error) {
+func (chS *CacheS) V1ReplicateSet(args *utils.ArgCacheReplicateSet, reply *string) (err error) {
 	if cmp, canCast := args.Value.(utils.Compiler); canCast {
 		if err = cmp.Compile(); err != nil {
 			return
@@ -468,13 +491,13 @@ func (chS *CacheS) V1ReplicateSet(_ *context.Context, args *utils.ArgCacheReplic
 }
 
 // ReplicateRemove replicate an item to ReplicationConns
-func (chS *CacheS) ReplicateRemove(ctx *context.Context, chID, itmID string) (err error) {
+func (chS *CacheS) ReplicateRemove(chID, itmID string) (err error) {
 	if len(chS.cfg.CacheCfg().ReplicationConns) == 0 ||
 		!chS.cfg.CacheCfg().Partitions[chID].Replicate {
 		return
 	}
 	var reply string
-	return chS.connMgr.Call(ctx, chS.cfg.CacheCfg().ReplicationConns, utils.CacheSv1ReplicateRemove,
+	return connMgr.Call(chS.cfg.CacheCfg().ReplicationConns, nil, utils.CacheSv1ReplicateRemove,
 		&utils.ArgCacheReplicateRemove{
 			CacheID: chID,
 			ItemID:  itmID,
@@ -482,7 +505,7 @@ func (chS *CacheS) ReplicateRemove(ctx *context.Context, chID, itmID string) (er
 }
 
 // V1ReplicateRemove replicate an item
-func (chS *CacheS) V1ReplicateRemove(_ *context.Context, args *utils.ArgCacheReplicateRemove, reply *string) (err error) {
+func (chS *CacheS) V1ReplicateRemove(args *utils.ArgCacheReplicateRemove, reply *string) (err error) {
 	chS.tCache.Remove(args.CacheID, args.ItemID, true, utils.EmptyString)
 	*reply = utils.OK
 	return

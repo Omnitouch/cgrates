@@ -75,22 +75,29 @@ func TestSliceStringToIface(t *testing.T) {
 	}
 }
 
-func TestSliceStringEqual(t *testing.T) {
-	v1 := []string{"*V1field1", "*V1field2"}
-	v2 := []string{"*V2field1"}
-
-	//When the length don't match
-	if rcv := SliceStringEqual(v1, v2); rcv {
-		t.Error("The length should not match")
+func TestSliceStringEqualDiffLength(t *testing.T) {
+	v1 := []string{"foo", "bar"}
+	v2 := []string{"baz"}
+	if rcv := SliceStringEqual(v1, v2); rcv != false {
+		t.Errorf("expected false ,received : %v", rcv)
 	}
 
-	v2 = append(v2, "*V2field2")
-	if rcv := SliceStringEqual(v1, v2); rcv {
-		t.Error("The values should not match")
+}
+func TestSliceStringEqualElementEqualFalse(t *testing.T) {
+
+	v1 := []string{"foo", "bar"}
+	v2 := []string{"foo", "baz"}
+	if rcv := SliceStringEqual(v1, v2); rcv != false {
+		t.Errorf("expected false ,received : %v", rcv)
 	}
 
-	v2 = v1
-	if rcv := SliceStringEqual(v1, v2); !rcv {
-		t.Error("The slices should match")
+}
+func TestSliceStringEqualTrue(t *testing.T) {
+
+	v1 := []string{"foo", "bar"}
+	v2 := []string{"foo", "bar"}
+	if rcv := SliceStringEqual(v1, v2); rcv != true {
+		t.Errorf("expected false ,received : %v", rcv)
 	}
+
 }

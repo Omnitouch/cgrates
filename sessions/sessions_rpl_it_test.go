@@ -21,14 +21,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package sessions
 
 import (
+	"fmt"
 	"net/rpc"
 	"path"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -40,17 +41,15 @@ var (
 	SessionsRplTests = []func(t *testing.T){
 		testSessionSRplInitCfg,
 		testSessionSRplResetDB,
-		/*
-			testSessionSRplStartEngine,
-			testSessionSRplApierRpcConn,
-			testSessionSRplTPFromFolder,
-			testSessionSRplInitiate,
-			testSessionSRplUpdate,
-			testSessionSRplTerminate,
-			testSessionSRplManualReplicate,
-			testSessionSRplActivateSessions,
-			testSessionSRplStopCgrEngine,
-		*/
+		testSessionSRplStartEngine,
+		testSessionSRplApierRpcConn,
+		testSessionSRplTPFromFolder,
+		testSessionSRplInitiate,
+		testSessionSRplUpdate,
+		testSessionSRplTerminate,
+		testSessionSRplManualReplicate,
+		testSessionSRplActivateSessions,
+		testSessionSRplStopCgrEngine,
 	}
 )
 
@@ -80,18 +79,21 @@ func TestSessionSRpl(t *testing.T) {
 
 func testSessionSRplInitCfg(t *testing.T) {
 	smgRplcMasterCfgPath = path.Join(*dataDir, "conf", "samples", smgRplcMasterCfgDIR)
-	if smgRplcMasterCfg, err = config.NewCGRConfigFromPath(context.Background(), smgRplcMasterCfgPath); err != nil {
+	if smgRplcMasterCfg, err = config.NewCGRConfigFromPath(smgRplcMasterCfgPath); err != nil {
 		t.Fatal(err)
 	}
 	smgRplcSlaveCfgPath = path.Join(*dataDir, "conf", "samples", smgRplcSlaveCfgDIR)
-	if smgRplcSlaveCfg, err = config.NewCGRConfigFromPath(context.Background(), smgRplcSlaveCfgPath); err != nil {
+	if smgRplcSlaveCfg, err = config.NewCGRConfigFromPath(smgRplcSlaveCfgPath); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // Remove data in both rating and accounting db
 func testSessionSRplResetDB(t *testing.T) {
-	if err := engine.InitDataDB(smgRplcMasterCfg); err != nil {
+	if err := engine.InitDataDb(smgRplcMasterCfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.InitStorDb(smgRplcMasterCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -115,8 +117,6 @@ func testSessionSRplApierRpcConn(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-/*
 
 // Load the tariff plan, creating accounts and their balances
 func testSessionSRplTPFromFolder(t *testing.T) {
@@ -270,7 +270,7 @@ func testSessionSRplUpdate(t *testing.T) {
 		t.Errorf("Error: %v with len(aSessions)=%v , session : %+v", err, len(aSessions), utils.ToJSON(aSessions))
 	}
 
-	cgrID :=GetSetOptsOriginID(engine.NewMapEvent(argsUpdate.Event))
+	cgrID := GetSetCGRID(engine.NewMapEvent(argsUpdate.Event))
 	// Make sure session was replicated
 	if err := smgRplcMstrRPC.Call(utils.SessionSv1GetPassiveSessions,
 		new(utils.SessionFilter), &pSessions); err != nil {
@@ -496,7 +496,7 @@ func testSessionSRplActivateSessions(t *testing.T) {
 	var aSessions []*ExternalSession
 	var reply string
 	// Activate first session (with ID: ede927f8e42318a8db02c0f74adc2d9e16770339)
-	args := &utils.SessionIDsWithAPIOpts{
+	args := &utils.SessionIDsWithArgsDispatcher{
 		IDs: []string{"ede927f8e42318a8db02c0f74adc2d9e16770339"},
 	}
 	if err := smgRplcMstrRPC.Call(utils.SessionSv1ActivateSessions, args, &reply); err != nil {
@@ -525,7 +525,7 @@ func testSessionSRplActivateSessions(t *testing.T) {
 	// 	t.Errorf("Expecting: 1 session, received: %+v sessions", len(aSessions))
 	// }
 	//activate the second session (with ID: 3b0417028f8cefc0e02ddbd37a6dda6fbef4f5e0)
-	args = &utils.SessionIDsWithAPIOpts{
+	args = &utils.SessionIDsWithArgsDispatcher{
 		IDs: []string{"3b0417028f8cefc0e02ddbd37a6dda6fbef4f5e0"},
 	}
 	if err := smgRplcMstrRPC.Call(utils.SessionSv1ActivateSessions, args, &reply); err != nil {
@@ -553,4 +553,3 @@ func testSessionSRplStopCgrEngine(t *testing.T) {
 		t.Error(err)
 	}
 }
-*/

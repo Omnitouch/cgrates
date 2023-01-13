@@ -29,10 +29,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	v2 "github.com/cgrates/cgrates/apier/v2"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -68,7 +70,7 @@ func TestSCncrJSON(t *testing.T) {
 var sTestsSCncrIT = []func(t *testing.T){
 	testSCncrInitConfig,
 	testSCncrInitDataDB,
-
+	testSCncrInitStorDB,
 	testSCncrStartEngine,
 	testSCncrRPCConn,
 	testSCncrLoadTP,
@@ -85,6 +87,13 @@ func testSCncrInitConfig(t *testing.T) {
 
 func testSCncrInitDataDB(t *testing.T) {
 	if err := engine.InitDataDb(sCncrCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// InitDb so we can rely on count
+func testSCncrInitStorDB(t *testing.T) {
+	if err := engine.InitStorDb(sCncrCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -132,7 +141,7 @@ func testSCncrLoadTP(t *testing.T) {
 		},
 	}
 	var resAttrSet string
-	if err := sCncrRPC.Call(utils.APIerSv1SetAttributeProfile, attrPrfl, &resAttrSet); err != nil {
+	if err := sCncrRPC.Call(utils.APIerSv2SetAttributeProfile, attrPrfl, &resAttrSet); err != nil {
 		t.Error(err)
 	} else if resAttrSet != utils.OK {
 		t.Errorf("unexpected reply returned: <%s>", resAttrSet)

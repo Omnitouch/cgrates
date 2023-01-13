@@ -23,8 +23,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -87,7 +87,7 @@ func TestNewSQLeUrlPostgres(t *testing.T) {
 		reqs: newConcReq(0),
 	}
 	dialectExpect := postgres.Open(fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=%s",
-		"127.0.0.1", "3306", "postgres", "cgrates", "CGRateS.org", utils.SQLDefaultPgSSLMode))
+		"127.0.0.1", "3306", "postgres", "cgrates", "CGRateS.org", utils.SQLDefaultSSLMode))
 	if err := sqlEe.initDialector(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(sqlEe.dialect, dialectExpect) {

@@ -74,10 +74,8 @@ func HasPrefixSlice(prfxs []string, el string) bool {
 }
 
 func CloneStringSlice(in []string) (cl []string) {
-	if in != nil {
-		cl = make([]string, len(in))
-		copy(cl, in)
-	}
+	cl = make([]string, len(in))
+	copy(cl, in)
 	return
 }
 

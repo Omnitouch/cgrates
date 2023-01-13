@@ -28,11 +28,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/utils"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 )
 
 func NewJSONFileER(cfg *config.CGRConfig, cfgIdx int,
@@ -77,6 +77,36 @@ func (rdr *JSONFileER) Config() *config.EventReaderCfg {
 	return rdr.cgrCfg.ERsCfg().Readers[rdr.cfgIdx]
 }
 
+func (rdr *JSONFileER) serveDefault() {
+	tm := time.NewTimer(0)
+	for {
+		// Not automated, process and sleep approach
+		select {
+		case <-rdr.rdrExit:
+			tm.Stop()
+			utils.Logger.Info(
+				fmt.Sprintf("<%s> stop monitoring path <%s>",
+					utils.ERs, rdr.rdrDir))
+			return
+		case <-tm.C:
+		}
+		filesInDir, _ := os.ReadDir(rdr.rdrDir)
+		for _, file := range filesInDir {
+			if !strings.HasSuffix(file.Name(), utils.JSNSuffix) { // hardcoded file extension for json event reader
+				continue // used in order to filter the files from directory
+			}
+			go func(fileName string) {
+				if err := rdr.processFile(rdr.rdrDir, fileName); err != nil {
+					utils.Logger.Warning(
+						fmt.Sprintf("<%s> processing file %s, error: %s",
+							utils.ERs, fileName, err.Error()))
+				}
+			}(file.Name())
+		}
+		tm.Reset(rdr.Config().RunDelay)
+	}
+}
+
 func (rdr *JSONFileER) Serve() (err error) {
 	switch rdr.Config().RunDelay {
 	case time.Duration(0): // 0 disables the automatic read, maybe done per API
@@ -85,35 +115,7 @@ func (rdr *JSONFileER) Serve() (err error) {
 		return utils.WatchDir(rdr.rdrDir, rdr.processFile,
 			utils.ERs, rdr.rdrExit)
 	default:
-		go func() {
-			tm := time.NewTimer(0)
-			for {
-				// Not automated, process and sleep approach
-				select {
-				case <-rdr.rdrExit:
-					tm.Stop()
-					utils.Logger.Info(
-						fmt.Sprintf("<%s> stop monitoring path <%s>",
-							utils.ERs, rdr.rdrDir))
-					return
-				case <-tm.C:
-				}
-				filesInDir, _ := os.ReadDir(rdr.rdrDir)
-				for _, file := range filesInDir {
-					if !strings.HasSuffix(file.Name(), utils.JSONSuffix) { // hardcoded file extension for json event reader
-						continue // used in order to filter the files from directory
-					}
-					go func(fileName string) {
-						if err := rdr.processFile(rdr.rdrDir, fileName); err != nil {
-							utils.Logger.Warning(
-								fmt.Sprintf("<%s> processing file %s, error: %s",
-									utils.ERs, fileName, err.Error()))
-						}
-					}(file.Name())
-				}
-				tm.Reset(rdr.Config().RunDelay)
-			}
-		}()
+		go rdr.serveDefault()
 	}
 	return
 }
@@ -153,7 +155,7 @@ func (rdr *JSONFileER) processFile(fPath, fName string) (err error) {
 		utils.FirstNonEmpty(rdr.Config().Timezone,
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
-	if pass, err := rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err := rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil {
 		utils.Logger.Warning(
 			fmt.Sprintf("<%s> reading file: <%s>  ignoring due to filter error: <%s>",

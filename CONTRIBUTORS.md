@@ -81,8 +81,12 @@ information, please see the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
 | @andronache98 | Andronache Andrei |
 | @ionutboangiu | Boangiu Silviu Ionut |
 | @nickolasdaniel | Filip Nickolas Daniel |
+| @JeremyC-AU | Jeremy Chequer |
+| @nickvsnetworking | Nick Jones |
+| @Eda91 | Edlira Eltari |
+| @gezimbll | Gezim Blliku|
+| @ruhnet | Ruel Tmeizeh |
 | @arberkatellari | Arber Katellari |
-
 <!-- to sign, include a single line above this comment containing the following text:
 | @username | First Last |
 -->

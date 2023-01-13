@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package utils
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
 	"testing"
@@ -266,70 +267,59 @@ func TestStringSetJoin(t *testing.T) {
 	}
 }
 
-func TestStringSetEquals(t *testing.T) {
-	strSet := StringSet{
-		"setField1": struct{}{},
-		"setField2": struct{}{},
+func TestStringFieldAsInterface(t *testing.T) {
+	var s StringSet
+	fldPath := []string{"test1", "test2", "test3"}
+	if val, _ := s.FieldAsInterface(fldPath); val != nil {
+		t.Error("expected error")
 	}
 
-	strSet2 := StringSet{
-		"set2Field1": struct{}{},
+	fldPath = []string{"test1"}
+	s = StringSet{
+		"test2": struct{}{},
 	}
-
-	if rcv := strSet.Equals(strSet2); rcv {
-		t.Error("Length of sets should not match")
+	if val, _ := s.FieldAsInterface(fldPath); val != nil {
+		t.Errorf("expected error")
 	}
-
-	strSet2.Add("set2Field2")
-	if rcv := strSet.Equals(strSet2); rcv {
-		t.Error("The keys should not match")
-	}
-
-	strSet2 = strSet
-	if rcv := strSet.Equals(strSet2); !rcv {
-		t.Error("The sets should match")
+	fldPath = []string{"test2"}
+	if val, err := s.FieldAsInterface(fldPath); err != nil {
+		t.Errorf("expected %v", val)
 	}
 }
 
-func TestStringSetFieldAsInterface(t *testing.T) {
-	s := StringSet{
-		"field1": struct{}{},
+func TestStringFieldAsString(t *testing.T) {
+	s := StringSet{}
+	fldPath := []string{"test1"}
+	if _, err := s.FieldAsString(fldPath); err == nil {
+		t.Error("expected error")
 	}
-	_, err := s.FieldAsInterface([]string{"field1"})
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = s.FieldAsInterface([]string{"field2"})
-	if err != ErrNotFound {
-		t.Errorf("Expected %v", ErrNotFound)
-	}
-
-	_, err = s.FieldAsInterface([]string{"field2", "field3"})
-	if err != ErrNotFound {
-		t.Errorf("Expected %v", ErrNotFound)
+	exp := "{}"
+	s["test1"] = struct{}{}
+	if _, err := s.FieldAsString(fldPath); err != nil {
+		t.Errorf("expected %v got error", exp)
 	}
 }
 
-func TestString(t *testing.T) {
+func TestStringString(t *testing.T) {
 	s := StringSet{
-		"field1": struct{}{},
+		"key1": struct{}{},
+		"key2": struct{}{},
+		"key3": struct{}{},
 	}
+	exp := `["key1","key2","key3"]`
+
 	rcv := s.String()
-	if rcv != "[\"field1\"]" {
-		t.Errorf("Expected %v \n but received \n %v", "[\"field1\"]", rcv)
-	}
-}
-
-func TestFieldAsString(t *testing.T) {
-	s := StringSet{
-		"field1": struct{}{},
-	}
-	_, err := s.FieldAsString([]string{"field1"})
-	if err != nil {
+	rcvAsMap := []string{}
+	if err := json.Unmarshal([]byte(rcv), &rcvAsMap); err != nil {
 		t.Error(err)
 	}
-	_, err = s.FieldAsString([]string{"field2"})
-	if err == nil {
-		t.Error("Expected error")
+	sort.Slice(rcvAsMap, func(i, j int) bool {
+		return rcvAsMap[i] < rcvAsMap[j]
+	})
+
+	rcv = ToJSON(rcvAsMap)
+	if rcv != exp {
+		t.Errorf("expected %v received %v", exp, rcv)
 	}
+
 }

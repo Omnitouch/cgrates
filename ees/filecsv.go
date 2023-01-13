@@ -26,24 +26,23 @@ import (
 	"path"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/engine"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewFileCSVee(cfg *config.EventExporterCfg,
 	cgrCfg *config.CGRConfig, filterS *engine.FilterS,
-	dc *utils.SafeMapStorage, wrtr io.WriteCloser) (fCsv *FileCSVee, err error) {
+	dc *utils.SafeMapStorage) (fCsv *FileCSVee, err error) {
 	fCsv = &FileCSVee{
-		cfg:     cfg,
-		dc:      dc,
-		wrtr:    wrtr,
+		cfg: cfg,
+		dc:  dc,
+
 		cgrCfg:  cgrCfg,
 		filterS: filterS,
 	}
-	err = fCsv.init(wrtr)
+	err = fCsv.init()
 	return
 }
 
@@ -51,7 +50,7 @@ func NewFileCSVee(cfg *config.EventExporterCfg,
 type FileCSVee struct {
 	cfg       *config.EventExporterCfg
 	dc        *utils.SafeMapStorage
-	wrtr      io.WriteCloser // writer for the csv
+	file      io.WriteCloser
 	csvWriter *csv.Writer
 	sync.Mutex
 	slicePreparing
@@ -60,7 +59,7 @@ type FileCSVee struct {
 	filterS *engine.FilterS
 }
 
-func (fCsv *FileCSVee) init(wrtr io.WriteCloser) (err error) {
+func (fCsv *FileCSVee) init() (err error) {
 	fCsv.Lock()
 	defer fCsv.Unlock()
 	// create the file
@@ -69,12 +68,10 @@ func (fCsv *FileCSVee) init(wrtr io.WriteCloser) (err error) {
 	fCsv.dc.Lock()
 	fCsv.dc.MapStorage[utils.ExportPath] = filePath
 	fCsv.dc.Unlock()
-	if fCsv.cfg.ExportPath == utils.MetaBuffer {
-		fCsv.wrtr = wrtr
-	} else if fCsv.wrtr, err = os.Create(filePath); err != nil {
+	if fCsv.file, err = os.Create(filePath); err != nil {
 		return
 	}
-	fCsv.csvWriter = csv.NewWriter(fCsv.wrtr)
+	fCsv.csvWriter = csv.NewWriter(fCsv.file)
 	fCsv.csvWriter.Comma = utils.CSVSep
 	if fCsv.Cfg().Opts.CSVFieldSeparator != nil {
 		fCsv.csvWriter.Comma = rune((*fCsv.Cfg().Opts.CSVFieldSeparator)[0])
@@ -86,7 +83,7 @@ func (fCsv *FileCSVee) init(wrtr io.WriteCloser) (err error) {
 func (fCsv *FileCSVee) composeHeader() (err error) {
 	if len(fCsv.Cfg().HeaderFields()) != 0 {
 		var exp *utils.OrderedNavigableMap
-		if exp, err = composeHeaderTrailer(context.Background(), utils.MetaHdr, fCsv.Cfg().HeaderFields(), fCsv.dc, fCsv.cgrCfg, fCsv.filterS); err != nil {
+		if exp, err = composeHeaderTrailer(utils.MetaHdr, fCsv.Cfg().HeaderFields(), fCsv.dc, fCsv.cgrCfg, fCsv.filterS); err != nil {
 			return
 		}
 		return fCsv.csvWriter.Write(exp.OrderedFieldsAsStrings())
@@ -98,7 +95,7 @@ func (fCsv *FileCSVee) composeHeader() (err error) {
 func (fCsv *FileCSVee) composeTrailer() (err error) {
 	if len(fCsv.Cfg().TrailerFields()) != 0 {
 		var exp *utils.OrderedNavigableMap
-		if exp, err = composeHeaderTrailer(context.Background(), utils.MetaTrl, fCsv.Cfg().TrailerFields(), fCsv.dc, fCsv.cgrCfg, fCsv.filterS); err != nil {
+		if exp, err = composeHeaderTrailer(utils.MetaTrl, fCsv.Cfg().TrailerFields(), fCsv.dc, fCsv.cgrCfg, fCsv.filterS); err != nil {
 			return
 		}
 		return fCsv.csvWriter.Write(exp.OrderedFieldsAsStrings())
@@ -110,7 +107,7 @@ func (fCsv *FileCSVee) Cfg() *config.EventExporterCfg { return fCsv.cfg }
 
 func (fCsv *FileCSVee) Connect() (_ error) { return }
 
-func (fCsv *FileCSVee) ExportEvent(_ *context.Context, ev, _ interface{}) error {
+func (fCsv *FileCSVee) ExportEvent(ev interface{}, _ string) error {
 	fCsv.Lock() // make sure that only one event is writen in file at once
 	defer fCsv.Unlock()
 	return fCsv.csvWriter.Write(ev.([]string))
@@ -125,7 +122,7 @@ func (fCsv *FileCSVee) Close() (err error) {
 			utils.EEs, fCsv.Cfg().ID, err.Error()))
 	}
 	fCsv.csvWriter.Flush()
-	if err = fCsv.wrtr.Close(); err != nil {
+	if err = fCsv.file.Close(); err != nil {
 		utils.Logger.Warning(fmt.Sprintf("<%s> Exporter with id: <%s> received error: <%s> when closing the file",
 			utils.EEs, fCsv.Cfg().ID, err.Error()))
 	}
@@ -133,14 +130,3 @@ func (fCsv *FileCSVee) Close() (err error) {
 }
 
 func (fCsv *FileCSVee) GetMetrics() *utils.SafeMapStorage { return fCsv.dc }
-
-func (fCsv *FileCSVee) ExtraData(ev *utils.CGREvent) interface{} { return nil }
-
-// Buffers cannot be closed, they just Reset. We implement our struct and used it for writer field in FileCSVee to be available for WriterCloser interface
-type buffer struct {
-	io.Writer
-}
-
-func (buf *buffer) Close() (err error) {
-	return
-}

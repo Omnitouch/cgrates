@@ -15,9 +15,21 @@
 	"http": ":2080",
 },
 
-"rates": {
+
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"rals": {
 	"enabled": true,
 },
+
+
+"schedulers": {
+	"enabled": true,
+},
+
 
 "chargers": {
 	"enabled": true,
@@ -38,14 +50,14 @@
 "cdrs": {
 	"enabled": true,
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
 "sessions": {
 	"enabled": true,
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"resources_conns": ["*internal"],
 	"attributes_conns": ["*internal"],
@@ -59,7 +71,7 @@
 		{
 			"id": "file_reader1",
 			"run_delay":  "-1",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"flags": ["*cdrs","*log"],
 			"source_path": "/tmp/ers/in",
 			"processed_path": "/tmp/ers/out",
@@ -67,7 +79,7 @@
 		{
 			"id": "file_reader2",
 			"run_delay":  "-1",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"source_path": "/tmp/ers2/in",
 			"flags": ["*cdrs","*log"],
 			"processed_path": "/tmp/ers2/out",
@@ -95,8 +107,9 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

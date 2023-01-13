@@ -21,7 +21,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package general_tests
 
-/*
+import (
+	"flag"
+	"net/rpc"
+	"net/rpc/jsonrpc"
+	"os"
+	"path"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
+)
+
 var tutorialCallsCfg *config.CGRConfig
 var tutorialCallsRpc *rpc.Client
 var tutorialCallsPjSuaListener *os.File
@@ -34,7 +51,7 @@ var optConf string
 var sTestsCalls = []func(t *testing.T){
 	testCallInitCfg,
 	testCallResetDataDb,
-
+	testCallResetStorDb,
 	testCallStartFS,
 	testCallStartEngine,
 	testCallRestartFS,
@@ -67,7 +84,7 @@ var sTestsCalls = []func(t *testing.T){
 	testCallStopFS,
 }
 
-//Test start here
+// Test start here
 func TestFreeswitchCalls(t *testing.T) {
 	optConf = utils.Freeswitch
 	for _, stest := range sTestsCalls {
@@ -135,7 +152,12 @@ func testCallResetDataDb(t *testing.T) {
 	}
 }
 
-
+// Wipe out the cdr database
+func testCallResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(tutorialCallsCfg); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // start FS server
 func testCallStartFS(t *testing.T) {
@@ -284,16 +306,16 @@ func testCallStatMetricsBefore(t *testing.T) {
 
 func testCallCheckResourceBeforeAllocation(t *testing.T) {
 	var rs *engine.Resources
-	args := &utils.ArgRSv1ResourceUsage{
-		UsageID: "OriginID",
-		CGREvent: &utils.CGREvent{
-			Tenant: "cgrates.org",
-			ID:     "ResourceEvent",
-			Event: map[string]interface{}{
-				utils.AccountField: "1001",
-				utils.Subject:      "1001",
-				utils.Destination:  "1002",
-			},
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "ResourceEvent",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Subject:      "1001",
+			utils.Destination:  "1002",
+		},
+		APIOpts: map[string]interface{}{
+			utils.OptsResourcesUsageID: "OriginID",
 		},
 	}
 	if err := tutorialCallsRpc.Call(utils.ResourceSv1GetResourcesForEvent, args, &rs); err != nil {
@@ -435,16 +457,16 @@ func testCallCall1003To1001SecondTime(t *testing.T) {
 // Check if the resource was Allocated
 func testCallCheckResourceAllocation(t *testing.T) {
 	var rs *engine.Resources
-	args := &utils.ArgRSv1ResourceUsage{
-		UsageID: "OriginID1",
-		CGREvent: &utils.CGREvent{
-			Tenant: "cgrates.org",
-			ID:     "ResourceAllocation",
-			Event: map[string]interface{}{
-				utils.AccountField: "1001",
-				utils.Subject:      "1001",
-				utils.Destination:  "1002",
-			},
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "ResourceAllocation",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Subject:      "1001",
+			utils.Destination:  "1002",
+		},
+		APIOpts: map[string]interface{}{
+			utils.OptsResourcesUsageID: "OriginID1",
 		},
 	}
 	if err := tutorialCallsRpc.Call(utils.ResourceSv1GetResourcesForEvent, args, &rs); err != nil {
@@ -625,16 +647,16 @@ func testCallStatMetrics(t *testing.T) {
 
 func testCallCheckResourceRelease(t *testing.T) {
 	var rs *engine.Resources
-	args := &utils.ArgRSv1ResourceUsage{
-		UsageID: "OriginID2",
-		CGREvent: &utils.CGREvent{
-			Tenant: "cgrates.org",
-			ID:     "ResourceRelease",
-			Event: map[string]interface{}{
-				utils.AccountField: "1001",
-				utils.Subject:      "1001",
-				utils.Destination:  "1002",
-			},
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "ResourceRelease",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Subject:      "1001",
+			utils.Destination:  "1002",
+		},
+		APIOpts: map[string]interface{}{
+			utils.OptsResourcesUsageID: "OriginID2",
 		},
 	}
 	if err := tutorialCallsRpc.Call(utils.ResourceSv1GetResourcesForEvent, args, &rs); err != nil {
@@ -702,16 +724,16 @@ func testCallSyncSessions(t *testing.T) {
 	}
 	//check if resource was allocated for 2 calls(1001->1002;1001->1003)
 	var rs *engine.Resources
-	args := &utils.ArgRSv1ResourceUsage{
-		UsageID: "OriginID3",
-		CGREvent: &utils.CGREvent{
-			Tenant: "cgrates.org",
-			ID:     "AllocateResource",
-			Event: map[string]interface{}{
-				utils.AccountField: "1001",
-				utils.Subject:      "1001",
-				utils.Destination:  "1002",
-			},
+	args := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "AllocateResource",
+		Event: map[string]interface{}{
+			utils.AccountField: "1001",
+			utils.Subject:      "1001",
+			utils.Destination:  "1002",
+		},
+		APIOpts: map[string]interface{}{
+			utils.OptsResourcesUsageID: "OriginID3",
 		},
 	}
 	if err := tutorialCallsRpc.Call(utils.ResourceSv1GetResourcesForEvent, args, &rs); err != nil {
@@ -831,4 +853,3 @@ func testCallStopFS(t *testing.T) {
 		t.Errorf("unsupported format")
 	}
 }
-*/

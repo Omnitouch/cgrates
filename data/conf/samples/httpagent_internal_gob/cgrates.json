@@ -21,7 +21,18 @@
 	},
 },
 
-"rates": {
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+
+"rals": {
+	"enabled": true,
+	"max_increments":3000000,
+},
+
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -29,7 +40,7 @@
 "cdrs": {
 	"enabled": true,
 	"chargers_conns": ["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
@@ -47,13 +58,14 @@
 	"enabled": true,
 	"attributes_conns": ["conn1"],
 	"cdrs_conns": ["conn1"],
-	"rates_conns": ["conn1"],
+	"rals_conns": ["conn1"],
 	"chargers_conns": ["*internal"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

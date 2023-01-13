@@ -18,7 +18,12 @@
 	"db_type": "*internal",	
 },
 
-"rates": {
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+"rals": {
 	"enabled": true,
 },
 

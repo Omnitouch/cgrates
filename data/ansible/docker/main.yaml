@@ -21,8 +21,8 @@
 
     ###############################################################
     # CGRateS vars
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
-    cgrates_branch: "1.0"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
+    cgrates_branch: "master"
     cgrates_distribution: "nightly"
     docker_tag: "latest"
     registry_site: "dkr.cgrates.org"      # the web site
@@ -126,7 +126,7 @@
 
     - name: git clone cgrates
       git:
-        repo: https://github.com/Omnitouch/cgrates.git
+        repo: https://github.com/cgrates/cgrates.git
         dest: '{{ cgrates_dir }}'
         update: yes
         force: yes

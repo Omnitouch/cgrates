@@ -12,24 +12,35 @@
 },
 
 
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["*internal"],
+},
+
+
 "sessions": {
 	"enabled": true,
 	"attributes_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 	"routes_conns": ["*localhost"],
 },
 
 
-"rates": {
+"rals": {
 	"enabled": true,
 },
 
 
 "cdrs": {
 	"enabled": true,
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
@@ -55,7 +66,7 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },

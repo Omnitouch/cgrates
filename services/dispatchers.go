@@ -21,21 +21,23 @@ package services
 import (
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/dispatchers"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	v2 "github.com/cgrates/cgrates/apier/v2"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/dispatchers"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewDispatcherService returns the Dispatcher Service
 func NewDispatcherService(cfg *config.CGRConfig, dm *DataDBService,
-	cacheS *CacheService, filterSChan chan *engine.FilterS,
-	server *cores.Server, internalChan chan birpc.ClientConnector,
+	cacheS *engine.CacheS, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalChan chan rpcclient.ClientConnector,
 	connMgr *engine.ConnManager, anz *AnalyzerService,
-	srvDep map[string]*sync.WaitGroup) *DispatcherService {
+	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &DispatcherService{
 		connChan:    internalChan,
 		cfg:         cfg,
@@ -46,7 +48,6 @@ func NewDispatcherService(cfg *config.CGRConfig, dm *DataDBService,
 		connMgr:     connMgr,
 		anz:         anz,
 		srvDep:      srvDep,
-		srvsReload:  make(map[string]chan struct{}),
 	}
 }
 
@@ -55,65 +56,105 @@ type DispatcherService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	dm          *DataDBService
-	cacheS      *CacheService
+	cacheS      *engine.CacheS
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
 	connMgr     *engine.ConnManager
 
 	dspS     *dispatchers.DispatcherService
-	connChan chan birpc.ClientConnector
+	rpc      *v1.DispatcherSv1
+	connChan chan rpcclient.ClientConnector
 	anz      *AnalyzerService
 	srvDep   map[string]*sync.WaitGroup
-
-	srvsReload map[string]chan struct{}
 }
 
 // Start should handle the sercive start
-func (dspS *DispatcherService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (dspS *DispatcherService) Start() (err error) {
 	if dspS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 	utils.Logger.Info("Starting CGRateS DispatcherS service.")
-	if err = dspS.cacheS.WaitToPrecache(ctx,
-		utils.CacheDispatcherProfiles,
-		utils.CacheDispatcherHosts,
-		utils.CacheDispatcherFilterIndexes); err != nil {
-		return
-	}
-
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, dspS.filterSChan); err != nil {
-		return
-	}
-
-	var datadb *engine.DataManager
-	if datadb, err = dspS.dm.WaitForDM(ctx); err != nil {
-		return
-	}
+	fltrS := <-dspS.filterSChan
+	dspS.filterSChan <- fltrS
+	<-dspS.cacheS.GetPrecacheChannel(utils.CacheDispatcherProfiles)
+	<-dspS.cacheS.GetPrecacheChannel(utils.CacheDispatcherHosts)
+	<-dspS.cacheS.GetPrecacheChannel(utils.CacheDispatcherFilterIndexes)
+	dbchan := dspS.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
 	dspS.Lock()
 	defer dspS.Unlock()
 
-	dspS.dspS = dispatchers.NewDispatcherService(datadb, dspS.cfg, filterS, dspS.connMgr)
+	dspS.dspS = dispatchers.NewDispatcherService(datadb, dspS.cfg, fltrS, dspS.connMgr)
 
-	dspS.unregisterAllDispatchedSubsystems() // unregister all rpc services that can be dispatched
-
-	srv, _ := engine.NewDispatcherService(dspS.dspS)
-	// srv, _ := birpc.NewService(apis.NewDispatcherSv1(dspS.dspS), "", false)
-	for _, s := range srv {
-		dspS.server.RpcRegister(s)
-	}
-	dspS.connMgr.EnableDispatcher(srv)
 	// for the moment we dispable Apier through dispatcher
 	// until we figured out a better sollution in case of gob server
 	// dspS.server.SetDispatched()
-	dspS.connChan <- dspS.anz.GetInternalCodec(srv, utils.DispatcherS)
+
+	dspS.server.RpcRegister(v1.NewDispatcherSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.ThresholdSv1,
+		v1.NewDispatcherThresholdSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.StatSv1,
+		v1.NewDispatcherStatSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.ResourceSv1,
+		v1.NewDispatcherResourceSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.RouteSv1,
+		v1.NewDispatcherRouteSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.AttributeSv1,
+		v1.NewDispatcherAttributeSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.SessionSv1,
+		v1.NewDispatcherSessionSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.ChargerSv1,
+		v1.NewDispatcherChargerSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.CoreSv1,
+		v1.NewDispatcherCoreSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.EeSv1,
+		v1.NewDispatcherEeSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.Responder,
+		v1.NewDispatcherResponder(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.CacheSv1,
+		v1.NewDispatcherCacheSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.GuardianSv1,
+		v1.NewDispatcherGuardianSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.SchedulerSv1,
+		v1.NewDispatcherSchedulerSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.CDRsV1,
+		v1.NewDispatcherSCDRsV1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.ConfigSv1,
+		v1.NewDispatcherConfigSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.RALsV1,
+		v1.NewDispatcherRALsV1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.ReplicatorSv1,
+		v1.NewDispatcherReplicatorSv1(dspS.dspS))
+
+	dspS.server.RpcRegisterName(utils.CDRsV2,
+		v2.NewDispatcherSCDRsV2(dspS.dspS))
+
+	dspS.connChan <- dspS.anz.GetInternalCodec(dspS.dspS, utils.DispatcherS)
 
 	return
 }
 
 // Reload handles the change of config
-func (dspS *DispatcherService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (dspS *DispatcherService) Reload() (err error) {
 	return // for the momment nothing to reload
 }
 
@@ -123,13 +164,8 @@ func (dspS *DispatcherService) Shutdown() (err error) {
 	defer dspS.Unlock()
 	dspS.dspS.Shutdown()
 	dspS.dspS = nil
+	dspS.rpc = nil
 	<-dspS.connChan
-	dspS.server.RpcUnregisterName(utils.DispatcherSv1)
-	dspS.server.RpcUnregisterName(utils.AttributeSv1)
-
-	dspS.unregisterAllDispatchedSubsystems()
-	dspS.connMgr.DisableDispatcher()
-	dspS.sync()
 	return
 }
 
@@ -148,31 +184,4 @@ func (dspS *DispatcherService) ServiceName() string {
 // ShouldRun returns if the service should be running
 func (dspS *DispatcherService) ShouldRun() bool {
 	return dspS.cfg.DispatcherSCfg().Enabled
-}
-
-func (dspS *DispatcherService) unregisterAllDispatchedSubsystems() {
-	dspS.server.RpcUnregisterName(utils.AttributeSv1)
-}
-
-func (dspS *DispatcherService) RegisterShutdownChan(subsys string) (c chan struct{}) {
-	c = make(chan struct{})
-	dspS.Lock()
-	dspS.srvsReload[subsys] = c
-	dspS.Unlock()
-	return
-}
-
-func (dspS *DispatcherService) UnregisterShutdownChan(subsys string) {
-	dspS.Lock()
-	if dspS.srvsReload[subsys] != nil {
-		close(dspS.srvsReload[subsys])
-	}
-	delete(dspS.srvsReload, subsys)
-	dspS.Unlock()
-}
-
-func (dspS *DispatcherService) sync() {
-	for _, c := range dspS.srvsReload {
-		c <- struct{}{}
-	}
 }

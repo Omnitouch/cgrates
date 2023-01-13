@@ -20,7 +20,20 @@
 	"db_port": 27017
 },
 
-"rates": {
+
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017
+},
+
+
+"rals": {
+	"enabled": true,
+},
+
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -28,7 +41,7 @@
 "cdrs": {
 	"enabled": true,
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"session_cost_retries": 0,
 },
 
@@ -48,19 +61,19 @@
 	"enabled": true,
 	"attributes_conns":["*internal"],
 	"cache": {
-		"*fileCSV": {"limit": -1, "ttl": "1s", "static_ttl": false},
+		"*file_csv": {"limit": -1, "ttl": "1s", "static_ttl": false},
 	},
 	"exporters": [
 		{
 			"id": "CSVExporter",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSV",
 			"timezone": "UTC",
 			"synchronous": true,
 			"attempts": 1,
 			"field_separator": ",",
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -78,7 +91,7 @@
 		},
 		{
 			"id": "CSVExporter2",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSV2",
 			"timezone": "UTC",
 			"synchronous": true,
@@ -86,7 +99,7 @@
 			"field_separator": ",",
 			"filters": ["*string:~*req.RunID:*raw"],
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -104,15 +117,15 @@
 		},
 		{
 			"id": "CSVExporter3",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"export_path": "/tmp/testCSV3",
 			"timezone": "UTC",
 			"synchronous": false,
 			"attempts": 1,
 			"field_separator": ",",
-			"filters": ["*string:~*opts.*originID:Cdr1|Cdr2"],
+			"filters": ["*string:~*req.CGRID:Cdr1|Cdr2"],
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -132,8 +145,9 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 	"ees_conns": ["*localhost"],
 },
 

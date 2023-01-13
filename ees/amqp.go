@@ -22,9 +22,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/streadway/amqp"
 )
 
@@ -137,7 +136,7 @@ func (pstr *AMQPee) Connect() (err error) {
 	return
 }
 
-func (pstr *AMQPee) ExportEvent(_ *context.Context, content, _ interface{}) (err error) {
+func (pstr *AMQPee) ExportEvent(content interface{}, _ string) (err error) {
 	pstr.reqs.get()
 	pstr.RLock()
 	if pstr.postChan == nil {
@@ -175,5 +174,3 @@ func (pstr *AMQPee) Close() (err error) {
 }
 
 func (pstr *AMQPee) GetMetrics() *utils.SafeMapStorage { return pstr.dc }
-
-func (pstr *AMQPee) ExtraData(*utils.CGREvent) interface{} { return nil }

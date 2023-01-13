@@ -1,5 +1,5 @@
 ---
-- hosts: all
+- hosts: local
   vars:
     ansible_python_interpreter: auto # to disable deprication warning related to the use of python2
     ###############################################################
@@ -20,7 +20,7 @@
     golang_redis_filename: 'go{{ golang_version }}.linux-amd64.tar.gz'
     ###############################################################
     # CGRateS location
-    cgrates_dir: "{{ golang_gopath }}/src/github.com/Omnitouch/cgrates"
+    cgrates_dir: "{{ golang_gopath }}/src/github.com/cgrates/cgrates"
 
     rootUser : root
 
@@ -75,7 +75,7 @@
 # Install and config CGRateS
   - name: Install and config CGRateS
     include: cgrates.yaml
-
+    
 # Configure Asterisk
   - name: Download Asterisk
     become: yes

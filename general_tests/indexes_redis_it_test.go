@@ -25,18 +25,16 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestIndexesRedis(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	db, err := engine.NewRedisStorage(cfg.DataDbCfg().Host+":"+cfg.DataDbCfg().Port, 10, cfg.DataDbCfg().User,
-		cfg.DataDbCfg().Password, cfg.GeneralCfg().DBDataEncoding, cfg.DataDbCfg().Opts.RedisMaxConns,
-		cfg.DataDbCfg().Opts.RedisConnectAttempts, utils.EmptyString, false, 0, 0, 0, 0, 0, false, utils.EmptyString,
-		utils.EmptyString, utils.EmptyString)
+		cfg.DataDbCfg().Password, cfg.GeneralCfg().DBDataEncoding, 10, 20,
+		utils.EmptyString, false, 0, 0, 0, 0, 0, false, utils.EmptyString, utils.EmptyString, utils.EmptyString)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +44,7 @@ func TestIndexesRedis(t *testing.T) {
 	for i := 0; i < limit; i++ {
 		indx["*string:*req.Destination:"+strconv.Itoa(i)] = utils.StringSet{"ATTR_New": {}}
 	}
-	if err = db.SetIndexesDrv(context.Background(), utils.CacheAttributeFilterIndexes, "cgrates.org:*any", indx,
+	if err = db.SetIndexesDrv(utils.CacheAttributeFilterIndexes, "cgrates.org:*any", indx,
 		false, utils.NonTransactional); err != nil {
 		t.Fatal(err)
 	}

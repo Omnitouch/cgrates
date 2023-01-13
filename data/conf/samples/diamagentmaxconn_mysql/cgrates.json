@@ -20,7 +20,15 @@
 	"db_name": "10", 						// data_db database name to connect to
 },
 
-"rates": {
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
+
+"rals": {
+	"enabled": true,
+},
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -42,7 +50,7 @@
 	"enabled": true,
 	"attributes_conns": ["*localhost"],
 	"chargers_conns": ["*localhost"],
-	"rates_conns": ["*localhost"],
+	"rals_conns": ["*localhost"],
 	"cdrs_conns": ["*localhost"],
 },
 
@@ -54,15 +62,16 @@
 		{
 			"id": "maxconn",
 			"filters": ["*string:~*vars.*cmd:CCR", "*string:~*req.Service-Context-Id:TestDiamItDryRun"],
-			"flags": ["*dryRun","*continue"],
+			"flags": ["*dryrun","*continue"],
 			"request_fields":[],
 			"reply_fields":[],
 		},
 	],
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 }

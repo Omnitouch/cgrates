@@ -1,98 +1,103 @@
 {
-	"general": {
-		"log_level": 7,
-		"reply_timeout": "10s"
-	},
+// CGRateS Configuration file
+//
+// Used for SessionSv1 integration tests
 
 
-	"listen": {
-		"rpc_json": ":2012",
-		"rpc_gob": ":2013",
-		"http": ":2080"
-	},
+"general": {
+    "log_level": 7,
+	"reply_timeout": "10s",
+},
 
 
-	"data_db": {								
-		"db_type": "redis",						
-		"db_port": 6379, 						
-		"db_name": "10"					
-	},
+"listen": {
+	"rpc_json": ":2012",
+	"rpc_gob": ":2013",
+	"http": ":2080",
+},
 
 
+"data_db": {								
+	"db_type": "redis",						
+	"db_port": 6379, 						
+	"db_name": "10", 						
+},
 
-	"rates": {
-		"enabled": true
-	},
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
 
-	"cdrs": {
-		"enabled": true,
-		"session_cost_retries": 1,
-		"chargers_conns":["*internal"],
-		"rates_conns": ["*internal"]
-	},
-
-
-	"chargers": {
-		"enabled": true,
-		"attributes_conns": ["*internal"]
-	},
+"rals": {
+	"enabled": true,
+},
 
 
-	"resources": {
-		"enabled": true
-	},
+"schedulers": {
+	"enabled": true,
+},
 
 
-	"attributes": {
-		"enabled": true
-	},
+"cdrs": {
+	"enabled": true,
+	"session_cost_retries": 1,
+	"chargers_conns":["*internal"],
+	"rals_conns": ["*internal"],
+},
 
 
-	"thresholds": {
-		"enabled": true,
-		"store_interval": "1s"
-	},
+"chargers": {
+	"enabled": true,
+	"attributes_conns": ["*internal"],
+},
 
 
-	"stats": {
-		"enabled": true,
-		"store_interval": "1s",
-		"thresholds_conns": ["*internal"]
-	},
+"resources": {
+	"enabled": true,
+},
 
 
-	"routes": {
-		"enabled": true
-	},
+"attributes": {
+	"enabled": true,
+},
 
 
-	"sessions": {
-		"enabled": true,
-		"session_ttl": "50ms",
-		"chargers_conns": ["*localhost"],
-		"rates_conns": ["*localhost"],
-		"cdrs_conns": ["*internal"],
-		"resources_conns": ["*internal"],
-		"thresholds_conns": ["*internal"],
-		"stats_conns": ["*internal"],
-		"routes_conns": ["*internal"],
-		"attributes_conns": ["*internal"],
-		"alterable_fields": ["Extra1"]
-	},
+"thresholds": {
+	"enabled": true,
+	"store_interval": "1s",
+},
 
 
-	"admins": {
-		"enabled": true,
-	},
+"stats": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": ["*internal"],
+},
 
-	"loaders": [
-		{
-			"id": "*default",
-			"enabled": true,
-			"tenant": "cgrates.org",
-			"tp_in_dir": "/usr/share/cgrates/tariffplans/testit",
-			"tp_out_dir": "",
-			"lockfile_path": ""
-		}
-	]
+
+"routes": {
+	"enabled": true,
+},
+
+
+"sessions": {
+	"enabled": true,
+	"session_ttl": "50ms",
+	"chargers_conns": ["*internal"],
+	"rals_conns": ["*internal"],
+	"cdrs_conns": ["*internal"],
+	"resources_conns": ["*internal"],
+	"thresholds_conns": ["*internal"],
+	"stats_conns": ["*internal"],
+	"routes_conns": ["*internal"],
+	"attributes_conns": ["*internal"],
+	"alterable_fields": ["Extra1"],
+	"terminate_attempts": 10,
+},
+
+"apiers": {
+	"enabled": true,
+	"scheduler_conns": ["*internal"],
+},
+
+
 }

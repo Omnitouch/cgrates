@@ -18,10 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package config
 
-import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
-)
+import "github.com/cgrates/cgrates/utils"
 
 // TLSCfg is the configuration for tls
 type TLSCfg struct {
@@ -32,15 +29,6 @@ type TLSCfg struct {
 	ClientCerificate string
 	ClientKey        string
 	CaCertificate    string
-}
-
-// loadTLSCgrCfg loads the Tls section of the configuration
-func (tls *TLSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnTLSCgrCfg := new(TlsJsonCfg)
-	if err = jsnCfg.GetSection(ctx, TlsJSON, jsnTLSCgrCfg); err != nil {
-		return
-	}
-	return tls.loadFromJSONCfg(jsnTLSCgrCfg)
 }
 
 func (tls *TLSCfg) loadFromJSONCfg(jsnCfg *TlsJsonCfg) (err error) {
@@ -72,7 +60,7 @@ func (tls *TLSCfg) loadFromJSONCfg(jsnCfg *TlsJsonCfg) (err error) {
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (tls TLSCfg) AsMapInterface(string) interface{} {
+func (tls *TLSCfg) AsMapInterface() map[string]interface{} {
 	return map[string]interface{}{
 		utils.ServerCerificateCfg: tls.ServerCerificate,
 		utils.ServerKeyCfg:        tls.ServerKey,
@@ -85,9 +73,6 @@ func (tls TLSCfg) AsMapInterface(string) interface{} {
 
 }
 
-func (TLSCfg) SName() string             { return TlsJSON }
-func (tls TLSCfg) CloneSection() Section { return tls.Clone() }
-
 // Clone returns a deep copy of TLSCfg
 func (tls TLSCfg) Clone() *TLSCfg {
 	return &TLSCfg{
@@ -99,42 +84,4 @@ func (tls TLSCfg) Clone() *TLSCfg {
 		ClientKey:        tls.ClientKey,
 		CaCertificate:    tls.CaCertificate,
 	}
-}
-
-type TlsJsonCfg struct {
-	Server_certificate *string
-	Server_key         *string
-	Server_policy      *int
-	Server_name        *string
-	Client_certificate *string
-	Client_key         *string
-	Ca_certificate     *string
-}
-
-func diffTlsJsonCfg(d *TlsJsonCfg, v1, v2 *TLSCfg) *TlsJsonCfg {
-	if d == nil {
-		d = new(TlsJsonCfg)
-	}
-	if v2.ServerCerificate != v1.ServerCerificate {
-		d.Server_certificate = utils.StringPointer(v2.ServerCerificate)
-	}
-	if v2.ServerKey != v1.ServerKey {
-		d.Server_key = utils.StringPointer(v2.ServerKey)
-	}
-	if v2.ServerPolicy != v1.ServerPolicy {
-		d.Server_policy = utils.IntPointer(v2.ServerPolicy)
-	}
-	if v2.ServerName != v1.ServerName {
-		d.Server_name = utils.StringPointer(v2.ServerName)
-	}
-	if v2.ClientCerificate != v1.ClientCerificate {
-		d.Client_certificate = utils.StringPointer(v2.ClientCerificate)
-	}
-	if v2.ClientKey != v1.ClientKey {
-		d.Client_key = utils.StringPointer(v2.ClientKey)
-	}
-	if v2.CaCertificate != v1.CaCertificate {
-		d.Ca_certificate = utils.StringPointer(v2.CaCertificate)
-	}
-	return d
 }

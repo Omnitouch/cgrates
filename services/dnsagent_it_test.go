@@ -27,48 +27,55 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 func TestDNSAgentReload(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.SessionSCfg().Enabled = true
 	cfg.SessionSCfg().ListenBijson = ""
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
-	ctx, cancel := context.WithCancel(context.TODO())
+	shdChan := utils.NewSyncedChan()
 	defer func() {
-		cancel()
+		shdChan.CloseOnce()
 		time.Sleep(10 * time.Millisecond)
 	}()
 	shdWg := new(sync.WaitGroup)
+	chS := engine.NewCacheS(cfg, nil, nil)
+
+	cacheSChan := make(chan rpcclient.ClientConnector, 1)
+	cacheSChan <- chS
 
 	server := cores.NewServer(nil)
-	srvMngr := servmanager.NewServiceManager(shdWg, nil, cfg)
+	srvMngr := servmanager.NewServiceManager(cfg, shdChan, shdWg, nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	sS := NewSessionService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1),
-		nil, anz, srvDep)
-	srv := NewDNSAgent(cfg, filterSChan, nil, srvDep)
-	engine.NewConnManager(cfg)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
+	sS := NewSessionService(cfg, db, server, make(chan rpcclient.ClientConnector, 1),
+		shdChan, nil, anz, srvDep)
+	srv := NewDNSAgent(cfg, filterSChan, shdChan, nil, srvDep)
+	engine.NewConnManager(cfg, nil)
 	srvMngr.AddServices(srv, sS,
-		NewLoaderService(cfg, db, filterSChan, server, make(chan birpc.ClientConnector, 1), nil, anz, srvDep), db)
-	srvMngr.StartServices(ctx, cancel)
+		NewLoaderService(cfg, db, filterSChan, server, make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep), db)
+	if err := srvMngr.StartServices(); err != nil {
+		t.Fatal(err)
+	}
 	if srv.IsRunning() {
 		t.Fatalf("Expected service to be down")
 	}
 	var reply string
-	cfg.ConfigPath = path.Join("/usr", "share", "cgrates", "conf", "samples", "dnsagent_reload")
-	if err := cfg.V1ReloadConfig(context.Background(), &config.ReloadArgs{
-		Section: config.DNSAgentJSON,
+	if err := cfg.V1ReloadConfig(&config.ReloadArgs{
+		Path:    path.Join("/usr", "share", "cgrates", "conf", "samples", "dnsagent_reload"),
+		Section: config.DNSAgentJson,
 	}, &reply); err != nil {
 		t.Fatal(err)
 	} else if reply != utils.OK {
@@ -79,22 +86,22 @@ func TestDNSAgentReload(t *testing.T) {
 	if !srv.IsRunning() {
 		t.Fatalf("Expected service to be running")
 	}
-	err := srv.Start(ctx, cancel)
+	err := srv.Start()
 	if err == nil || err != utils.ErrServiceAlreadyRunning {
 		t.Fatalf("\nExpecting <%+v>,\n Received <%+v>", utils.ErrServiceAlreadyRunning, err)
 	}
 
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err != nil {
 		t.Fatalf("\nExpecting <nil>,\n Received <%+v>", err)
 	}
 
 	cfg.DNSAgentCfg().Enabled = false
-	cfg.GetReloadChan() <- config.SectionToService[config.DNSAgentJSON]
+	cfg.GetReloadChan(config.DNSAgentJson) <- struct{}{}
 	time.Sleep(10 * time.Millisecond)
 	if srv.IsRunning() {
 		t.Fatalf("Expected service to be down")
@@ -109,10 +116,13 @@ func TestDNSAgentReload2(t *testing.T) {
 	cfg.DNSAgentCfg().Enabled = true
 	cfg.DNSAgentCfg().ListenNet = "test"
 	cfg.DNSAgentCfg().Listen = "test"
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srv := NewDNSAgent(cfg, filterSChan, nil, srvDep)
+	srv := NewDNSAgent(cfg, filterSChan, shdChan, nil, srvDep)
 	agentSrv, err := agents.NewDNSAgent(cfg, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +130,7 @@ func TestDNSAgentReload2(t *testing.T) {
 	runtime.Gosched()
 	dnsSrv := srv.(*DNSAgent)
 	dnsSrv.dns = agentSrv
-	err = dnsSrv.listenAndServe(func() {})
+	err = dnsSrv.listenAndServe()
 	if err == nil || err.Error() != "dns: bad network" {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", "dns: bad network", err)
 	}
@@ -132,10 +142,13 @@ func TestDNSAgentReload3(t *testing.T) {
 	cfg.DNSAgentCfg().Enabled = true
 	cfg.DNSAgentCfg().ListenNet = "test"
 	cfg.DNSAgentCfg().Listen = "test"
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srv := NewDNSAgent(cfg, filterSChan, nil, srvDep)
+	srv := NewDNSAgent(cfg, filterSChan, shdChan, nil, srvDep)
 	agentSrv, err := agents.NewDNSAgent(cfg, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -143,8 +156,7 @@ func TestDNSAgentReload3(t *testing.T) {
 	runtime.Gosched()
 	dnsSrv := srv.(*DNSAgent)
 	dnsSrv.dns = agentSrv
-	ctx, cancel := context.WithCancel(context.TODO())
-	err = dnsSrv.Reload(ctx, cancel)
+	err = dnsSrv.Reload()
 	if err == nil || err.Error() != "dns: server not started" {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", "dns: server not started", err)
 	}
@@ -157,16 +169,18 @@ func TestDNSAgentReload4(t *testing.T) {
 	cfg.DNSAgentCfg().ListenNet = "tls"
 	cfg.TLSCfg().ServerCerificate = "bad_certificate"
 	cfg.TLSCfg().ServerKey = "bad_key"
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srv := NewDNSAgent(cfg, filterSChan, nil, srvDep)
+	srv := NewDNSAgent(cfg, filterSChan, shdChan, nil, srvDep)
 
 	runtime.Gosched()
 	dnsSrv := srv.(*DNSAgent)
 	dnsSrv.dns = nil
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := dnsSrv.Start(ctx, cancel)
+	err := dnsSrv.Start()
 	if err == nil || err.Error() != "open bad_certificate: no such file or directory" {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", "open bad_certificate: no such file or directory", err)
 	}
@@ -178,12 +192,14 @@ func TestDNSAgentReload5(t *testing.T) {
 	cfg.SessionSCfg().Enabled = true
 	cfg.DNSAgentCfg().Enabled = true
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srv := NewDNSAgent(cfg, filterSChan, nil, srvDep)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := srv.Start(ctx, cancel)
+	srv := NewDNSAgent(cfg, filterSChan, shdChan, nil, srvDep)
+	err := srv.Start()
 	if err != nil {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -191,7 +207,7 @@ func TestDNSAgentReload5(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	runtime.Gosched()
 	runtime.Gosched()
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err != nil {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -202,13 +218,15 @@ func TestDNSAgentReload6(t *testing.T) {
 	cfg.SessionSCfg().Enabled = true
 	cfg.DNSAgentCfg().Enabled = true
 
+	utils.Logger, _ = utils.Newlogger(utils.MetaSysLog, cfg.GeneralCfg().NodeID)
+	utils.Logger.SetLogLevel(7)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srv := NewDNSAgent(cfg, filterSChan, nil, srvDep)
+	srv := NewDNSAgent(cfg, filterSChan, shdChan, nil, srvDep)
 	cfg.DNSAgentCfg().Listen = "127.0.0.1:0"
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := srv.Start(ctx, cancel)
+	err := srv.Start()
 	if err != nil {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", nil, err)
 	}
@@ -219,7 +237,7 @@ func TestDNSAgentReload6(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	runtime.Gosched()
 	runtime.Gosched()
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err == nil || err.Error() != "open bad_certificate: no such file or directory" {
 		t.Fatalf("\nExpected <%+v>, \nReceived <%+v>", "open bad_certificate: no such file or directory", err)
 	}

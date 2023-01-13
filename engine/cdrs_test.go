@@ -15,3009 +15,2119 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
-	"net/http"
-	"net/url"
+	"bytes"
+	"fmt"
+	"log"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/guardian"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
-func TestCDRsNewCDRServer(t *testing.T) {
+type clMock func(_ string, _ interface{}, _ interface{}) error
 
+func (c clMock) Call(m string, a interface{}, r interface{}) error {
+	return c(m, a, r)
+}
+
+func TestCDRSV1ProcessCDRNoTenant(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	expected := &CDRServer{
-		cfg:     cfg,
+	cfg.CdrsCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*AttrSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = AttrSProcessEventReply{
+			AlteredFields: []string{utils.AccountField},
+			CGREvent: &utils.CGREvent{
+				ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+				Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+				Event: map[string]interface{}{
+					"Account":     "1002",
+					"Category":    "call",
+					"Destination": "1003",
+					"OriginHost":  "local",
+					"OriginID":    "123456",
+					"ToR":         "*voice",
+					"Usage":       "10s",
+				},
+			},
+		}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes): chanClnt,
+	})
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), connMngr)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMngr,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		dm:      dm,
-		guard:   guardian.Guardian,
-		fltrS:   fltrs,
-		connMgr: connMng,
 	}
-	if !reflect.DeepEqual(newCDRSrv, expected) {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", expected, newCDRSrv)
+	cdr := &CDRWithAPIOpts{ // no tenant, take the default
+		CDR: &CDR{
+			CGRID:       "Cdr1",
+			OrderID:     123,
+			ToR:         utils.MetaVoice,
+			OriginID:    "OriginCDR1",
+			OriginHost:  "192.168.1.1",
+			Source:      "test",
+			RequestType: utils.MetaRated,
+			Category:    "call",
+			Account:     "1001",
+			Subject:     "1001",
+			Destination: "+4986517174963",
+			RunID:       utils.MetaDefault,
+			Usage:       time.Duration(0),
+			ExtraFields: map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"},
+			Cost:        1.01,
+		},
+	}
+	var reply string
+	if err := cdrs.V1ProcessCDR(cdr, &reply); err != nil {
+		t.Error(err)
 	}
 }
 
-func TestCDRsChrgrSProcessEventErrMsnConnIDs(t *testing.T) {
-
+func TestCDRSV1ProcessEventNoTenant(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys:   utils.MetaChargers,
-			utils.MetaOriginID: "originID",
-		},
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*[]*ChrgSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = []*ChrgSProcessEventReply{}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): chanClnt,
+	})
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), connMngr)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMngr,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
 	}
-	_, err := newCDRSrv.chrgrSProcessEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-}
-
-func TestCDRsAttrSProcessEventNoOpts(t *testing.T) {
-	cfg := config.NewDefaultCGRConfig()
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-	}
-	err := newCDRSrv.attrSProcessEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-}
-
-func TestCDRsAttrSProcessEvent(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaChargers,
-		},
-	}
-	err := newCDRSrv.attrSProcessEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-}
-
-func TestCDRsRateSCostForEventErr(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaChargers,
-		},
-	}
-	err := newCDRSrv.rateSCostForEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-}
-
-func TestCDRsAccountSDebitEventErr(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaChargers,
-		},
-	}
-	err := newCDRSrv.accountSDebitEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-}
-
-func TestCDRsThdSProcessEventErr(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-	}
-	err := newCDRSrv.thdSProcessEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-
-}
-
-func TestCDRsStatSProcessEventErrMsnConnIDs(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaChargers,
-		},
-	}
-	err := newCDRSrv.statSProcessEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
-
-}
-
-func TestCDRsEESProcessEventErrMsnConnIDs(t *testing.T) {
-
-	cfg := config.NewDefaultCGRConfig()
-
-	dm := &DataManager{}
-	fltrs := &FilterS{}
-	connMng := &ConnManager{}
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	cgrEv := &utils.CGREventWithEeIDs{
-		CGREvent: &utils.CGREvent{
-			Tenant: "cgrates.org",
-			ID:     "testID",
+	args := &ArgV1ProcessEvent{
+		Flags: []string{utils.MetaChargers},
+		CGREvent: utils.CGREvent{
+			ID: "TestV1ProcessEventNoTenant",
 			Event: map[string]interface{}{
-				"Resources":      "ResourceProfile1",
-				utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-				"UsageInterval":  "1s",
-				"PddInterval":    "1s",
-				utils.Weight:     "20.0",
-				utils.Usage:      135 * time.Second,
-				utils.Cost:       123.0,
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaSubsys: utils.MetaChargers,
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute,
 			},
 		},
 	}
-	err := newCDRSrv.eeSProcessEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <MANDATORY_IE_MISSING: [connIDs]> \n, received <%+v>", err)
-	}
+	var reply string
 
-}
-
-func TestCDRsNewMapEventFromReqForm(t *testing.T) {
-	httpReq := &http.Request{
-		Form: url.Values{
-			"value1": {"value2"},
-		},
-	}
-	result, err := newMapEventFromReqForm(httpReq)
-	if err != nil {
-		t.Errorf("\nExpected <nil> \n, received <%+v>", err)
-	}
-	expected := MapEvent{
-		"value1": "value2",
-		"Source": "",
-	}
-	if !reflect.DeepEqual(expected, result) {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", expected, result)
+	if err := cdrs.V1ProcessEvent(args, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("expected %v,received %v", utils.OK, reply)
 	}
 }
 
-func TestCDRsAttrSProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
+func TestCDRSV1V1ProcessExternalCDRNoTenant(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAttributes)}
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+		rply, cancast := reply.(*[]*ChrgSProcessEventReply)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		newArgs, cancast := args.(*utils.CGREvent)
+		if !cancast {
+			return fmt.Errorf("can't cast")
+		}
+		if newArgs.Tenant == utils.EmptyString {
+			return fmt.Errorf("Tenant is missing")
+		}
+		*rply = []*ChrgSProcessEventReply{}
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): chanClnt,
+	})
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), connMngr)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMngr,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
 
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*AttrSProcessEventReply) = AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{},
-				}
+	args := &ExternalCDRWithAPIOpts{
+		ExternalCDR: &ExternalCDR{
+			ToR:         utils.MetaVoice,
+			OriginID:    "testDspCDRsProcessExternalCDR",
+			OriginHost:  "127.0.0.1",
+			Source:      utils.UnitTest,
+			RequestType: utils.MetaRated,
+			Tenant:      "cgrates.org",
+			Category:    "call",
+			Account:     "1003",
+			Subject:     "1003",
+			Destination: "1001",
+			SetupTime:   "2014-08-04T13:00:00Z",
+			AnswerTime:  "2014-08-04T13:00:07Z",
+			Usage:       "1s",
+			ExtraFields: map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"},
+		},
+	}
+	var reply string
+
+	if err := cdrs.V1ProcessExternalCDR(args, &reply); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestArgV1ProcessClone(t *testing.T) {
+	attr := &ArgV1ProcessEvent{
+		Flags: []string{"flg,flg2,flg3"},
+		CGREvent: utils.CGREvent{
+			ID:   "TestBiRPCv1AuthorizeEventNoTenant",
+			Time: utils.TimePointer(time.Date(2016, time.January, 5, 18, 30, 49, 0, time.UTC)),
+			Event: map[string]interface{}{
+				"Account":     "1002",
+				"Category":    "call",
+				"Destination": "1003",
+				"OriginHost":  "local",
+				"OriginID":    "123456",
+				"ToR":         "*voice",
+				"Usage":       "10s",
+			},
+		},
+		clnb: true,
+	}
+	if val := attr.Clone(); reflect.DeepEqual(attr, val) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(val), utils.ToJSON(attr))
+	}
+
+}
+
+func TestCDRV1CountCDRs(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.GeneralCfg().DefaultTimezone = "UTC"
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: nil,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+	args := &utils.RPCCDRsFilterWithAPIOpts{
+
+		RPCCDRsFilter: &utils.RPCCDRsFilter{},
+		Tenant:        "cgrates.org",
+		APIOpts:       map[string]interface{}{},
+	}
+
+	i := int64(3)
+	if err := cdrS.V1CountCDRs(args, &i); err != nil {
+		t.Error(err)
+	}
+}
+func TestV1CountCDRsErr(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.GeneralCfg().DefaultTimezone = "UTC"
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: nil,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+	args := &utils.RPCCDRsFilterWithAPIOpts{
+		RPCCDRsFilter: &utils.RPCCDRsFilter{
+			Accounts:       []string{"1001"},
+			RunIDs:         []string{utils.MetaDefault},
+			SetupTimeStart: "fdd",
+		},
+		Tenant: "cgrates.org",
+		APIOpts: map[string]interface{}{
+			utils.OptsAPIKey: "cdrs12345",
+		},
+	}
+	i := utils.Int64Pointer(23)
+	if err := cdrS.V1CountCDRs(args, i); err == nil {
+		t.Error(err)
+	}
+}
+func TestV1RateCDRs(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.GeneralCfg().DefaultTimezone = "UTC"
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: nil,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+	arg := &ArgRateCDRs{
+		Flags:         []string{utils.MetaAttributes, utils.MetaStats, utils.MetaExport, utils.MetaStore, utils.OptsThresholdS, utils.MetaThresholds, utils.MetaStats, utils.OptsChargerS, utils.MetaChargers, utils.OptsRALs, utils.MetaRALs, utils.OptsRerate, utils.MetaRerate, utils.OptsRefund, utils.MetaRefund},
+		Tenant:        "cgrates.rg",
+		RPCCDRsFilter: utils.RPCCDRsFilter{},
+		APIOpts:       map[string]interface{}{},
+	}
+
+	var reply string
+	if err := cdrS.V1RateCDRs(arg, &reply); err == nil {
+		t.Error(err)
+	}
+
+}
+
+func TestCDRServerThdsProcessEvent(t *testing.T) {
+	clMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ThresholdSv1ProcessEvent: func(args, reply interface{}) error {
+
+				rpl := &[]string{"event"}
+
+				*reply.(*[]string) = *rpl
 				return nil
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaAttributes,
-		},
-	}
-	err := newCDRSrv.attrSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsContext: utils.MetaCDRs,
-			utils.MetaSubsys:  utils.MetaCDRs,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsAttrSProcessEventMockNotFoundErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- clMock
 	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAttributes)}
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.ThresholdSConnsCfg): clientconn,
+	})
+	cfg.CdrsCfg().ThresholdSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.ThreshSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMgr,
+		cdrDb:   db,
+		dm:      dm,
+	}
+	crgEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "id",
+		Time:   utils.TimePointer(time.Date(2019, 12, 1, 15, 0, 0, 0, time.UTC)),
+	}
 
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*AttrSProcessEventReply) = AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{{
-						Fields: []string{},
-					}},
-				}
-				return utils.ErrNotFound
+	if err := cdrS.thdSProcessEvent(crgEv); err != nil {
+		t.Error(err)
+	}
+
+}
+func TestCDRServerStatSProcessEvent(t *testing.T) {
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.StatSv1ProcessEvent: func(args, reply interface{}) error {
+
+				rpl := &[]string{"status"}
+
+				*reply.(*[]string) = *rpl
+				return nil
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	cfg := config.NewDefaultCGRConfig()
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.StatSConnsCfg): clientconn,
+	})
+	cfg.CdrsCfg().StatSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.StatSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	fltrs := NewFilterS(cfg, connMgr, dm)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		dm:      dm,
+		filterS: fltrs,
+		cdrDb:   db,
+		connMgr: connMgr,
+	}
+	crgEv := &utils.CGREvent{
+		Tenant: "cgrates.org",
+		ID:     "id",
+		Time:   utils.TimePointer(time.Date(2019, 12, 1, 15, 0, 0, 0, time.UTC)),
+	}
 
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaAttributes,
-		},
-	}
-	err := newCDRSrv.attrSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsContext: utils.MetaCDRs,
-			utils.MetaSubsys:  utils.MetaCDRs,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
+	if err := cdrS.statSProcessEvent(crgEv); err != nil {
+		t.Error(err)
 	}
 }
 
-func TestCDRsAttrSProcessEventMockNotEmptyAF(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAttributes)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AttributeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*AttrSProcessEventReply) = AttrSProcessEventReply{
-					AlteredFields: []*FieldsAltered{{
-						Fields: []string{utils.AccountField},
-					}},
-					CGREvent: &utils.CGREvent{
-						Tenant: "cgrates.org",
-						ID:     "testID",
-						Event: map[string]interface{}{
-							utils.AccountField: "1001",
-							"Resources":        "ResourceProfile1",
-							utils.AnswerTime:   time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-							"UsageInterval":    "1s",
-							"PddInterval":      "1s",
-							utils.Weight:       "20.0",
-							utils.Usage:        135 * time.Second,
-							utils.Cost:         123.0,
-						},
-						APIOpts: map[string]interface{}{
-							utils.MetaSubsys:   utils.MetaAttributes,
-							utils.AccountField: "1001",
-						},
+func TestCDRServerEesProcessEvent(t *testing.T) {
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.EeSv1ProcessEvent: func(args, reply interface{}) error {
+				rpls := &map[string]map[string]interface{}{
+					"eeS": {
+						"process": "event",
 					},
 				}
+				*reply.(*map[string]map[string]interface{}) = *rpls
+
 				return nil
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAttributes), utils.AttributeSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.AccountField: "1001",
-			"Resources":        "ResourceProfile1",
-			utils.AnswerTime:   time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":    "1s",
-			"PddInterval":      "1s",
-			utils.Weight:       "20.0",
-			utils.Usage:        135 * time.Second,
-			utils.Cost:         123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaAttributes,
-		},
-	}
-	err := newCDRSrv.attrSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.AccountField: "1001",
-			"Resources":        "ResourceProfile1",
-			utils.AnswerTime:   time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":    "1s",
-			"PddInterval":      "1s",
-			utils.Weight:       "20.0",
-			utils.Usage:        135 * time.Second,
-			utils.Cost:         123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.AccountField: "1001",
-			utils.MetaSubsys:   utils.MetaAttributes,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsChrgrSProcessEvent(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
 
 	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaChargers)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.ChargerSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*[]*ChrgSProcessEventReply) = []*ChrgSProcessEventReply{
-					{
-						ChargerSProfile: "string",
-					},
-				}
-				return nil
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaChargers), utils.ChargerSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaChargers,
-		},
-	}
-	result, err := newCDRSrv.chrgrSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	var expecte *utils.CGREvent
-	expected := []*utils.CGREvent{
-		expecte,
-	}
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", expected, result)
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.EEsConnsCfg): clientconn,
+	})
+	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.EEsConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), connMgr)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
 	}
 
-}
-
-func TestCDRsRateProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().RateSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaRates)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.RateSv1CostForEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*utils.RateProfileCost) = utils.RateProfileCost{}
-				return nil
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaRates), utils.RateSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaRates,
-		},
-	}
-	err := newCDRSrv.rateSCostForEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaRateSCost: utils.RateProfileCost{},
-			utils.MetaSubsys:    utils.MetaRates,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsAccountProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AccountSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAccounts)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AccountSv1DebitAbstracts: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*utils.EventCharges) = utils.EventCharges{}
-				return nil
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAccounts), utils.AccountSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAccountSCost: &utils.EventCharges{},
-			utils.MetaSubsys:       utils.MetaAccounts,
-		},
-	}
-	err := newCDRSrv.accountSDebitEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAccountSCost: cgrEv.APIOpts[utils.MetaAccountSCost],
-			utils.MetaSubsys:       utils.MetaAccounts,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsThdSProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().ThresholdSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaThresholds)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.ThresholdSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*[]string) = []string{"testID"}
-				return nil
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaThresholds), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	err := newCDRSrv.thdSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsThdSProcessEventMockNotfound(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().ThresholdSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaThresholds)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.ThresholdSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaThresholds), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	err := newCDRSrv.thdSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsStatSProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().StatSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaStats)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.StatSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*[]string) = []string{"testID"}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaStats), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	err := newCDRSrv.statSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsEESProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.EeSv1, rpcInternal)
-
-	cgrEv := &utils.CGREventWithEeIDs{
+	cgrEv := &CGREventWithEeIDs{
+		EeIDs: []string{"ees"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
-			ID:     "testID",
-			Event: map[string]interface{}{
-				"Resources":      "ResourceProfile1",
-				utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-				"UsageInterval":  "1s",
-				"PddInterval":    "1s",
-				utils.Weight:     "20.0",
-				utils.Usage:      135 * time.Second,
-				utils.Cost:       123.0,
-			},
-			APIOpts: nil,
+			ID:     "id",
+			Time:   utils.TimePointer(time.Date(2019, 12, 1, 15, 0, 0, 0, time.UTC)),
 		},
 	}
-	err := newCDRSrv.eeSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
+	if err := cdrS.eeSProcessEvent(cgrEv); err != nil {
+		t.Error(err)
 	}
-	expected := &utils.CGREventWithEeIDs{
-		CGREvent: &utils.CGREvent{
-			Tenant: "cgrates.org",
-			ID:     "testID",
-			Event: map[string]interface{}{
-				"Resources":      "ResourceProfile1",
-				utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-				"UsageInterval":  "1s",
-				"PddInterval":    "1s",
-				utils.Weight:     "20.0",
-				utils.Usage:      135 * time.Second,
-				utils.Cost:       123.0,
-			},
-			APIOpts: nil,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
+
 }
 
-func TestCDRsProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
+func TestCDRefundEventCost(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsProcessEventMockSkipOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: nil,
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsNewMapEventFromReqFormErr(t *testing.T) {
-	httpReq := &http.Request{
-		URL: &url.URL{
-			RawQuery: "%0x",
-		},
-	}
-	_, err := newMapEventFromReqForm(httpReq)
-	errExpect := `invalid URL escape "%0x"`
-	if err == nil || err.Error() != errExpect {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", errExpect, err)
-	}
-
-}
-
-func TestCDRsProcessEventMockAttrsErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAttributes: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "ATTRIBUTES_ERROR:MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "ATTRIBUTES_ERROR:MANDATORY_IE_MISSING: [connIDs]", err)
-	}
-}
-
-func TestCDRsProcessEventMockAttrsErrBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAttributes: time.Second,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-}
-
-func TestCDRsProcessEventMockChrgsErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaChargers: true,
-			"*context":         utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "CHARGERS_ERROR:MANDATORY_IE_MISSING: [connIDs]" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "CHARGERS_ERROR:MANDATORY_IE_MISSING: [connIDs]", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockChrgsErrBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaChargers: time.Second,
-			"*context":         utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockRateSErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaRates: true,
-			"*context":      utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockRateSErrBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaRates: time.Second,
-			"*context":      utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockAcntsErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAccounts: true,
-			"*context":         utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockAcntsErrBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAccounts: time.Second,
-			"*context":         utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockExportErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrExists
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockExportErrBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrExists
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: time.Second,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockThdsErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaThresholds: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockThdsErrBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaThresholds: time.Second,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockStatsErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrExists
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaStats: true,
-			"*context":      utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
-	}
-
-}
-
-func TestCDRsProcessEventMockStatsErrGetBoolOpts(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrExists
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaStats: time.Second,
-			"*context":      utils.MetaCDRs,
-		},
-	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-
-func TestCDRsV1ProcessEventMock(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	var rply string
-	err := newCDRSrv.V1ProcessEvent(context.Background(), cgrEv, &rply)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	cgrEv.ID = "testID"
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", utils.ToJSON(expected), utils.ToJSON(cgrEv))
-	}
-}
-
-func TestCDRsV1ProcessEventMockErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaStats:      true,
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	var rply string
-	err := newCDRSrv.V1ProcessEvent(context.Background(), cgrEv, &rply)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaStats:      true,
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsV1ProcessEventMockCache(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	defaultConf := config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses]
-	config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
-	defer func() {
-		config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses] = defaultConf
-	}()
-	var rply string
-	err := newCDRSrv.V1ProcessEvent(context.Background(), cgrEv, &rply)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-func TestCDRsV1ProcessEventWithGetMockCache(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	defaultConf := config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses]
-	config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
-	defer func() {
-		config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses] = defaultConf
-	}()
-	var rply []*utils.EventsWithOpts
-	err := newCDRSrv.V1ProcessEventWithGet(context.Background(), cgrEv, &rply)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	cgrEv.ID = "testID"
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-func TestCDRsV1ProcessEventWithGetMockCacheErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.EeSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*map[string]map[string]interface{}) = map[string]map[string]interface{}{}
-				return utils.ErrNotFound
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaEEs), utils.ThresholdSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.OptsCDRsExport: true,
-			utils.MetaAttributes: time.Second,
-			"*context":           utils.MetaCDRs,
-		},
-	}
-	defaultConf := config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses]
-	config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
-	defer func() {
-		config.CgrConfig().CacheCfg().Partitions[utils.CacheRPCResponses] = defaultConf
-	}()
-	var rply []*utils.EventsWithOpts
-	err := newCDRSrv.V1ProcessEventWithGet(context.Background(), cgrEv, &rply)
-	if err == nil || err.Error() != "cannot convert field: 1s to bool" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "cannot convert field: 1s to bool", err)
-	}
-
-}
-func TestCDRsChrgrSProcessEventEmptyChrgrs(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaChargers)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.ChargerSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderRefundIncrements: func(args, reply interface{}) error {
 				return nil
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaChargers), utils.ChargerSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: utils.MetaChargers,
-		},
+	ec := &EventCost{
+		CGRID: "event",
+		RunID: "runid",
 	}
-	_, err := newCDRSrv.chrgrSProcessEvent(context.Background(), cgrEv)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.ResponderRefundIncrements): clientconn,
+	})
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.ResponderRefundIncrements)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
 	}
-
+	if _, err := cdrS.refundEventCost(ec, "*postpaid", "tor"); err != nil {
+		t.Error(err)
+	}
 }
 
-func TestCDRsV1ProcessEventCacheGet(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
+func TestGetCostFromRater(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
 
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, nil)
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.Cost: 123,
-		},
-	}
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
 
-	rply := "string"
-	Cache.Set(context.Background(), utils.CacheRPCResponses, "CDRsV1.ProcessEvent:testID",
-		&utils.CachedRPCResponse{Result: &rply, Error: nil},
-		nil, true, utils.NonTransactional)
-
-	err := newCDRSrv.V1ProcessEvent(context.Background(), cgrEv, &rply)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.Cost: 123,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRsV1ProcessEventWithGetCacheGet(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, nil)
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.Cost: 123,
-		},
-	}
-
-	rply := []*utils.EventsWithOpts{}
-	Cache.Set(context.Background(), utils.CacheRPCResponses, "CDRsV1.ProcessEvent:testID",
-		&utils.CachedRPCResponse{Result: &rply, Error: nil},
-		nil, true, utils.NonTransactional)
-
-	err := newCDRSrv.V1ProcessEventWithGet(context.Background(), cgrEv, &rply)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-	expected := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.Cost: 123,
-		},
-	}
-	if !reflect.DeepEqual(expected, cgrEv) {
-		t.Errorf("\nExpected <%+v> \n,received <%+v>", expected, cgrEv)
-	}
-}
-
-func TestCDRServerAccountSRefundCharges(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AccountSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.AccountSConnsCfg)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.AccountSv1RefundCharges: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*string) = utils.OK
-				return nil
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.AccountSConnsCfg), utils.AccountSv1, rpcInternal)
-
-	apiOpts := map[string]interface{}{
-		utils.MetaAccountSCost: &utils.EventCharges{},
-		utils.MetaSubsys:       utils.AccountSConnsCfg,
-	}
-	eChrgs := &utils.EventCharges{
-		Abstracts: utils.NewDecimal(500, 0),
-		Concretes: utils.NewDecimal(400, 0),
-		Charges: []*utils.ChargeEntry{
-			{
-				ChargingID:     "GENUUID", //will be changed
-				CompressFactor: 1,
-			},
-			{
-				ChargingID:     "GENUUID2", //will be changed
-				CompressFactor: 1,
-			},
-		},
-		Accounting: map[string]*utils.AccountCharge{
-			"GENUUID2": {
-				BalanceID:    "CB2",
-				Units:        utils.NewDecimal(2, 0),
-				BalanceLimit: utils.NewDecimal(-1, 0),
-			},
-			"GENUUID": {
-				BalanceID:    "CB1",
-				Units:        utils.NewDecimal(7, 0),
-				BalanceLimit: utils.NewDecimal(-200, 0),
-				UnitFactorID: "GENNUUID_FACTOR",
-			},
-		},
-		UnitFactors: map[string]*utils.UnitFactor{
-			"GENNUUID_FACTOR": {
-				Factor: utils.NewDecimal(100, 0),
-			},
-		},
-		Rating:   make(map[string]*utils.RateSInterval),
-		Rates:    make(map[string]*utils.IntervalRate),
-		Accounts: make(map[string]*utils.Account),
-	}
-	err := newCDRSrv.accountSRefundCharges(context.Background(), "cgrates.org", eChrgs, apiOpts)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
-	}
-}
-func TestCDRServerAccountSRefundChargesErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AccountSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.AccountSConnsCfg)}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-			utils.ChargerSv1ProcessEvent: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*string) = utils.OK
-				return nil
-			},
-		},
-	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.AccountSConnsCfg), utils.AccountSv1, rpcInternal)
-
-	apiOpts := map[string]interface{}{
-		utils.MetaAccountSCost: &utils.EventCharges{},
-		utils.MetaSubsys:       utils.AccountSConnsCfg,
-	}
-	eChrgs := &utils.EventCharges{
-		Abstracts: utils.NewDecimal(500, 0),
-		Concretes: utils.NewDecimal(400, 0),
-	}
-	expErr := "UNSUPPORTED_SERVICE_METHOD"
-	err := newCDRSrv.accountSRefundCharges(context.Background(), "cgrates.org", eChrgs, apiOpts)
-	if err == nil || err.Error() != expErr {
-		t.Errorf("\nExpected error <%v> \n, received error <%v>", expErr, err)
-	}
-
-}
-
-func TestPopulateCost(t *testing.T) {
-
-	ev := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		Event: map[string]interface{}{
-			utils.Usage: "10s",
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAccountSCost: &utils.EventCharges{
-				Concretes: utils.NewDecimal(400, 0),
-			},
-		},
-	}
-	exp := utils.NewDecimal(400, 0)
-	if rcv := populateCost(ev.APIOpts); !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected <%+v>, Received <%+v>", exp, rcv)
-	}
-	ev = &utils.CGREvent{
-		Tenant: "cgrates.org",
-		Event: map[string]interface{}{
-			utils.Usage: "10s",
-		},
-		APIOpts: map[string]interface{}{
-
-			utils.MetaRateSCost: utils.RateProfileCost{
-
-				Cost: utils.NewDecimal(400, 0),
-			},
-		},
-	}
-	if rcv := populateCost(ev.APIOpts); !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected <%+v>, Received <%+v>", exp, rcv)
-	}
-	ev = &utils.CGREvent{
-		Tenant: "cgrates.org",
-		Event: map[string]interface{}{
-			utils.Usage: "10s",
-		},
-		APIOpts: map[string]interface{}{
-
-			utils.MetaCost: 102.1,
-		},
-	}
-	if rcv := populateCost(ev.APIOpts); rcv != nil {
-		t.Errorf("Expected <%+v>, Received <%+v>", nil, rcv)
-	}
-}
-func TestCDRsProcessEventMockThdsEcCostIface(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-	cfg.CdrsCfg().AccountSConns = []string{utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAccounts)}
-	cfg.CdrsCfg().Opts.Attributes = []*utils.DynamicBoolOpt{
-		{
-			Value: false,
-		},
-	}
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-	ccM := &ccMock{
-		calls: map[string]func(ctx *context.Context, args interface{}, reply interface{}) error{
-
-			utils.AccountSv1DebitAbstracts: func(ctx *context.Context, args, reply interface{}) error {
-				*reply.(*utils.EventCharges) = utils.EventCharges{
-					Concretes: utils.NewDecimal(400, 0),
+			utils.ResponderDebit: func(args, reply interface{}) error {
+				rpl := &CallCost{
+					Category: "category",
+					Tenant:   "cgrates",
 				}
+				*reply.(*CallCost) = *rpl
 				return nil
 			},
 		},
 	}
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-	rpcInternal <- ccM
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAccounts), utils.AccountSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			"Resources":      "ResourceProfile1",
-			utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
-			"UsageInterval":  "1s",
-			"PddInterval":    "1s",
-			utils.Weight:     "20.0",
-			utils.Usage:      135 * time.Second,
-			utils.Cost:       123.0,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaAccounts: true,
-			"*context":         utils.MetaCDRs,
-			utils.MetaAccountSCost: map[string]interface{}{
-				"Concretes": utils.NewDecimal(400, 0),
-			},
-		},
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg): clientconn,
+	})
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMgr,
+		cdrDb:   db,
+		dm:      dm,
 	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "PARTIALLY_EXECUTED" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "PARTIALLY_EXECUTED", err)
+	cd := &CDR{
+		Category:    "category",
+		Tenant:      "cgrates.org",
+		RequestType: utils.PseudoPrepaid,
 	}
-}
-
-func TestCDRsProcessEventMockThdsEcCostIfaceMarshalErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAccounts), utils.AccountSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		APIOpts: map[string]interface{}{
-			utils.MetaAccounts: true,
-			"*context":         utils.MetaCDRs,
-			utils.MetaAccountSCost: map[string]interface{}{
-				"Concretes": make(chan string),
-			},
-		},
+	cdr := &CDRWithAPIOpts{
+		CDR:     cd,
+		APIOpts: map[string]interface{}{},
 	}
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != "json: unsupported type: chan string" {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", "json: unsupported type: chan string", err)
+	exp := &CallCost{
+		Category: "category",
+		Tenant:   "cgrates",
+	}
+	if val, err := cdrS.getCostFromRater(cdr); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(exp, val) {
+		t.Errorf("expected %+v ,received %+v", utils.ToJSON(exp), utils.ToJSON(val))
 	}
 }
 
-func TestCDRsProcessEventMockThdsEcCostIfaceUnmarshalErr(t *testing.T) {
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
-
-	cfg := config.NewDefaultCGRConfig()
-
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	rpcInternal := make(chan birpc.ClientConnector, 1)
-
-	newCDRSrv.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal,
-		utils.MetaAccounts), utils.AccountSv1, rpcInternal)
-
-	cgrEv := &utils.CGREvent{
-		APIOpts: map[string]interface{}{
-			utils.MetaAccounts: true,
-			"*context":         utils.MetaCDRs,
-			utils.MetaAccountSCost: map[string]interface{}{
-				"Charges": "not unmarshable",
-			},
-		},
-	}
-	expErr := "json: cannot unmarshal string into Go struct field EventCharges.Charges of type []*utils.ChargeEntry"
-	_, err := newCDRSrv.processEvent(context.Background(), cgrEv)
-	if err == nil || err.Error() != expErr {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", expErr, err)
-	}
-}
-
-func TestCDRsV1ProcessEventWithGetMockCacheErrResp(t *testing.T) {
-
-	testCache := Cache
-	tmpC := config.CgrConfig()
-	tmpCM := connMgr
-	defer func() {
-		Cache = testCache
-		config.SetCgrConfig(tmpC)
-		connMgr = tmpCM
-	}()
+func TestRefundEventCost(t *testing.T) {
 	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderRefundIncrements: func(args, reply interface{}) error {
+				rpl := &Account{}
+				*reply.(*Account) = *rpl
+				return nil
+			},
+		},
+	}
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg): clientconn,
+	})
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	ec := &EventCost{
+		CGRID:     "cgrid",
+		RunID:     "rnID",
+		StartTime: time.Date(2022, 12, 1, 11, 0, 0, 0, time.UTC),
+		Charges: []*ChargingInterval{
+			{
+				CompressFactor: 2,
+				Increments: []*ChargingIncrement{
+					{
+						Usage: 10 * time.Minute,
+						Cost:  20,
+					}, {
+						Usage: 5 * time.Minute,
+						Cost:  15,
+					},
+				},
+			}, {},
+		},
+	}
+	if val, err := cdrS.refundEventCost(ec, utils.MetaPrepaid, "tor"); err != nil {
+		t.Error(err)
+	} else if !val {
+		t.Error("expected true")
+	}
+}
 
+func TestCDRSV2ProcessEvent(t *testing.T) {
+	Cache.Clear(nil)
 	cfg := config.NewDefaultCGRConfig()
 	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): chanClnt,
+	})
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), connMngr)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMngr,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+
 	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	args := &ArgV1ProcessEvent{
+		Flags: []string{utils.MetaChargers},
+		CGREvent: utils.CGREvent{
+			ID: "TestV1ProcessEventNoTenant",
+			Event: map[string]interface{}{
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute,
+			},
+		},
+	}
+	evs := &[]*utils.EventWithFlags{}
 
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, nil, dm)
-	Cache = NewCacheS(cfg, dm, nil, nil)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, nil)
+	if err := cdrs.V2ProcessEvent(args, evs); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{
+		Result: evs,
+		Error:  nil}
+	cacheKey := utils.ConcatenatedKey(utils.CDRsV2ProcessEvent, args.CGREvent.ID)
+	rcv, has := Cache.Get(utils.CacheRPCResponses, cacheKey)
+	if !has {
+		t.Error("expected value")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID",
-		Event: map[string]interface{}{
-			utils.Cost: 123,
+	}
+
+}
+func TestCDRSV2ProcessEventCacheSet(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: nil,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	args := &ArgV1ProcessEvent{
+		Flags: []string{utils.MetaChargers},
+		CGREvent: utils.CGREvent{
+			ID: "TestV1ProcessEventNoTenant",
+			Event: map[string]interface{}{
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute,
+			},
+		},
+	}
+	evs := &[]*utils.EventWithFlags{}
+	Cache.Set(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV2ProcessEvent, args.CGREvent.ID),
+		&utils.CachedRPCResponse{Result: evs, Error: nil},
+		nil, true, utils.NonTransactional)
+
+	if err := cdrs.V2ProcessEvent(args, evs); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{Result: evs, Error: nil}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV2ProcessEvent, args.CGREvent.ID))
+	if !has {
+		t.Error("expected to have a values")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+
+}
+
+func TestCDRSV1ProcessEvent(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	clMock := clMock(func(_ string, args interface{}, reply interface{}) error {
+
+		return nil
+	})
+	chanClnt := make(chan rpcclient.ClientConnector, 1)
+	chanClnt <- clMock
+	connMngr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): chanClnt,
+	})
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), connMngr)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMngr,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	args := &ArgV1ProcessEvent{
+		Flags: []string{utils.MetaChargers},
+		CGREvent: utils.CGREvent{
+			ID: "TestV1ProcessEventNoTenant",
+			Event: map[string]interface{}{
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute,
+			},
+		},
+	}
+	reply := utils.StringPointer("result")
+
+	if err := cdrs.V1ProcessEvent(args, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{
+		Result: reply,
+		Error:  nil}
+	cacheKey := utils.ConcatenatedKey(utils.CDRsV1ProcessEvent, args.CGREvent.ID)
+	rcv, has := Cache.Get(utils.CacheRPCResponses, cacheKey)
+	if !has {
+		t.Error("expected value")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+
+	}
+
+}
+func TestCDRSV1ProcessEventCacheSet(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: nil,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	args := &ArgV1ProcessEvent{
+		Flags: []string{utils.MetaChargers},
+		CGREvent: utils.CGREvent{
+			ID: "TestV1ProcessEventNoTenant",
+			Event: map[string]interface{}{
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute,
+			},
+		},
+	}
+	reply := utils.StringPointer("result")
+	Cache.Set(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1ProcessEvent, args.CGREvent.ID),
+		&utils.CachedRPCResponse{Result: reply, Error: nil},
+		nil, true, utils.NonTransactional)
+
+	if err := cdrs.V1ProcessEvent(args, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{Result: reply, Error: nil}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1ProcessEvent, args.CGREvent.ID))
+	if !has {
+		t.Error("expected to have a values")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+
+}
+
+func TestV1ProcessEvent(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	defer func() {
+		config.SetCgrConfig(cfg)
+	}()
+	cfg.CdrsCfg().AttributeSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.AttributeSConnsCfg)}
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)}
+	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.EEsConnsCfg)}
+	cfg.CdrsCfg().ThresholdSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds)}
+	cfg.CdrsCfg().StatSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats)}
+	cfg.CdrsCfg().StoreCdrs = true
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.AttributeSv1ProcessEvent: func(args, reply interface{}) error {
+				rpl := &AttrSProcessEventReply{
+					AlteredFields: []string{"*req.OfficeGroup"},
+					CGREvent: &utils.CGREvent{
+						Event: map[string]interface{}{
+							utils.CGRID: "cgrid",
+						},
+					},
+				}
+				*reply.(*AttrSProcessEventReply) = *rpl
+
+				return nil
+			},
+			utils.ChargerSv1ProcessEvent: func(args, reply interface{}) error {
+				rpl := []*ChrgSProcessEventReply{
+					{
+						ChargerSProfile:    "chrgs1",
+						AttributeSProfiles: []string{"attr1", "attr2"},
+						CGREvent: &utils.CGREvent{
+							Event: map[string]interface{}{
+								utils.CGRID: "cgrid2",
+							},
+						},
+					},
+				}
+				*reply.(*[]*ChrgSProcessEventReply) = rpl
+				return nil
+			},
+			utils.ResponderRefundIncrements: func(args, reply interface{}) error {
+				rpl := &Account{
+					ID: "cgrates.org:1001",
+					BalanceMap: map[string]Balances{
+						utils.MetaMonetary: {
+							&Balance{Value: 20},
+						}}}
+				*reply.(*Account) = *rpl
+				return nil
+			},
+			utils.ResponderDebit: func(args, reply interface{}) error {
+				rpl := &CallCost{}
+				*reply.(*CallCost) = *rpl
+				return nil
+			},
+			utils.ResponderGetCost: func(args, reply interface{}) error {
+				rpl := &CallCost{}
+				*reply.(*CallCost) = *rpl
+				return nil
+			},
+			utils.EeSv1ProcessEvent: func(args, reply interface{}) error {
+				rpl := &map[string]map[string]interface{}{}
+				*reply.(*map[string]map[string]interface{}) = *rpl
+				return nil
+			},
+			utils.ThresholdSv1ProcessEvent: func(args, reply interface{}) error {
+				rpl := &[]string{}
+				*reply.(*[]string) = *rpl
+				return nil
+			},
+			utils.StatSv1ProcessEvent: func(args, reply interface{}) error {
+				rpl := &[]string{}
+				*reply.(*[]string) = *rpl
+				return nil
+			},
+		},
+	}
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.AttributeSConnsCfg): clientconn,
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers):       clientconn,
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder):      clientconn,
+		utils.ConcatenatedKey(utils.MetaInternal, utils.EEsConnsCfg):        clientconn,
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds):     clientconn,
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats):          clientconn,
+	})
+
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	arg := &ArgV1ProcessEvent{
+		Flags: []string{utils.MetaAttributes, utils.MetaStats, utils.MetaExport, utils.MetaStore, utils.OptsThresholdS, utils.MetaThresholds, utils.MetaStats, utils.OptsChargerS, utils.MetaChargers, utils.OptsRALs, utils.MetaRALs, utils.OptsRerate, utils.MetaRerate, utils.OptsRefund, utils.MetaRefund},
+		CGREvent: utils.CGREvent{
+			ID: "TestV1ProcessEventNoTenant",
+			Event: map[string]interface{}{
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute,
+			},
+		},
+	}
+	var reply string
+	if err := cdrS.V1ProcessEvent(arg, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("expected %v,received %v", utils.OK, reply)
+	}
+}
+func TestCdrprocessEventsErrLog(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	buf := new(bytes.Buffer)
+	setlog := func(b *bytes.Buffer) {
+		utils.Logger.SetLogLevel(4)
+		utils.Logger.SetSyslog(nil)
+		log.SetOutput(b)
+	}
+	setlog(buf)
+	removelog := func() {
+		utils.Logger.SetLogLevel(0)
+		log.SetOutput(os.Stderr)
+	}
+	tmp := Cache
+	defer func() {
+		removelog()
+		Cache = tmp
+	}()
+	cfg.DataDbCfg().Items = map[string]*config.ItemOpt{
+		utils.CacheCDRsTBL: {
+			Limit:     3,
+			StaticTTL: true,
+		},
+	}
+	Cache.Clear(nil)
+	cfg.CdrsCfg().EEsConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEEs)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	clientConn := make(chan rpcclient.ClientConnector, 1)
+	clientConn <- &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.EeSv1ProcessEvent: func(args, reply interface{}) error {
+
+				return utils.ErrPartiallyExecuted
+			},
+		},
+	}
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEEs): clientConn,
+	})
+	cdrs := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+
+	evs := []*utils.CGREvent{
+		{ID: "TestV1ProcessEventNoTenant",
+			Event: map[string]interface{}{
+				utils.CGRID:        "test1",
+				utils.RunID:        utils.MetaDefault,
+				utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+				utils.RequestType:  utils.MetaPrepaid,
+				utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+				utils.Destination:  "+4986517174963",
+				utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+				utils.Usage:        123 * time.Minute},
+		}}
+	expLog := `with AttributeS`
+	if _, err := cdrs.processEvents(evs, true, true, true, true, true, true, true, true, true); err == nil || err != utils.ErrPartiallyExecuted {
+		t.Error(err)
+	} else if rcvLog := buf.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	removelog()
+	buf2 := new(bytes.Buffer)
+	setlog(buf2)
+	expLog = `with ChargerS`
+	if _, err := cdrs.processEvents(evs, true, false, true, true, true, true, true, true, true); err == nil || err != utils.ErrPartiallyExecuted {
+		t.Error(err)
+	} else if rcvLog := buf2.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	removelog()
+	buf3 := new(bytes.Buffer)
+	setlog(buf3)
+	Cache.Set(utils.CacheCDRIDs, utils.ConcatenatedKey("test1", utils.MetaDefault), "val", []string{}, true, utils.NonTransactional)
+	expLog = `with CacheS`
+	if _, err = cdrs.processEvents(evs, false, false, false, true, true, false, true, true, true); err == nil || err != utils.ErrExists {
+		t.Error(err)
+	} else if rcvLog := buf3.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	buf4 := new(bytes.Buffer)
+	removelog()
+	setlog(buf4)
+	evs[0].Event[utils.AnswerTime] = "time"
+	expLog = `converting event`
+	if _, err = cdrs.processEvents(evs, false, false, true, true, true, false, true, true, true); err == nil || err != utils.ErrPartiallyExecuted {
+		t.Error(err)
+	} else if rcvLog := buf4.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	buf5 := new(bytes.Buffer)
+	removelog()
+	setlog(buf5)
+	evs[0].Event[utils.AnswerTime] = time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC)
+	expLog = `refunding CDR`
+	if _, err = cdrs.processEvents(evs, false, false, true, false, false, false, false, false, false); err != nil {
+		t.Error(err)
+	} else if rcvLog := buf5.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	db.db.Set(utils.CacheCDRsTBL, utils.ConcatenatedKey("test1", utils.MetaDefault, "testV1CDRsRefundOutOfSessionCost"), "val", []string{}, true, utils.NonTransactional)
+
+	buf6 := new(bytes.Buffer)
+	removelog()
+	setlog(buf6)
+	expLog = `refunding CDR`
+	if _, err = cdrs.processEvents(evs, false, false, true, false, true, false, false, false, false); err == nil || err != utils.ErrExists {
+		t.Error(err)
+	} else if rcvLog := buf6.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	buf7 := new(bytes.Buffer)
+	removelog()
+	setlog(buf7)
+	expLog = `exporting cdr`
+	if _, err = cdrs.processEvents(evs, false, false, true, false, false, true, true, false, false); err == nil || err != utils.ErrPartiallyExecuted {
+		t.Error(err)
+	} else if rcvLog := buf7.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	buf8 := new(bytes.Buffer)
+	removelog()
+	setlog(buf8)
+	expLog = `processing event`
+	if _, err = cdrs.processEvents(evs, false, false, true, false, false, true, false, true, false); err == nil || err != utils.ErrPartiallyExecuted {
+		t.Error(err)
+	} else if rcvLog := buf8.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+	buf9 := new(bytes.Buffer)
+	removelog()
+	setlog(buf9)
+	expLog = `processing event`
+	if _, err = cdrs.processEvents(evs, false, false, true, false, false, true, false, false, true); err == nil || err != utils.ErrPartiallyExecuted {
+		t.Error(err)
+	} else if rcvLog := buf9.String(); !strings.Contains(rcvLog, expLog) {
+		t.Errorf("expected %v,received %v", expLog, rcvLog)
+	}
+}
+
+func TestV1ProcessCDR(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg: cfg,
+		cdrDb:  db,
+		dm:     dm,
+	}
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	cd := &CDR{
+		CGRID:       "cgrid1",
+		RunID:       "run1",
+		Category:    "category",
+		Tenant:      "cgrates.org",
+		RequestType: utils.PseudoPrepaid,
+	}
+	cdr := &CDRWithAPIOpts{
+		CDR:     cd,
+		APIOpts: map[string]interface{}{},
+	}
+	reply := utils.StringPointer("reply")
+
+	if err = cdrS.V1ProcessCDR(cdr, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{
+		Result: reply,
+		Error:  nil,
+	}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1ProcessCDR, cdr.CGRID, cdr.RunID))
+
+	if !has {
+		t.Errorf("has no value")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+
+}
+
+func TestV1ProcessCDRSet(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg: cfg,
+		cdrDb:  db,
+		dm:     dm,
+	}
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	cd := &CDR{
+		CGRID:       "cgrid1",
+		RunID:       "run1",
+		Category:    "category",
+		Tenant:      "cgrates.org",
+		RequestType: utils.PseudoPrepaid,
+	}
+	cdr := &CDRWithAPIOpts{
+		CDR:     cd,
+		APIOpts: map[string]interface{}{},
+	}
+	reply := utils.StringPointer("reply")
+	Cache.Set(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1ProcessCDR, cdr.CGRID, cdr.RunID),
+		&utils.CachedRPCResponse{Result: reply, Error: err},
+		nil, true, utils.NonTransactional)
+	if err = cdrS.V1ProcessCDR(cdr, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{
+		Result: reply,
+		Error:  nil,
+	}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1ProcessCDR, cdr.CGRID, cdr.RunID))
+
+	if !has {
+		t.Errorf("has no value")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+
+}
+
+func TestV1StoreSessionCost(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	clMock := clMock(func(_ string, _, _ interface{}) error {
+
+		return nil
+	})
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+
+	clientconn <- clMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{})
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	attr := &AttrCDRSStoreSMCost{
+		Cost: &SMCost{
+			CGRID:    "cgrid1",
+			RunID:    "run1",
+			OriginID: "originid",
+			CostDetails: &EventCost{
+				Usage: utils.DurationPointer(1 * time.Minute),
+				Cost:  utils.Float64Pointer(32.3),
+			},
+		},
+		CheckDuplicate: false,
+	}
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	reply := utils.StringPointer("reply")
+
+	if err = cdrS.V1StoreSessionCost(attr, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{
+		Result: reply,
+		Error:  nil,
+	}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1StoreSessionCost, attr.Cost.CGRID, attr.Cost.RunID))
+
+	if !has {
+		t.Errorf("has no value")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+	attr.Cost.CGRID = utils.EmptyString
+	if err := cdrS.V1StoreSessionCost(attr, reply); err == nil || err.Error() != fmt.Sprintf("%s: CGRID", utils.MandatoryInfoMissing) {
+		t.Error(err)
+	}
+}
+
+func TestV1StoreSessionCostSet(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	clMock := clMock(func(_ string, _, _ interface{}) error {
+
+		return nil
+	})
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+
+	clientconn <- clMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{})
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+
+	attr := &AttrCDRSStoreSMCost{
+		Cost: &SMCost{
+			CGRID:    "cgrid1",
+			RunID:    "run1",
+			OriginID: "originid",
+			CostDetails: &EventCost{
+				Usage: utils.DurationPointer(1 * time.Minute),
+				Cost:  utils.Float64Pointer(32.3),
+			},
+		},
+		CheckDuplicate: false,
+	}
+	cdrS := &CDRServer{
+
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	reply := utils.StringPointer("reply")
+	Cache.Set(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1StoreSessionCost, attr.Cost.CGRID, attr.Cost.RunID),
+		&utils.CachedRPCResponse{Result: reply, Error: nil},
+		nil, true, utils.NonTransactional)
+
+	if err = cdrS.V1StoreSessionCost(attr, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{
+		Result: reply,
+		Error:  nil,
+	}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1StoreSessionCost, attr.Cost.CGRID, attr.Cost.RunID))
+
+	if !has {
+		t.Errorf("has no value")
+	} else if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+	cdrS.guard = guardian.Guardian
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 0
+	attr.CheckDuplicate = true
+	if err = cdrS.V1StoreSessionCost(attr, reply); err != nil {
+		t.Error(err)
+	}
+
+}
+
+func TestV2StoreSessionCost(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderRefundRounding: func(args, reply interface{}) error {
+				rpl := &Account{}
+				*reply.(*Account) = *rpl
+				return nil
+			},
+		},
+	}
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg): clientconn,
+	})
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	args := &ArgsV2CDRSStoreSMCost{
+		CheckDuplicate: false,
+		Cost: &V2SMCost{
+			CGRID:      "cgrid",
+			RunID:      "runid",
+			OriginHost: "host",
+			OriginID:   "originid",
+			CostSource: "cgrates",
+			CostDetails: &EventCost{
+				CGRID:          "evcgrid",
+				RunID:          "evrunid",
+				StartTime:      time.Date(2021, 11, 1, 2, 0, 0, 0, time.UTC),
+				Usage:          utils.DurationPointer(122),
+				Cost:           utils.Float64Pointer(134),
+				Charges:        []*ChargingInterval{},
+				AccountSummary: &AccountSummary{},
+				Rating:         Rating{},
+				Accounting:     Accounting{},
+				RatingFilters:  RatingFilters{},
+				Rates:          ChargedRates{},
+				Timings:        ChargedTimings{},
+			},
+		},
+	}
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	var reply string
+
+	if err := cdrS.V2StoreSessionCost(args, &reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{Result: utils.StringPointer("OK"), Error: nil}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1StoreSessionCost, args.Cost.CGRID, args.Cost.RunID))
+
+	if !has {
+		t.Error("has no value")
+	}
+	if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("expected %+v,received %+v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+	args = &ArgsV2CDRSStoreSMCost{
+		Cost: &V2SMCost{},
+	}
+	if err = cdrS.V2StoreSessionCost(args, &reply); err == nil {
+		t.Error(err)
+	}
+}
+
+func TestV2StoreSessionCostSet(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderRefundRounding: func(args, reply interface{}) error {
+				rpl := &Account{}
+				*reply.(*Account) = *rpl
+				return nil
+			},
+		},
+	}
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg): clientconn,
+	})
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 1
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	config.SetCgrConfig(cfg)
+	Cache = NewCacheS(cfg, dm, nil)
+	args := &ArgsV2CDRSStoreSMCost{
+		CheckDuplicate: false,
+		Cost: &V2SMCost{
+			CGRID:      "cgrid",
+			RunID:      "runid",
+			OriginHost: "host",
+			OriginID:   "originid",
+			CostSource: "cgrates",
+			CostDetails: &EventCost{
+				CGRID:     "evcgrid",
+				RunID:     "evrunid",
+				StartTime: time.Date(2021, 11, 1, 2, 0, 0, 0, time.UTC),
+				Usage:     utils.DurationPointer(122),
+				Cost:      utils.Float64Pointer(134),
+				Charges: []*ChargingInterval{
+					{
+						RatingID: "rating1",
+						Increments: []*ChargingIncrement{
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id",
+								CompressFactor: 5,
+							},
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id",
+								CompressFactor: 5,
+							},
+						},
+						CompressFactor: 3,
+						usage:          utils.DurationPointer(10 * time.Minute),
+						ecUsageIdx:     utils.DurationPointer(4 * time.Minute),
+						cost:           utils.Float64Pointer(38),
+					},
+					{
+						RatingID: "rating2",
+						Increments: []*ChargingIncrement{
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id",
+								CompressFactor: 5,
+							},
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id",
+								CompressFactor: 5,
+							},
+						},
+						CompressFactor: 3,
+						usage:          utils.DurationPointer(10 * time.Minute),
+						ecUsageIdx:     utils.DurationPointer(4 * time.Minute),
+						cost:           utils.Float64Pointer(38),
+					},
+				},
+				AccountSummary: &AccountSummary{
+					Tenant:           "Tenant",
+					ID:               "acc_id",
+					BalanceSummaries: BalanceSummaries{},
+					AllowNegative:    false,
+					Disabled:         true,
+				},
+				Rating: Rating{
+					"rating1": &RatingUnit{},
+					"rating2": &RatingUnit{},
+				},
+				Accounting:    Accounting{},
+				RatingFilters: RatingFilters{},
+				Rates:         ChargedRates{},
+				Timings:       ChargedTimings{},
+			},
+		},
+	}
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	reply := utils.StringPointer("reply")
+	Cache.Set(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1StoreSessionCost, args.Cost.CGRID, args.Cost.RunID),
+		&utils.CachedRPCResponse{Result: reply, Error: nil},
+		nil, true, utils.NonTransactional)
+
+	if err := cdrS.V2StoreSessionCost(args, reply); err != nil {
+		t.Error(err)
+	}
+	exp := &utils.CachedRPCResponse{Result: reply, Error: nil}
+	rcv, has := Cache.Get(utils.CacheRPCResponses, utils.ConcatenatedKey(utils.CDRsV1StoreSessionCost, args.Cost.CGRID, args.Cost.RunID))
+
+	if !has {
+		t.Error("has no value")
+	}
+
+	if !reflect.DeepEqual(exp, rcv) {
+		t.Errorf("expected %+v,received %+v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+}
+
+func TestV1RateCDRSErr(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.ChargerSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	arg := &ArgRateCDRs{
+		Flags: []string{utils.MetaStore, utils.MetaExport, utils.MetaThresholds, utils.MetaStats, utils.MetaChargers, utils.MetaAttributes},
+
+		Tenant:  "cgrates.org",
+		APIOpts: map[string]interface{}{},
+	}
+	var reply string
+
+	if err := cdrS.V1RateCDRs(arg, &reply); err == nil || err != utils.ErrNotFound {
+		t.Error(err)
+	}
+}
+
+func TestV1GetCDRsErr(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	defer func() {
+		config.SetCgrConfig(config.NewDefaultCGRConfig())
+	}()
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: nil,
+		cdrDb:   NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
+		dm:      dm,
+	}
+	args := utils.RPCCDRsFilterWithAPIOpts{
+
+		RPCCDRsFilter: &utils.RPCCDRsFilter{
+			CGRIDs:         []string{"CGRIDs"},
+			NotCGRIDs:      []string{"NotCGRIDs"},
+			OriginHosts:    []string{"OriginHosts"},
+			SetupTimeStart: "time",
+			SetupTimeEnd:   "2020-04-18T11:46:26.371Z",
+		},
+		Tenant:  "cgrates.org",
+		APIOpts: map[string]interface{}{},
+	}
+	var cdrs *[]*CDR
+	if err := cdrS.V1GetCDRs(args, cdrs); err == nil {
+		t.Error(utils.NewErrServerError(utils.ErrNotFound))
+	}
+	args.RPCCDRsFilter.SetupTimeStart = ""
+	if err := cdrS.V1GetCDRs(args, cdrs); err == nil || err.Error() != fmt.Sprintf("SERVER_ERROR: %s", utils.ErrNotFound) {
+		t.Error(utils.NewErrServerError(utils.ErrNotFound))
+	}
+}
+func TestGetCostFromRater2(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	cfg.CdrsCfg().SchedulerConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.SchedulerConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderDebit: func(args, reply interface{}) error {
+
+				return utils.ErrAccountNotFound
+			},
+			utils.SchedulerSv1ExecuteActionPlans: func(args, reply interface{}) error {
+				rpl := "reply"
+				*reply.(*string) = rpl
+				return nil
+			},
+		},
+	}
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg):     clientconn,
+		utils.ConcatenatedKey(utils.MetaInternal, utils.SchedulerConnsCfg): clientconn,
+	})
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	cdr := &CDRWithAPIOpts{
+
+		CDR: &CDR{
+			ToR:         "tor",
+			Tenant:      "tenant",
+			Category:    "cdr",
+			Subject:     "cdrsubj",
+			Account:     "acc_cdr",
+			Destination: "acc_dest",
+			RequestType: utils.MetaDynaprepaid,
+			Usage:       1 * time.Minute,
 		},
 		APIOpts: map[string]interface{}{},
 	}
 
-	evs := []*utils.EventsWithOpts{
-		{
-			Event: map[string]interface{}{
-				utils.Cost: 666,
+	if _, err := cdrS.getCostFromRater(cdr); err == nil || err != utils.ErrAccountNotFound {
+		t.Error(err)
+	}
+}
+
+func TestGetCostFromRater3(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	ccMock := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderGetCost: func(args, reply interface{}) error {
+
+				return nil
 			},
 		},
 	}
-	Cache.Set(context.Background(), utils.CacheRPCResponses, "CDRsV1.ProcessEventWithGet:testID",
-		&utils.CachedRPCResponse{Result: &evs, Error: nil},
-		nil, true, utils.NonTransactional)
-	var reply []*utils.EventsWithOpts
-	err := newCDRSrv.V1ProcessEventWithGet(context.Background(), cgrEv, &reply)
-	if err != nil {
-		t.Errorf("\nExpected <%+v> \n, received <%+v>", nil, err)
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMock
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg): clientconn,
+	})
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	cdr := &CDRWithAPIOpts{
+
+		CDR: &CDR{
+			ToR:         "tor",
+			Tenant:      "tenant",
+			Category:    "cdr",
+			Subject:     "cdrsubj",
+			Account:     "acc_cdr",
+			Destination: "acc_dest",
+			RequestType: "default",
+			Usage:       1 * time.Minute,
+		},
+		APIOpts: map[string]interface{}{},
 	}
 
-	expectedVal := []*utils.EventsWithOpts{
-		{
-			Event: map[string]interface{}{
-				utils.Cost: 666,
+	if _, err := cdrS.getCostFromRater(cdr); err == nil || err != rpcclient.ErrUnsupporteServiceMethod {
+		t.Errorf("expected %+v,received %v", rpcclient.ErrUnsupporteServiceMethod, err)
+	}
+}
+
+func TestV2StoreSessionCost2(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CacheCfg().Partitions[utils.CacheRPCResponses].Limit = 0
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	ccMOck := &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderRefundRounding: func(args, reply interface{}) error {
+				rpl := &Account{}
+				*reply.(*Account) = *rpl
+				return nil
 			},
 		},
 	}
-	if !reflect.DeepEqual(expectedVal, reply) {
-		t.Errorf("Expected %v, received %v", utils.ToJSON(expectedVal), utils.ToJSON(reply))
+	clientconn := make(chan rpcclient.ClientConnector, 1)
+	clientconn <- ccMOck
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg): clientconn,
+	})
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+
+	args := &ArgsV2CDRSStoreSMCost{
+
+		CheckDuplicate: false,
+		Cost: &V2SMCost{
+			CGRID:      "cgrid",
+			RunID:      "runid",
+			OriginHost: "host",
+			OriginID:   "originid",
+			CostSource: "cgrates",
+			CostDetails: &EventCost{
+				CGRID:     "evcgrid",
+				RunID:     "evrunid",
+				StartTime: time.Date(2021, 11, 1, 2, 0, 0, 0, time.UTC),
+				Usage:     utils.DurationPointer(122),
+				Cost:      utils.Float64Pointer(134),
+				Charges: []*ChargingInterval{
+					{
+
+						RatingID: utils.MetaRounding,
+						Increments: []*ChargingIncrement{
+							{
+
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id",
+								CompressFactor: 5,
+							},
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id2",
+								CompressFactor: 5,
+							},
+						},
+						CompressFactor: 3,
+						usage:          utils.DurationPointer(10 * time.Minute),
+						ecUsageIdx:     utils.DurationPointer(4 * time.Minute),
+						cost:           utils.Float64Pointer(38),
+					},
+					{
+						RatingID: utils.MetaRounding,
+
+						Increments: []*ChargingIncrement{
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id",
+								CompressFactor: 5,
+							},
+							{
+								Usage:          5 * time.Minute,
+								Cost:           23,
+								AccountingID:   "acc_id2",
+								CompressFactor: 5,
+							},
+						},
+						CompressFactor: 3,
+						usage:          utils.DurationPointer(10 * time.Minute),
+						ecUsageIdx:     utils.DurationPointer(4 * time.Minute),
+						cost:           utils.Float64Pointer(38),
+					},
+				},
+				AccountSummary: &AccountSummary{
+					Tenant:           "Tenant",
+					ID:               "acc_id",
+					BalanceSummaries: BalanceSummaries{},
+					AllowNegative:    false,
+					Disabled:         true,
+				},
+
+				Accounting: Accounting{
+					"acc_id": &BalanceCharge{
+						RatingID: utils.MetaRounding,
+					},
+					"acc_id2": &BalanceCharge{
+						RatingID: utils.MetaRounding,
+					},
+				},
+				RatingFilters: RatingFilters{
+					"filtersid": RatingMatchedFilters{
+						utils.Subject:               "string",
+						utils.DestinationPrefixName: "string",
+						utils.DestinationID:         "dest",
+						utils.RatingPlanID:          "rating",
+					},
+					"ratefilter": RatingMatchedFilters{
+						utils.Subject:               "string",
+						utils.DestinationPrefixName: "string",
+						utils.DestinationID:         "dest",
+						utils.RatingPlanID:          "rating",
+					},
+				},
+				Rates:   ChargedRates{},
+				Timings: ChargedTimings{},
+				Rating: Rating{
+					utils.MetaRounding: &RatingUnit{
+						ConnectFee:       21,
+						RoundingMethod:   "method",
+						RoundingDecimals: 3,
+						MaxCost:          22,
+						MaxCostStrategy:  "sr",
+						RatesID:          "rates",
+						RatingFiltersID:  "filtersid",
+					},
+				},
+			},
+		},
+		Tenant:  "cgrates.org",
+		APIOpts: map[string]interface{}{},
+	}
+	var reply string
+	if err := cdrS.V2StoreSessionCost(args, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("expected %+v,received %+v", utils.OK, reply)
+	}
+	clientconn2 := make(chan rpcclient.ClientConnector, 1)
+	clientconn2 <- &ccMock{
+
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderRefundRounding: func(args, reply interface{}) error {
+				rpl := &Account{}
+				*reply.(*Account) = *rpl
+				return utils.ErrNotFound
+			},
+		},
+	}
+	cdrS.connMgr.rpcInternal[utils.ConcatenatedKey(utils.MetaInternal, utils.RateSConnsCfg)] = clientconn2
+
+	if err := cdrS.V2StoreSessionCost(args, &reply); err != nil {
+		t.Error(err)
+	}
+
+}
+func TestV1RateCDRSSuccesful(t *testing.T) {
+	Cache.Clear(nil)
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.ChargerSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	cdr := &CDR{
+		CGRID:       "Cdr1",
+		OrderID:     123,
+		ToR:         utils.MetaVoice,
+		OriginID:    "OriginCDR1",
+		OriginHost:  "192.168.1.1",
+		Source:      "test",
+		RequestType: utils.MetaRated,
+		Category:    "call",
+		Account:     "1001",
+		Subject:     "1001",
+		Destination: "+4986517174963",
+		RunID:       utils.MetaDefault,
+		Usage:       time.Duration(0),
+		ExtraFields: map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"},
+		Cost:        1.01,
+	}
+	if err := cdrS.cdrDb.SetCDR(cdr, true); err != nil {
+		t.Error(err)
+	}
+	arg := &ArgRateCDRs{
+		Flags: []string{utils.MetaStore, utils.MetaExport, utils.MetaThresholds, utils.MetaStats, utils.MetaChargers, utils.MetaAttributes},
+		RPCCDRsFilter: utils.RPCCDRsFilter{
+			CGRIDs: []string{"Cdr1"},
+		},
+		Tenant:  "cgrates.org",
+		APIOpts: map[string]interface{}{},
+	}
+	var reply *string
+
+	if err := cdrS.V1RateCDRs(arg, reply); err == nil {
+		t.Error(err)
+	}
+}
+
+func TestCdrServerStoreSMCost(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.ChargerSConnsCfg)}
+	db := NewInternalDB(nil, nil, true, map[string]*config.ItemOpt{
+		utils.CacheSessionCostsTBL: {
+			Limit:     2,
+			TTL:       2 * time.Minute,
+			StaticTTL: true,
+			Remote:    false,
+			Replicate: true,
+		},
+	})
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+
+	smCost := &SMCost{
+		CGRID:      "cgrid",
+		RunID:      "runid",
+		OriginHost: "originhost",
+		OriginID:   "origin",
+		CostSource: "cost",
+		Usage:      1 * time.Minute,
+		CostDetails: &EventCost{
+			CGRID:          "ecId",
+			RunID:          "ecRunId",
+			StartTime:      time.Date(2022, 12, 1, 12, 0, 0, 0, time.UTC),
+			Usage:          utils.DurationPointer(1 * time.Hour),
+			Cost:           utils.Float64Pointer(12.1),
+			Charges:        []*ChargingInterval{},
+			AccountSummary: &AccountSummary{},
+			Accounting:     Accounting{},
+			RatingFilters:  RatingFilters{},
+			Rates:          ChargedRates{},
+		},
+	}
+	guardian := guardian.GuardianLocker{}
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+		guard:   &guardian,
+	}
+	if err := cdrS.cdrDb.SetSMCost(smCost); err != nil {
+		t.Error(err)
 	}
 
 }
 
-func TestCDRServerListenAndServe(t *testing.T) {
-
+func TestCdrSRateCDR(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
-	connMng := NewConnManager(cfg)
-	dm := NewDataManager(data, cfg.CacheCfg(), nil)
-	fltrs := NewFilterS(cfg, connMng, dm)
-	newCDRSrv := NewCDRServer(cfg, dm, fltrs, connMng)
-
-	stopChan := make(chan struct{}, 1)
-
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		stopChan <- struct{}{}
+	tmp := Cache
+	defer func() {
+		config.SetCgrConfig(config.NewDefaultCGRConfig())
+		Cache = tmp
 	}()
+	Cache.Clear(nil)
+	cfg.CdrsCfg().SMCostRetries = 1
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.ChargerSConnsCfg)}
+	cfg.CdrsCfg().RaterConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaRALs)}
+	db := NewInternalDB(nil, nil, true, map[string]*config.ItemOpt{
+		utils.CacheSessionCostsTBL: {
+			Limit:     2,
+			TTL:       2 * time.Minute,
+			StaticTTL: true,
+			Remote:    false,
+			Replicate: true,
+		},
+	})
+	clientConn := make(chan rpcclient.ClientConnector, 1)
+	clientConn <- &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ResponderDebit: func(args, reply interface{}) error {
+				cc := &CallCost{
+					Category:    "generic",
+					Tenant:      "cgrates.org",
+					Subject:     "1001",
+					Account:     "1001",
+					Destination: "data",
+					ToR:         "*data",
+					Cost:        0,
+				}
+				*reply.(*CallCost) = *cc
+				return nil
+			},
+		},
+	}
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaRALs): clientConn,
+	})
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	smc := &SMCost{
+		CGRID:       "cgrid",
+		RunID:       "runid",
+		OriginHost:  "originHost",
+		OriginID:    "originID",
+		CostSource:  "cost_source",
+		Usage:       2 * time.Minute,
+		CostDetails: &EventCost{},
+	}
+	if err := cdrS.cdrDb.SetSMCost(smc); err != nil {
+		t.Error(err)
+	}
+	db.db.Set(utils.CacheSessionCostsTBL, "cgrates:item1", &SMCost{
+		CGRID:      "CGRID",
+		RunID:      utils.MetaDefault,
+		OriginHost: utils.FreeSWITCHAgent,
+		OriginID:   "Origin1",
+		Usage:      time.Second,
+		CostSource: utils.MetaSessionS,
+	}, []string{utils.ConcatenatedKey(utils.CGRID, "CGRID_22"),
+		utils.ConcatenatedKey(utils.RunID, "RUN_ID1"),
+		utils.ConcatenatedKey(utils.OriginHost, "ORG_Host1")}, true, utils.NonTransactional)
+	cdrOpts := &CDRWithAPIOpts{
+		CDR: &CDR{
+			CGRID:       "CGRID_22",
+			RunID:       "RUN_ID1",
+			OriginHost:  "ORG_Host1",
+			OrderID:     222,
+			Usage:       4 * time.Second,
+			RequestType: utils.Prepaid,
+			ExtraFields: map[string]string{
+				utils.LastUsed: "extra",
+			},
+		},
+	}
 
-	newCDRSrv.ListenAndServe(stopChan)
+	if _, err := cdrS.rateCDR(cdrOpts); err != nil {
+		t.Error(err)
+	}
 
+	cdrOpts.ExtraFields = map[string]string{}
+	cdrOpts.Usage = 0
+	if _, err := cdrS.rateCDR(cdrOpts); err != nil {
+		t.Error(err)
+	}
+
+	cdrOpts.CostDetails = &EventCost{
+		CGRID:     "7636f3f1a06dffa038ba7900fb57f52d28830a24",
+		RunID:     utils.MetaDefault,
+		StartTime: time.Date(2018, 7, 27, 0, 59, 21, 0, time.UTC),
+		Usage:     utils.DurationPointer(2 * time.Second),
+		Charges: []*ChargingInterval{
+			{
+				RatingID: "cc68da4",
+				Increments: []*ChargingIncrement{
+					{
+						Usage:          102400,
+						AccountingID:   "0d87a64",
+						CompressFactor: 103,
+					},
+				},
+				CompressFactor: 1,
+			},
+		},
+		AccountSummary: &AccountSummary{
+			Tenant: "cgrates.org",
+			ID:     "dan",
+			BalanceSummaries: []*BalanceSummary{
+				{
+					UUID:  "9a767726-fe69-4940-b7bd-f43de9f0f8a5",
+					ID:    "addon_data",
+					Type:  utils.MetaData,
+					Value: 10726871040},
+			},
+		},
+	}
+	if _, err := cdrS.rateCDR(cdrOpts); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestChrgrSProcessEvent(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CdrsCfg().ChargerSConns = []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)}
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	clienConn := make(chan rpcclient.ClientConnector, 1)
+	clienConn <- &ccMock{
+		calls: map[string]func(args interface{}, reply interface{}) error{
+			utils.ChargerSv1ProcessEvent: func(args, reply interface{}) error {
+				*reply.(*[]*ChrgSProcessEventReply) = []*ChrgSProcessEventReply{
+					{
+						ChargerSProfile:    "Charger1",
+						AttributeSProfiles: []string{"cgrates.org:ATTR_1001_SIMPLEAUTH"},
+						AlteredFields:      []string{utils.MetaReqRunID, "*req.Password"},
+						CGREvent: &utils.CGREvent{ // matching Charger1
+							Tenant: "cgrates.org",
+							ID:     "event1",
+							Event: map[string]interface{}{
+								utils.AccountField: "1001",
+								"Password":         "CGRateS.org",
+								"RunID":            utils.MetaDefault,
+							},
+							APIOpts: map[string]interface{}{
+								utils.OptsContext:              "simpleauth",
+								utils.MetaSubsys:               utils.MetaChargers,
+								utils.OptsAttributesProfileIDs: []string{"ATTR_1001_SIMPLEAUTH"},
+							},
+						},
+					},
+				}
+				return nil
+			},
+		},
+	}
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers): clienConn,
+	})
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		cdrDb:   db,
+		dm:      dm,
+		connMgr: connMgr,
+	}
+	cgrEv := utils.CGREvent{
+		ID: "TestV1ProcessEventNoTenant",
+		Event: map[string]interface{}{
+			utils.CGRID:        "test1",
+			utils.RunID:        utils.MetaDefault,
+			utils.OriginID:     "testV1CDRsRefundOutOfSessionCost",
+			utils.RequestType:  utils.MetaPrepaid,
+			utils.AccountField: "testV1CDRsRefundOutOfSessionCost",
+			utils.Destination:  "+4986517174963",
+			utils.AnswerTime:   time.Date(2019, 11, 27, 12, 21, 26, 0, time.UTC),
+			utils.Usage:        123 * time.Minute,
+		},
+	}
+	expcgrEv := []*utils.CGREvent{
+		{
+			Tenant: "cgrates.org",
+			ID:     "event1",
+			Event: map[string]interface{}{
+				utils.AccountField: "1001",
+				"Password":         "CGRateS.org",
+				"RunID":            utils.MetaDefault,
+			},
+			APIOpts: map[string]interface{}{
+				utils.OptsContext:              "simpleauth",
+				utils.MetaSubsys:               utils.MetaChargers,
+				utils.OptsAttributesProfileIDs: []string{"ATTR_1001_SIMPLEAUTH"},
+			},
+		},
+	}
+	if val, err := cdrS.chrgrSProcessEvent(&cgrEv); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(val, expcgrEv) {
+		t.Errorf("expected %v,received %v", utils.ToJSON(expcgrEv), utils.ToJSON(val))
+	}
+}
+
+func TestCdrSCall123(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+
+	tmpConnMgr := connMgr
+	defer func() {
+		connMgr = tmpConnMgr
+		config.SetCgrConfig(config.NewDefaultCGRConfig())
+	}()
+	db := NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := NewDataManager(db, cfg.CacheCfg(), nil)
+	cdrS := &CDRServer{
+		cgrCfg:  cfg,
+		connMgr: connMgr,
+		dm:      dm,
+		cdrDb:   db,
+	}
+	clientConn := make(chan rpcclient.ClientConnector, 1)
+	clientConn <- cdrS
+	connMgr := NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{})
+	config.SetCgrConfig(cfg)
+	SetConnManager(connMgr)
+	var reply string
+	attr := &AttrCDRSStoreSMCost{
+		Cost: &SMCost{
+			CGRID:    "cgrid1",
+			RunID:    "run1",
+			OriginID: "originid",
+			CostDetails: &EventCost{
+				Usage: utils.DurationPointer(1 * time.Minute),
+				Cost:  utils.Float64Pointer(32.3),
+			},
+		},
+		CheckDuplicate: false,
+	}
+	if err := cdrS.Call(utils.CDRsV1StoreSessionCost, attr, &reply); err != nil {
+		t.Error(err)
+	}
 }

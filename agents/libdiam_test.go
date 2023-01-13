@@ -25,10 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/Omnitouch/go-diameter/v4/diam"
 	"github.com/Omnitouch/go-diameter/v4/diam/avp"
 	"github.com/Omnitouch/go-diameter/v4/diam/datatype"
@@ -1147,33 +1146,33 @@ func TestFilterWithDiameterDP(t *testing.T) {
 		}})
 	dP := newDADataProvider(nil, avps)
 	cfg := config.NewDefaultCGRConfig()
-	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items),
+	dm := engine.NewDataManager(engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items),
 		config.CgrConfig().CacheCfg(), nil)
 	filterS := engine.NewFilterS(cfg, nil, dm)
 	agReq := NewAgentRequest(dP, nil, nil, nil, nil, nil, "cgrates.org", "", filterS, nil)
 
-	if pass, err := filterS.Pass(context.TODO(), "cgrates.org",
+	if pass, err := filterS.Pass("cgrates.org",
 		[]string{"*exists:~*req.Multiple-Services-Credit-Control.Rating-Group[~Rating-Group(99)]:"}, agReq); err != nil {
 		t.Error(err)
 	} else if !pass {
 		t.Errorf("Exptected true, received: %+v", pass)
 	}
 
-	if pass, err := filterS.Pass(context.TODO(), "cgrates.org",
+	if pass, err := filterS.Pass("cgrates.org",
 		[]string{"*exists:~*req.Multiple-Services-Credit-Control.Rating-Group[~Rating-Group(10)]:"}, agReq); err != nil {
 		t.Error(err)
 	} else if pass {
 		t.Errorf("Exptected false, received: %+v", pass)
 	}
 
-	if pass, err := filterS.Pass(context.TODO(), "cgrates.org",
+	if pass, err := filterS.Pass("cgrates.org",
 		[]string{"*string:~*req.Multiple-Services-Credit-Control.Rating-Group[~Rating-Group(10)]:12"}, agReq); err != nil {
 		t.Error(err)
 	} else if pass {
 		t.Errorf("Exptected false, received: %+v", pass)
 	}
 
-	if pass, err := filterS.Pass(context.TODO(), "cgrates.org",
+	if pass, err := filterS.Pass("cgrates.org",
 		[]string{"*string:~*req.Multiple-Services-Credit-Control.Rating-Group[~Rating-Group(1)]:1"}, agReq); err != nil {
 		t.Error(err)
 	} else if !pass {

@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestEESClone(t *testing.T) {
@@ -32,7 +32,7 @@ func TestEESClone(t *testing.T) {
      "enabled": true,						
 	"attributes_conns":["*internal", "*conn1"],					
 	"cache": {
-		"*fileCSV": {"limit": -2, "ttl": "3s", "static_ttl": true},
+		"*file_csv": {"limit": -2, "ttl": "3s", "static_ttl": true},
 	},
 	"exporters": [
 		{
@@ -40,8 +40,60 @@ func TestEESClone(t *testing.T) {
 			"type": "*none",									
 			"export_path": "/var/spool/cgrates/ees",			
 			"opts": {
-              "csvFieldSeparator": ";"
-             },											
+				"csvFieldSeparator": ";",					// separator used when reading the fields
+				"mysqlDSNParams": {
+					"allowOldPasswords": "true",
+					"allowNativePasswords": "true",
+				},
+			"elsIndex":"test",
+			"elsIfPrimaryTerm":0,
+			"elsIfSeqNo":0,
+			"elsOpType":"test2",
+			"elsPipeline":"test3",
+			"elsRouting":"test4",
+			"elsTimeout":"1m",
+			"elsVersion":2,
+			"elsVersionType":"test5",
+			"elsWaitForActiveShards":"test6",
+			"sqlMaxIdleConns":4,
+			"sqlMaxOpenConns":6,
+			"sqlConnMaxLifetime":"1m",
+			"sqlTableName":"table",
+			"sqlDBName":"db",
+			"pgSSLMode":"pg",
+			"awsToken":"token",
+			"s3FolderPath":"s3",
+			"natsJetStream":true,
+			"natsSubject":"nat",
+			"natsJWTFile":"jwt",
+			"natsSeedFile":"seed",
+			"natsCertificateAuthority":"NATS",
+			"natsClientCertificate":"NATSClient",
+			"natsClientKey":"key",
+			"natsJetStreamMaxWait":"1m",
+			"kafkaTopic":"kafka",
+			"amqpQueueID":"id",
+			"amqpRoutingKey":"key",
+			"amqpExchangeType":"type",
+			"amqpExchange":"exchange",
+			"awsRegion":"eu",
+			"awsKey":"key",
+			"awsSecret":"secretkey",
+			"sqsQueueID":"sqsid",
+			"s3BucketID":"s3",
+			"rpcCodec":"rpc",
+			"serviceMethod":"service",
+			"keyPath":"path",
+			"certPath":"certpath",
+			"caPath":"capath",
+			"tls":true,
+			"connIDs":["id1","id2"],
+			"rpcConnTimeout":"1m",
+			"rpcReplyTimeout":"1m",
+			"rpcAPIOpts":{
+				"key":"val",
+			}
+			},											
 			"timezone": "local",										
 			"filters": ["randomFiletrs"],										
 			"flags": [],										
@@ -51,15 +103,16 @@ func TestEESClone(t *testing.T) {
 			"attempts": 2,										
 			"field_separator": ",",								
 			"fields":[											
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
-                {"tag": "*originID", "path": "*hdr.*originID", "type": "*variable", "value": "~*opts.*originID"},
-                {"tag": "*originID", "path": "*trl.*originID", "type": "*variable", "value": "~*opts.*originID"},
-                {"tag": "*originID", "path": "*uch.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
+                {"tag": "CGRID", "path": "*hdr.CGRID", "type": "*variable", "value": "~*req.CGRID"},
+                {"tag": "CGRID", "path": "*trl.CGRID", "type": "*variable", "value": "~*req.CGRID"},
+                {"tag": "CGRID", "path": "*uch.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 			],
 		},
 	],
 },
 }`
+
 	expected := &EEsCfg{
 		Enabled:         true,
 		AttributeSConns: []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), "*conn1"},
@@ -90,7 +143,6 @@ func TestEESClone(t *testing.T) {
 				trailerFields:  []*FCTemplate{},
 				Opts:           &EventExporterOpts{},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 			},
 			{
 				ID:             utils.CGRateSLwr,
@@ -103,73 +155,125 @@ func TestEESClone(t *testing.T) {
 				AttributeSIDs:  []string{"randomID"},
 				Flags:          utils.FlagsWithParams{},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 				Fields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*exp.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*exp.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*hdr.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*hdr.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*trl.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*trl.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*uch.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*uch.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 				},
 				contentFields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*exp.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*exp.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*uch.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*uch.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 				},
 				headerFields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*hdr.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*hdr.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 				},
 				trailerFields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*trl.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*trl.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 				},
 				Opts: &EventExporterOpts{
+
 					CSVFieldSeparator: utils.StringPointer(utils.InfieldSep),
+					MYSQLDSNParams: map[string]string{
+						"allowOldPasswords":    "true",
+						"allowNativePasswords": "true",
+					},
+					ElsIndex:                 utils.StringPointer("test"),
+					ElsIfPrimaryTerm:         utils.IntPointer(0),
+					ElsIfSeqNo:               utils.IntPointer(0),
+					ElsOpType:                utils.StringPointer("test2"),
+					ElsPipeline:              utils.StringPointer("test3"),
+					ElsRouting:               utils.StringPointer("test4"),
+					ElsTimeout:               utils.DurationPointer(1 * time.Minute),
+					ElsVersion:               utils.IntPointer(2),
+					ElsVersionType:           utils.StringPointer("test5"),
+					ElsWaitForActiveShards:   utils.StringPointer("test6"),
+					SQLMaxIdleConns:          utils.IntPointer(4),
+					SQLConnMaxLifetime:       utils.DurationPointer(1 * time.Minute),
+					SQLTableName:             utils.StringPointer("table"),
+					SQLDBName:                utils.StringPointer("db"),
+					PgSSLMode:                utils.StringPointer("pg"),
+					KafkaTopic:               utils.StringPointer("kafka"),
+					SQLMaxOpenConns:          utils.IntPointer(6),
+					AWSToken:                 utils.StringPointer("token"),
+					S3FolderPath:             utils.StringPointer("s3"),
+					NATSJetStream:            utils.BoolPointer(true),
+					NATSSubject:              utils.StringPointer("nat"),
+					NATSJWTFile:              utils.StringPointer("jwt"),
+					NATSSeedFile:             utils.StringPointer("seed"),
+					NATSCertificateAuthority: utils.StringPointer("NATS"),
+					NATSClientCertificate:    utils.StringPointer("NATSClient"),
+					NATSClientKey:            utils.StringPointer("key"),
+					NATSJetStreamMaxWait:     utils.DurationPointer(1 * time.Minute),
+					AMQPRoutingKey:           utils.StringPointer("key"),
+					AMQPQueueID:              utils.StringPointer("id"),
+					AMQPExchangeType:         utils.StringPointer("type"),
+					AMQPExchange:             utils.StringPointer("exchange"),
+					AWSRegion:                utils.StringPointer("eu"),
+					AWSKey:                   utils.StringPointer("key"),
+					AWSSecret:                utils.StringPointer("secretkey"),
+					S3BucketID:               utils.StringPointer("s3"),
+					SQSQueueID:               utils.StringPointer("sqsid"),
+					RPCCodec:                 utils.StringPointer("rpc"),
+					ServiceMethod:            utils.StringPointer("service"),
+					KeyPath:                  utils.StringPointer("path"),
+					CertPath:                 utils.StringPointer("certpath"),
+					CAPath:                   utils.StringPointer("capath"),
+					TLS:                      utils.BoolPointer(true),
+					ConnIDs:                  utils.SliceStringPointer([]string{"id1", "id2"}),
+					RPCConnTimeout:           utils.DurationPointer(1 * time.Minute),
+					RPCReplyTimeout:          utils.DurationPointer(1 * time.Minute),
+					RPCAPIOpts: map[string]interface{}{
+						"key": "val",
+					},
 				},
 			},
 		},
@@ -212,7 +316,7 @@ func TestEventExporterFieldloadFromJsonCfg(t *testing.T) {
 	}
 	expected := "invalid converter terminator in rule: <a{*>"
 	jsonCfg := NewDefaultCGRConfig()
-	if err = jsonCfg.eesCfg.loadFromJSONCfg(eventExporterJSON, jsonCfg.templates, jsonCfg.generalCfg.RSRSep); err == nil || err.Error() != expected {
+	if err = jsonCfg.eesCfg.loadFromJSONCfg(eventExporterJSON, jsonCfg.templates, jsonCfg.generalCfg.RSRSep, jsonCfg.dfltEvExp); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 }
@@ -231,7 +335,7 @@ func TestEventExporterFieldloadFromJsonCfg1(t *testing.T) {
 	}
 	expected := "no template with id: <>"
 	jsonCfg := NewDefaultCGRConfig()
-	if err = jsonCfg.eesCfg.loadFromJSONCfg(eventExporterJSON, jsonCfg.templates, jsonCfg.generalCfg.RSRSep); err == nil || err.Error() != expected {
+	if err = jsonCfg.eesCfg.loadFromJSONCfg(eventExporterJSON, jsonCfg.templates, jsonCfg.generalCfg.RSRSep, jsonCfg.dfltEvExp); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 }
@@ -245,9 +349,105 @@ func TestEventExporterloadFromJsonCfg(t *testing.T) {
 	}
 }
 
+func TestEventExporterOptsloadFromJsonCfg(t *testing.T) {
+
+	eventExporterOptsJSON := &EventExporterOptsJson{
+
+		ElsIndex:                 utils.StringPointer("test"),
+		ElsIfPrimaryTerm:         utils.IntPointer(0),
+		ElsIfSeqNo:               utils.IntPointer(0),
+		ElsOpType:                utils.StringPointer("test2"),
+		ElsPipeline:              utils.StringPointer("test3"),
+		ElsRouting:               utils.StringPointer("test4"),
+		ElsTimeout:               utils.StringPointer("1m"),
+		ElsVersion:               utils.IntPointer(2),
+		ElsVersionType:           utils.StringPointer("test5"),
+		ElsWaitForActiveShards:   utils.StringPointer("test6"),
+		SQLMaxIdleConns:          utils.IntPointer(4),
+		SQLMaxOpenConns:          utils.IntPointer(6),
+		SQLConnMaxLifetime:       utils.StringPointer("1m"),
+		SQLTableName:             utils.StringPointer("table"),
+		SQLDBName:                utils.StringPointer("db"),
+		PgSSLMode:                utils.StringPointer("pg"),
+		AWSToken:                 utils.StringPointer("token"),
+		S3FolderPath:             utils.StringPointer("s3"),
+		NATSJetStream:            utils.BoolPointer(true),
+		NATSSubject:              utils.StringPointer("nat"),
+		NATSJWTFile:              utils.StringPointer("jwt"),
+		NATSSeedFile:             utils.StringPointer("seed"),
+		NATSCertificateAuthority: utils.StringPointer("NATS"),
+		NATSClientCertificate:    utils.StringPointer("NATSClient"),
+		NATSClientKey:            utils.StringPointer("key"),
+		NATSJetStreamMaxWait:     utils.StringPointer("1m"),
+	}
+
+	expected := &EventExporterOpts{
+
+		ElsIndex:                 utils.StringPointer("test"),
+		ElsIfPrimaryTerm:         utils.IntPointer(0),
+		ElsIfSeqNo:               utils.IntPointer(0),
+		ElsOpType:                utils.StringPointer("test2"),
+		ElsPipeline:              utils.StringPointer("test3"),
+		ElsRouting:               utils.StringPointer("test4"),
+		ElsTimeout:               utils.DurationPointer(1 * time.Minute),
+		ElsVersion:               utils.IntPointer(2),
+		ElsVersionType:           utils.StringPointer("test5"),
+		ElsWaitForActiveShards:   utils.StringPointer("test6"),
+		SQLMaxIdleConns:          utils.IntPointer(4),
+		SQLMaxOpenConns:          utils.IntPointer(6),
+		SQLConnMaxLifetime:       utils.DurationPointer(1 * time.Minute),
+		SQLTableName:             utils.StringPointer("table"),
+		SQLDBName:                utils.StringPointer("db"),
+		PgSSLMode:                utils.StringPointer("pg"),
+		AWSToken:                 utils.StringPointer("token"),
+		S3FolderPath:             utils.StringPointer("s3"),
+		NATSJetStream:            utils.BoolPointer(true),
+		NATSSubject:              utils.StringPointer("nat"),
+		NATSJWTFile:              utils.StringPointer("jwt"),
+		NATSSeedFile:             utils.StringPointer("seed"),
+		NATSCertificateAuthority: utils.StringPointer("NATS"),
+		NATSClientCertificate:    utils.StringPointer("NATSClient"),
+		NATSClientKey:            utils.StringPointer("key"),
+		NATSJetStreamMaxWait:     utils.DurationPointer(1 * time.Minute),
+	}
+	eventExporter := &EventExporterCfg{
+		Opts: &EventExporterOpts{},
+	}
+	if err := eventExporter.Opts.loadFromJSONCfg(eventExporterOptsJSON); err != nil {
+		t.Error(expected)
+	} else if !reflect.DeepEqual(expected, eventExporter.Opts) {
+		t.Errorf("expected %v  received %v", expected, eventExporter.Opts)
+	}
+	if err := eventExporter.Opts.loadFromJSONCfg(nil); err != nil {
+		t.Error(err)
+	} else if err := eventExporter.Opts.loadFromJSONCfg(&EventExporterOptsJson{
+		ElsTimeout: utils.StringPointer("test"),
+	}); err == nil {
+		t.Error(err)
+	} else if err := eventExporter.Opts.loadFromJSONCfg(&EventExporterOptsJson{
+		SQLConnMaxLifetime: utils.StringPointer("test"),
+	}); err == nil {
+		t.Error(err)
+	} else if err := eventExporter.Opts.loadFromJSONCfg(&EventExporterOptsJson{
+		RPCConnTimeout: utils.StringPointer("test"),
+	}); err == nil {
+		t.Error(err)
+	} else if err := eventExporter.Opts.loadFromJSONCfg(&EventExporterOptsJson{
+		NATSJetStreamMaxWait: utils.StringPointer("test"),
+	}); err == nil {
+		t.Error(err)
+	} else if err := eventExporter.Opts.loadFromJSONCfg(&EventExporterOptsJson{
+
+		RPCReplyTimeout: utils.StringPointer("test"),
+	}); err == nil {
+		t.Error(err)
+	}
+
+}
+
 func TestEESCacheloadFromJsonCfg(t *testing.T) {
 	eesCfg := &EEsJsonCfg{
-		Cache: map[string]*CacheParamJsonCfg{
+		Cache: &map[string]*CacheParamJsonCfg{
 			utils.MetaFileCSV: {
 				Ttl: utils.StringPointer("1ss"),
 			},
@@ -255,7 +455,7 @@ func TestEESCacheloadFromJsonCfg(t *testing.T) {
 	}
 	expected := "time: unknown unit \"ss\" in duration \"1ss\""
 	jsonCfg := NewDefaultCGRConfig()
-	if err = jsonCfg.eesCfg.loadFromJSONCfg(eesCfg, jsonCfg.templates, jsonCfg.generalCfg.RSRSep); err == nil || err.Error() != expected {
+	if err = jsonCfg.eesCfg.loadFromJSONCfg(eesCfg, jsonCfg.templates, jsonCfg.generalCfg.RSRSep, jsonCfg.dfltEvExp); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
 }
@@ -286,7 +486,6 @@ func TestEventExporterSameID(t *testing.T) {
 				headerFields:   []*FCTemplate{},
 				trailerFields:  []*FCTemplate{},
 				Opts:           &EventExporterOpts{},
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
 			},
 			{
@@ -310,7 +509,6 @@ func TestEventExporterSameID(t *testing.T) {
 				trailerFields:  []*FCTemplate{},
 				Opts:           &EventExporterOpts{},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 			},
 		},
 	}
@@ -329,14 +527,14 @@ func TestEventExporterSameID(t *testing.T) {
 	"exporters": [
 		{
 			"id": "file_exporter1",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"fields":[
 				{"tag": "CustomTag1", "path": "*exp.CustomPath1", "type": "*variable", "value": "CustomValue1", "mandatory": true},
 			],
 		},
 		{
 			"id": "file_exporter1",
-			"type": "*fileCSV",
+			"type": "*file_csv",
 			"fields":[
 				{"tag": "CustomTag2", "path": "*exp.CustomPath2", "type": "*variable", "value": "CustomValue2", "mandatory": true},
 			],
@@ -355,7 +553,7 @@ func TestEEsCfgloadFromJsonCfgCase1(t *testing.T) {
 	jsonCfg := &EEsJsonCfg{
 		Enabled:          utils.BoolPointer(true),
 		Attributes_conns: &[]string{"*conn1", "*conn2"},
-		Cache: map[string]*CacheParamJsonCfg{
+		Cache: &map[string]*CacheParamJsonCfg{
 			utils.MetaFileCSV: {
 				Limit:      utils.IntPointer(-2),
 				Ttl:        utils.StringPointer("1s"),
@@ -365,10 +563,10 @@ func TestEEsCfgloadFromJsonCfgCase1(t *testing.T) {
 		Exporters: &[]*EventExporterJsonCfg{
 			{
 				Id:               utils.StringPointer("CSVExporter"),
-				Type:             utils.StringPointer("*fileCSV"),
+				Type:             utils.StringPointer("*file_csv"),
 				Filters:          &[]string{},
 				Attribute_ids:    &[]string{},
-				Flags:            &[]string{"*dryRun"},
+				Flags:            &[]string{"*dryrun"},
 				Export_path:      utils.StringPointer("/tmp/testCSV"),
 				Timezone:         utils.StringPointer("UTC"),
 				Synchronous:      utils.BoolPointer(true),
@@ -376,10 +574,10 @@ func TestEEsCfgloadFromJsonCfgCase1(t *testing.T) {
 				Failed_posts_dir: utils.StringPointer("/var/spool/cgrates/failed_posts"),
 				Fields: &[]*FcTemplateJsonCfg{
 					{
-						Tag:   utils.StringPointer(utils.MetaOriginID),
-						Path:  utils.StringPointer("*exp.*originID"),
+						Tag:   utils.StringPointer(utils.CGRID),
+						Path:  utils.StringPointer("*exp.CGRID"),
 						Type:  utils.StringPointer(utils.MetaVariable),
-						Value: utils.StringPointer("~*opts.*originID"),
+						Value: utils.StringPointer("~*req.CGRID"),
 					},
 				},
 			},
@@ -411,11 +609,10 @@ func TestEEsCfgloadFromJsonCfgCase1(t *testing.T) {
 				trailerFields:  []*FCTemplate{},
 				Opts:           &EventExporterOpts{},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 			},
 			{
 				ID:            "CSVExporter",
-				Type:          "*fileCSV",
+				Type:          "*file_csv",
 				Filters:       []string{},
 				AttributeSIDs: []string{},
 				Flags:         utils.FlagsWithParamsFromSlice([]string{utils.MetaDryRun}),
@@ -427,19 +624,18 @@ func TestEEsCfgloadFromJsonCfgCase1(t *testing.T) {
 				trailerFields: []*FCTemplate{},
 				contentFields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*exp.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*exp.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 				},
 				Opts: &EventExporterOpts{},
 				Fields: []*FCTemplate{
-					{Tag: utils.MetaOriginID, Path: "*exp.*originID", Type: utils.MetaVariable, Value: NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep), Layout: time.RFC3339},
+					{Tag: utils.CGRID, Path: "*exp.CGRID", Type: utils.MetaVariable, Value: NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep), Layout: time.RFC3339},
 				},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 			},
 		},
 	}
@@ -452,9 +648,9 @@ func TestEEsCfgloadFromJsonCfgCase1(t *testing.T) {
 		}
 	}
 	cgrCfg := NewDefaultCGRConfig()
-	if err := cgrCfg.eesCfg.loadFromJSONCfg(nil, cgrCfg.templates, cgrCfg.generalCfg.RSRSep); err != nil {
+	if err := cgrCfg.eesCfg.loadFromJSONCfg(nil, cgrCfg.templates, cgrCfg.generalCfg.RSRSep, cgrCfg.dfltEvExp); err != nil {
 		t.Error(err)
-	} else if err := cgrCfg.eesCfg.loadFromJSONCfg(jsonCfg, cgrCfg.templates, cgrCfg.generalCfg.RSRSep); err != nil {
+	} else if err := cgrCfg.eesCfg.loadFromJSONCfg(jsonCfg, cgrCfg.templates, cgrCfg.generalCfg.RSRSep, cgrCfg.dfltEvExp); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expectedCfg, cgrCfg.eesCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expectedCfg), utils.ToJSON(cgrCfg.eesCfg))
@@ -465,7 +661,7 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 	jsonCfg := &EEsJsonCfg{
 		Enabled:          utils.BoolPointer(true),
 		Attributes_conns: &[]string{"*conn1", "*conn2"},
-		Cache: map[string]*CacheParamJsonCfg{
+		Cache: &map[string]*CacheParamJsonCfg{
 			utils.MetaFileCSV: {
 				Limit:      utils.IntPointer(-2),
 				Ttl:        utils.StringPointer("1s"),
@@ -475,10 +671,10 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 		Exporters: &[]*EventExporterJsonCfg{
 			{
 				Id:            utils.StringPointer("CSVExporter"),
-				Type:          utils.StringPointer("*fileCSV"),
+				Type:          utils.StringPointer("*file_csv"),
 				Filters:       &[]string{},
 				Attribute_ids: &[]string{},
-				Flags:         &[]string{"*dryRun"},
+				Flags:         &[]string{"*dryrun"},
 				Export_path:   utils.StringPointer("/tmp/testCSV"),
 				Timezone:      utils.StringPointer("UTC"),
 				Synchronous:   utils.BoolPointer(true),
@@ -492,7 +688,7 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 						Layout: utils.StringPointer(time.RFC3339),
 					},
 					{
-						Path:  utils.StringPointer("*opts.*originID"),
+						Path:  utils.StringPointer("*req.CGRID"),
 						Type:  utils.StringPointer(utils.MetaVariable),
 						Value: utils.StringPointer("1"),
 					},
@@ -526,11 +722,10 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 				trailerFields:  []*FCTemplate{},
 				Opts:           &EventExporterOpts{},
 				FailedPostsDir: "/var/spool/cgrates/failed_posts",
-				EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 			},
 			{
 				ID:            "CSVExporter",
-				Type:          "*fileCSV",
+				Type:          "*file_csv",
 				Filters:       []string{},
 				AttributeSIDs: []string{},
 				Flags:         utils.FlagsWithParamsFromSlice([]string{utils.MetaDryRun}),
@@ -538,15 +733,14 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 				Timezone:      "UTC",
 				Synchronous:   true,
 				Attempts:      1,
-				EFsConns:      []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
 				headerFields:  []*FCTemplate{},
 				trailerFields: []*FCTemplate{},
 				contentFields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*exp.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*exp.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 				},
@@ -554,15 +748,15 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 				Opts:           &EventExporterOpts{},
 				Fields: []*FCTemplate{
 					{
-						Tag:    utils.MetaOriginID,
-						Path:   "*exp.*originID",
+						Tag:    utils.CGRID,
+						Path:   "*exp.CGRID",
 						Type:   utils.MetaVariable,
-						Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+						Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 						Layout: time.RFC3339,
 					},
 					{
-						Tag:    "*opts.*originID",
-						Path:   "*opts.*originID",
+						Tag:    "*req.CGRID",
+						Path:   "*req.CGRID",
 						Type:   utils.MetaVariable,
 						Value:  NewRSRParsersMustCompile("1", utils.InfieldSep),
 						Layout: time.RFC3339,
@@ -574,10 +768,10 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 	msgTemplates := map[string][]*FCTemplate{
 		"randomVal": {
 			{
-				Tag:    utils.MetaOriginID,
-				Path:   "*exp.*originID",
+				Tag:    utils.CGRID,
+				Path:   "*exp.CGRID",
 				Type:   utils.MetaVariable,
-				Value:  NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+				Value:  NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 				Layout: time.RFC3339,
 			},
 		},
@@ -594,7 +788,7 @@ func TestEEsCfgloadFromJsonCfgCase2(t *testing.T) {
 		}
 	}
 	jsnCfg := NewDefaultCGRConfig()
-	if err = jsnCfg.eesCfg.loadFromJSONCfg(jsonCfg, msgTemplates, jsnCfg.generalCfg.RSRSep); err != nil {
+	if err = jsnCfg.eesCfg.loadFromJSONCfg(jsonCfg, msgTemplates, jsnCfg.generalCfg.RSRSep, jsnCfg.dfltEvExp); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expectedCfg, jsnCfg.eesCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expectedCfg), utils.ToJSON(jsnCfg.eesCfg))
@@ -607,19 +801,66 @@ func TestEEsCfgAsMapInterface(t *testing.T) {
 	        "enabled": true,						
             "attributes_conns":["*internal","*conn2"],					
             "cache": {
-		          "*fileCSV": {"limit": -2, "precache": false, "replicate": false, "ttl": "1s", "static_ttl": false}
+		          "*file_csv": {"limit": -2, "precache": false, "replicate": false, "ttl": "1s", "static_ttl": false}
             },
             "exporters": [
             {
                   "id": "CSVExporter",									
-			      "type": "*fileCSV",									
+			      "type": "*file_csv",									
                   "export_path": "/tmp/testCSV",			
 			      "opts": {
-					"awsSecret": "test",
-					"mysqlDSNParams": {
-						"allowOldPasswords": "true",
-						"allowNativePasswords": "true",
-					},
+					"elsIndex":"test",
+					"elsIfPrimaryTerm":0,
+					"kafkaTopic": "test",	
+					"elsIfSeqNo":0,
+					"elsOpType":"test2",
+					"elsPipeline":"test3",
+					"elsRouting":"test4",
+					"elsTimeout":"1m",
+					"elsVersion":2,
+					"elsVersionType":"test5",
+					"elsWaitForActiveShards":"test6",
+					"sqlMaxIdleConns":4,
+					"sqlMaxOpenConns":6,
+					"sqlConnMaxLifetime":"1m",
+					"sqlTableName":"table",
+					"sqlDBName":"db",
+					"pgSSLMode":"pg",
+					"awsToken":"token",
+					"s3FolderPath":"s3",
+					"natsJetStream":true,
+					"natsSubject":"nat",
+					"natsJWTFile":"jwt",
+					"natsSeedFile":"seed",
+					"natsCertificateAuthority":"NATS",
+					"natsClientCertificate":"NATSClient",
+					"natsClientKey":"key",
+					"natsJetStreamMaxWait":"1m",				
+					"amqpQueueID":"id",
+					"amqpRoutingKey":"key",
+					"amqpExchangeType":"type",
+					"amqpExchange":"exchange",
+					"awsRegion":"eu",
+					"awsKey":"key",
+					"awsSecret":"secretkey",
+					"sqsQueueID":"sqsid",
+					"s3BucketID":"s3",
+					"rpcCodec":"rpc",
+					"serviceMethod":"service",
+					"keyPath":"path",
+					"certPath":"certpath",
+					"caPath":"capath",
+					"tls":true,
+					"connIDs":["id1","id2"],
+					"rpcConnTimeout":"1m",
+					"rpcReplyTimeout":"1m",
+					"csvFieldSeparator":",",
+					"mysqlDSNParams":{
+						"key":"param",
+					},	
+					"rpcAPIOpts":{
+						"key":"val",
+					}				
 				  },											
 			      "timezone": "UTC",										
 			      "filters": [],										
@@ -630,7 +871,7 @@ func TestEEsCfgAsMapInterface(t *testing.T) {
 			      "attempts": 1,										
 			      "field_separator": ",",								
 			      "fields":[
-                      {"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"}
+                      {"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"}
                   ]
             }]
 	  }
@@ -642,8 +883,8 @@ func TestEEsCfgAsMapInterface(t *testing.T) {
 			utils.MetaFileCSV: map[string]interface{}{
 				utils.LimitCfg:     -2,
 				utils.PrecacheCfg:  false,
-				utils.RemoteCfg:    false,
 				utils.ReplicateCfg: false,
+				utils.RemoteCfg:    false,
 				utils.TTLCfg:       "1s",
 				utils.StaticTTLCfg: false,
 			},
@@ -651,13 +892,60 @@ func TestEEsCfgAsMapInterface(t *testing.T) {
 		utils.ExportersCfg: []map[string]interface{}{
 			{
 				utils.IDCfg:         "CSVExporter",
-				utils.TypeCfg:       "*fileCSV",
+				utils.TypeCfg:       "*file_csv",
 				utils.ExportPathCfg: "/tmp/testCSV",
 				utils.OptsCfg: map[string]interface{}{
-					utils.AWSSecret: "test",
+					utils.KafkaTopic:               "test",
+					utils.ElsIndex:                 "test",
+					utils.ElsIfPrimaryTerm:         0,
+					utils.ElsIfSeqNo:               0,
+					utils.ElsOpType:                "test2",
+					utils.ElsPipeline:              "test3",
+					utils.ElsRouting:               "test4",
+					utils.ElsTimeout:               "1m0s",
+					utils.ElsVersionLow:            2,
+					utils.ElsVersionType:           "test5",
+					utils.ElsWaitForActiveShards:   "test6",
+					utils.SQLMaxIdleConnsCfg:       4,
+					utils.SQLMaxOpenConns:          6,
+					utils.SQLConnMaxLifetime:       "1m0s",
+					utils.SQLTableNameOpt:          "table",
+					utils.SQLDBNameOpt:             "db",
+					utils.PgSSLModeCfg:             "pg",
+					utils.AWSToken:                 "token",
+					utils.S3FolderPath:             "s3",
+					utils.NatsJetStream:            true,
+					utils.NatsSubject:              "nat",
+					utils.NatsJWTFile:              "jwt",
+					utils.NatsSeedFile:             "seed",
+					utils.NatsCertificateAuthority: "NATS",
+					utils.NatsClientCertificate:    "NATSClient",
+					utils.NatsClientKey:            "key",
+					utils.NatsJetStreamMaxWait:     "1m0s",
+					utils.AMQPQueueID:              "id",
+					utils.AMQPRoutingKey:           "key",
+					utils.AMQPExchangeType:         "type",
+					utils.AMQPExchange:             "exchange",
+					utils.AWSRegion:                "eu",
+					utils.AWSKey:                   "key",
+					utils.AWSSecret:                "secretkey",
+					utils.SQSQueueID:               "sqsid",
+					utils.S3Bucket:                 "s3",
+					utils.RpcCodec:                 "rpc",
+					utils.ServiceMethod:            "service",
+					utils.KeyPath:                  "path",
+					utils.CertPath:                 "certpath",
+					utils.CaPath:                   "capath",
+					utils.Tls:                      true,
+					utils.ConnIDs:                  []string{"id1", "id2"},
+					utils.RpcConnTimeout:           "1m0s",
+					utils.RpcReplyTimeout:          "1m0s",
+					utils.CSVFieldSepOpt:           ",",
 					utils.MYSQLDSNParams: map[string]string{
-						"allowOldPasswords":    "true",
-						"allowNativePasswords": "true",
+						"key": "param",
+					},
+					utils.RPCAPIOpts: map[string]interface{}{
+						"key": "val",
 					},
 				},
 				utils.TimezoneCfg:           "UTC",
@@ -668,24 +956,22 @@ func TestEEsCfgAsMapInterface(t *testing.T) {
 				utils.SynchronousCfg:        false,
 				utils.AttemptsCfg:           1,
 				utils.ConcurrentRequestsCfg: 0,
-				utils.BlockerCfg:            false,
 				utils.FieldsCfg: []map[string]interface{}{
 					{
-						utils.TagCfg:   utils.MetaOriginID,
-						utils.PathCfg:  "*exp.*originID",
+						utils.TagCfg:   utils.CGRID,
+						utils.PathCfg:  "*exp.CGRID",
 						utils.TypeCfg:  utils.MetaVariable,
-						utils.ValueCfg: "~*opts.*originID",
+						utils.ValueCfg: "~*req.CGRID",
 					},
 				},
 				utils.FailedPostsDirCfg: "/var/spool/cgrates/failed_posts",
-				utils.EFsConnsCfg:       []string{utils.MetaInternal},
 			},
 		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
 	} else {
-		rcv := cgrCfg.eesCfg.AsMapInterface(cgrCfg.generalCfg.RSRSep).(map[string]interface{})
+		rcv := cgrCfg.eesCfg.AsMapInterface(cgrCfg.generalCfg.RSRSep)
 		if len(rcv[utils.ExportersCfg].([]map[string]interface{})) != 2 {
 			t.Errorf("Expected %+v, received %+v", 2, len(rcv[utils.ExportersCfg].([]map[string]interface{})))
 		} else if !reflect.DeepEqual(eMap[utils.ExportersCfg].([]map[string]interface{})[0][utils.FieldsCfg].([]map[string]interface{})[0][utils.ValueCfg],
@@ -705,1060 +991,5 @@ func TestEEsCfgAsMapInterface(t *testing.T) {
 		if !reflect.DeepEqual(rcv, eMap) {
 			t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 		}
-	}
-}
-
-func TestDiffEventExporterJsonCfg(t *testing.T) {
-	var d *EventExporterJsonCfg
-
-	v1 := &EventExporterCfg{
-		ID:         "EES_ID",
-		Type:       "xml",
-		ExportPath: "/tmp/ees",
-		Opts:       &EventExporterOpts{},
-		Timezone:   "UTC",
-		Filters:    []string{"Filter1"},
-		Flags: utils.FlagsWithParams{
-			"FLAG_1": {
-				"PARAM_1": []string{"param1"},
-			},
-		},
-		AttributeSIDs:      []string{"ATTR_PRF"},
-		AttributeSCtx:      "*sessions",
-		Synchronous:        false,
-		Attempts:           2,
-		ConcurrentRequests: 3,
-		FailedPostsDir:     "/tmp/failedPosts",
-		Fields: []*FCTemplate{
-			{
-				Type: "*string",
-			},
-		},
-		headerFields: []*FCTemplate{
-			{
-				Type: "*string",
-			},
-		},
-		contentFields: []*FCTemplate{
-			{
-				Type: "*string",
-			},
-		},
-		trailerFields: []*FCTemplate{
-			{
-				Type: "*string",
-			},
-		},
-		Blocker:  true,
-		EFsConns: []string{"v1 efs test"},
-	}
-
-	v2 := &EventExporterCfg{
-		ID:         "EES_ID2",
-		Type:       "http",
-		ExportPath: "/var/tmp/ees",
-		Opts: &EventExporterOpts{
-			CSVFieldSeparator: utils.StringPointer(utils.InfieldSep),
-		},
-
-		Timezone: "EEST",
-		Filters:  []string{"Filter2"},
-		Flags: utils.FlagsWithParams{
-			"FLAG_2": {
-				"PARAM_2": []string{"param2"},
-			},
-		},
-		AttributeSIDs:      []string{"ATTR_PRF_2"},
-		AttributeSCtx:      "*actions",
-		Synchronous:        true,
-		Attempts:           3,
-		ConcurrentRequests: 4,
-		FailedPostsDir:     "/tmp/failed",
-		Fields: []*FCTemplate{
-			{
-				Type: "*prefix",
-			},
-		},
-		headerFields: []*FCTemplate{
-			{
-				Type: "*prefix",
-			},
-		},
-		contentFields: []*FCTemplate{
-			{
-				Type: "*prefix",
-			},
-		},
-		trailerFields: []*FCTemplate{
-			{
-				Type: "*prefix",
-			},
-		},
-		Blocker:  false,
-		EFsConns: []string{"efs test"},
-	}
-
-	expected := &EventExporterJsonCfg{
-		Id:          utils.StringPointer("EES_ID2"),
-		Type:        utils.StringPointer("http"),
-		Export_path: utils.StringPointer("/var/tmp/ees"),
-		Opts: &EventExporterOptsJson{
-			CSVFieldSeparator: utils.StringPointer(utils.InfieldSep),
-		},
-		Timezone:            utils.StringPointer("EEST"),
-		Filters:             &[]string{"Filter2"},
-		Flags:               &[]string{"FLAG_2:PARAM_2:param2"},
-		Attribute_ids:       &[]string{"ATTR_PRF_2"},
-		Attribute_context:   utils.StringPointer("*actions"),
-		Synchronous:         utils.BoolPointer(true),
-		Attempts:            utils.IntPointer(3),
-		Concurrent_requests: utils.IntPointer(4),
-		Failed_posts_dir:    utils.StringPointer("/tmp/failed"),
-		Fields: &[]*FcTemplateJsonCfg{
-			{
-				Type:   utils.StringPointer("*prefix"),
-				Layout: utils.StringPointer(""),
-			},
-		},
-		Blocker:   utils.BoolPointer(false),
-		Efs_conns: utils.SliceStringPointer([]string{"efs test"}),
-	}
-
-	rcv := diffEventExporterJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &EventExporterJsonCfg{
-		Opts: &EventExporterOptsJson{},
-	}
-	rcv = diffEventExporterJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = &EventExporterJsonCfg{
-		Fields: &[]*FcTemplateJsonCfg{
-			{
-				Type: utils.StringPointer("*prefix"),
-			},
-		},
-	}
-
-	expected = &EventExporterJsonCfg{
-		Opts: &EventExporterOptsJson{},
-		Fields: &[]*FcTemplateJsonCfg{
-			{
-				Type: utils.StringPointer("*prefix"),
-			},
-		},
-	}
-
-	rcv = diffEventExporterJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestGetEventExporterJsonCfg(t *testing.T) {
-	d := []*EventExporterJsonCfg{
-		{
-			Id: utils.StringPointer("EES_ID"),
-		},
-	}
-
-	expected := &EventExporterJsonCfg{
-		Id: utils.StringPointer("EES_ID"),
-	}
-
-	rcv, idx := getEventExporterJsonCfg(d, "EES_ID")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	} else if idx != 0 {
-		t.Errorf("Expected %v \n but received \n %v", 0, idx)
-	}
-
-	d = []*EventExporterJsonCfg{
-		{
-			Id: nil,
-		},
-	}
-	rcv, idx = getEventExporterJsonCfg(d, "EES_ID")
-	if rcv != nil {
-		t.Error("Received value should be null")
-	} else if idx != -1 {
-		t.Errorf("Expected %v \n but received \n %v", -1, idx)
-	}
-}
-
-func TestGetEventExporterCfg(t *testing.T) {
-	d := []*EventExporterCfg{
-		{
-			ID:   "EES_ID",
-			Opts: &EventExporterOpts{},
-		},
-	}
-
-	expected := &EventExporterCfg{
-		ID:   "EES_ID",
-		Opts: &EventExporterOpts{},
-	}
-
-	rcv := getEventExporterCfg(d, "EES_ID")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = []*EventExporterCfg{
-		{
-			ID:   "EES_ID2",
-			Opts: &EventExporterOpts{},
-		},
-	}
-
-	rcv = getEventExporterCfg(d, "EES_ID")
-	expected = &EventExporterCfg{
-		Opts: &EventExporterOpts{},
-	}
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffEventExportersJsonCfg(t *testing.T) {
-	var d *[]*EventExporterJsonCfg
-
-	v1 := []*EventExporterCfg{
-		{
-			ID:         "EES_ID",
-			Type:       "xml",
-			ExportPath: "/tmp/ees",
-			Opts:       &EventExporterOpts{},
-
-			Timezone: "UTC",
-			Filters:  []string{"Filter1"},
-			Flags: utils.FlagsWithParams{
-				"FLAG_1": {
-					"PARAM_1": []string{"param1"},
-				},
-			},
-			AttributeSIDs: []string{"ATTR_PRF"},
-			AttributeSCtx: "*sessions",
-			Synchronous:   false,
-			Attempts:      2,
-			Fields: []*FCTemplate{
-				{
-					Type: "*string",
-				},
-			},
-			headerFields: []*FCTemplate{
-				{
-					Type: "*string",
-				},
-			},
-			contentFields: []*FCTemplate{
-				{
-					Type: "*string",
-				},
-			},
-			trailerFields: []*FCTemplate{
-				{
-					Type: "*string",
-				},
-			},
-		},
-	}
-
-	v2 := []*EventExporterCfg{
-		{
-			ID:         "EES_ID2",
-			Type:       "http",
-			ExportPath: "/var/tmp/ees",
-			Opts: &EventExporterOpts{
-				CSVFieldSeparator: utils.StringPointer(utils.InfieldSep),
-			},
-
-			Timezone: "EEST",
-			Filters:  []string{"Filter2"},
-			Flags: utils.FlagsWithParams{
-				"FLAG_2": {
-					"PARAM_2": []string{"param2"},
-				},
-			},
-			AttributeSIDs: []string{"ATTR_PRF_2"},
-			AttributeSCtx: "*actions",
-			Synchronous:   true,
-			Attempts:      3,
-			Fields: []*FCTemplate{
-				{
-					Type: "*prefix",
-				},
-			},
-			headerFields: []*FCTemplate{
-				{
-					Type: "*prefix",
-				},
-			},
-			contentFields: []*FCTemplate{
-				{
-					Type: "*prefix",
-				},
-			},
-			trailerFields: []*FCTemplate{
-				{
-					Type: "*prefix",
-				},
-			},
-		},
-	}
-
-	expected := &[]*EventExporterJsonCfg{
-		{
-			Id:          utils.StringPointer("EES_ID2"),
-			Type:        utils.StringPointer("http"),
-			Export_path: utils.StringPointer("/var/tmp/ees"),
-			Opts: &EventExporterOptsJson{
-				CSVFieldSeparator: utils.StringPointer(utils.InfieldSep),
-			},
-			Timezone:          utils.StringPointer("EEST"),
-			Filters:           &[]string{"Filter2"},
-			Flags:             &[]string{"FLAG_2:PARAM_2:param2"},
-			Attribute_ids:     &[]string{"ATTR_PRF_2"},
-			Attribute_context: utils.StringPointer("*actions"),
-			Synchronous:       utils.BoolPointer(true),
-			Attempts:          utils.IntPointer(3),
-			Fields: &[]*FcTemplateJsonCfg{
-				{
-					Type:   utils.StringPointer("*prefix"),
-					Layout: utils.StringPointer(""),
-				},
-			},
-		},
-	}
-
-	rcv := diffEventExportersJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &[]*EventExporterJsonCfg{
-		{
-			Opts: &EventExporterOptsJson{},
-		},
-	}
-	rcv = diffEventExportersJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	d = &[]*EventExporterJsonCfg{
-		{
-			Id: utils.StringPointer("EES_ID2"),
-		},
-	}
-
-	expected = &[]*EventExporterJsonCfg{
-		{
-			Opts: &EventExporterOptsJson{},
-			Id:   utils.StringPointer("EES_ID2"),
-		},
-	}
-
-	rcv = diffEventExportersJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffEEsJsonCfg(t *testing.T) {
-	var d *EEsJsonCfg
-
-	v1 := &EEsCfg{
-		Enabled:         false,
-		AttributeSConns: []string{"*localhost"},
-		Cache:           map[string]*CacheParamCfg{},
-		Exporters: []*EventExporterCfg{
-			{
-				Opts: &EventExporterOpts{},
-			},
-		},
-	}
-
-	v2 := &EEsCfg{
-		Enabled:         true,
-		AttributeSConns: []string{"*birpc"},
-		Cache: map[string]*CacheParamCfg{
-			"CACHE_1": {
-				Limit: 1,
-			},
-		},
-		Exporters: []*EventExporterCfg{
-			{
-				ID:   "EES_ID",
-				Opts: &EventExporterOpts{},
-			},
-		},
-	}
-
-	expected := &EEsJsonCfg{
-		Enabled:          utils.BoolPointer(true),
-		Attributes_conns: &[]string{"*birpc"},
-		Cache: map[string]*CacheParamJsonCfg{
-			"CACHE_1": {
-				Limit:      utils.IntPointer(1),
-				Ttl:        utils.StringPointer("0s"),
-				Static_ttl: utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-				Precache:   utils.BoolPointer(false),
-				Replicate:  utils.BoolPointer(false),
-			},
-		},
-		Exporters: &[]*EventExporterJsonCfg{
-			{
-				Id:   utils.StringPointer("EES_ID"),
-				Opts: &EventExporterOptsJson{},
-			},
-		},
-	}
-
-	rcv := diffEEsJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &EEsJsonCfg{
-		Cache: map[string]*CacheParamJsonCfg{
-			"CACHE_1": {
-				Limit:      utils.IntPointer(1),
-				Ttl:        utils.StringPointer("0s"),
-				Static_ttl: utils.BoolPointer(false),
-				Precache:   utils.BoolPointer(false),
-				Remote:     utils.BoolPointer(false),
-				Replicate:  utils.BoolPointer(false),
-			},
-		},
-		Exporters: &[]*EventExporterJsonCfg{
-			{
-				Opts: &EventExporterOptsJson{},
-			},
-		},
-	}
-	rcv = diffEEsJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestEeSCloneSection(t *testing.T) {
-	eeSCfg := &EEsCfg{
-		Enabled:         true,
-		AttributeSConns: []string{"*birpc"},
-		Cache: map[string]*CacheParamCfg{
-			"CACHE_1": {
-				Limit: 1,
-			},
-		},
-	}
-
-	exp := &EEsCfg{
-		Enabled:         true,
-		AttributeSConns: []string{"*birpc"},
-		Cache: map[string]*CacheParamCfg{
-			"CACHE_1": {
-				Limit: 1,
-			},
-		},
-	}
-	rcv := eeSCfg.CloneSection()
-	rcv.(*EEsCfg).Exporters = nil
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffEventExporterOptsJsonCfg(t *testing.T) {
-	var d *EventExporterOptsJson
-
-	v1 := &EventExporterOpts{
-		ConnIDs: utils.SliceStringPointer([]string{"V1test"}),
-	}
-
-	v2 := &EventExporterOpts{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.DurationPointer(2 * time.Second),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.DurationPointer(2 * time.Second),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-		KafkaSkipTLSVerify:       utils.BoolPointer(false),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.DurationPointer(2 * time.Second),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.DurationPointer(2 * time.Second),
-		RPCReplyTimeout:          utils.DurationPointer(2 * time.Second),
-		MYSQLDSNParams:           map[string]string{},
-		KafkaTLS:                 utils.BoolPointer(true),
-		ConnIDs:                  utils.SliceStringPointer([]string{"test"}),
-	}
-
-	exp := &EventExporterOptsJson{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.StringPointer("2s"),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.StringPointer("2s"),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-		KafkaSkipTLSVerify:       utils.BoolPointer(false),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.StringPointer("2s"),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.StringPointer("2s"),
-		RPCReplyTimeout:          utils.StringPointer("2s"),
-		MYSQLDSNParams:           map[string]string{},
-		KafkaTLS:                 utils.BoolPointer(true),
-		ConnIDs:                  utils.SliceStringPointer([]string{"test"}),
-	}
-
-	rcv := diffEventExporterOptsJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffEventExporterOptsJsonCfgConnIDsAreEqual(t *testing.T) {
-	var d *EventExporterOptsJson
-
-	v1 := &EventExporterOpts{
-		ConnIDs: utils.SliceStringPointer([]string{"test"}),
-	}
-
-	v2 := &EventExporterOpts{
-		ConnIDs: utils.SliceStringPointer([]string{"test"}),
-	}
-
-	exp := &EventExporterOptsJson{}
-
-	rcv := diffEventExporterOptsJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestEventExporterOptsClone(t *testing.T) {
-	eeOpts := &EventExporterOpts{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.DurationPointer(2 * time.Second),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.DurationPointer(2 * time.Second),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-		KafkaSkipTLSVerify:       utils.BoolPointer(false),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.DurationPointer(2 * time.Second),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.DurationPointer(2 * time.Second),
-		RPCReplyTimeout:          utils.DurationPointer(2 * time.Second),
-		MYSQLDSNParams:           make(map[string]string),
-		KafkaTLS:                 utils.BoolPointer(false),
-		ConnIDs:                  utils.SliceStringPointer([]string{"testID"}),
-		RPCAPIOpts:               make(map[string]interface{}),
-	}
-
-	exp := &EventExporterOpts{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.DurationPointer(2 * time.Second),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.DurationPointer(2 * time.Second),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-		KafkaSkipTLSVerify:       utils.BoolPointer(false),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.DurationPointer(2 * time.Second),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.DurationPointer(2 * time.Second),
-		RPCReplyTimeout:          utils.DurationPointer(2 * time.Second),
-		MYSQLDSNParams:           make(map[string]string),
-		KafkaTLS:                 utils.BoolPointer(false),
-		ConnIDs:                  utils.SliceStringPointer([]string{"testID"}),
-		RPCAPIOpts:               make(map[string]interface{}),
-	}
-
-	if rcv := eeOpts.Clone(); !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestLoadFromJSONCfg(t *testing.T) {
-	eeOpts := &EventExporterOpts{}
-
-	eeSJson := &EventExporterOptsJson{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.StringPointer("2s"),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.StringPointer("2s"),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-		KafkaSkipTLSVerify:       utils.BoolPointer(false),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.StringPointer("2s"),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.StringPointer("2s"),
-		RPCReplyTimeout:          utils.StringPointer("2s"),
-		KafkaTLS:                 utils.BoolPointer(false),
-		ConnIDs:                  utils.SliceStringPointer([]string{"testID"}),
-		RPCAPIOpts:               make(map[string]interface{}),
-	}
-
-	exp := &EventExporterOpts{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.DurationPointer(2 * time.Second),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.DurationPointer(2 * time.Second),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-		KafkaSkipTLSVerify:       utils.BoolPointer(false),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.DurationPointer(2 * time.Second),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.DurationPointer(2 * time.Second),
-		RPCReplyTimeout:          utils.DurationPointer(2 * time.Second),
-		KafkaTLS:                 utils.BoolPointer(false),
-		ConnIDs:                  utils.SliceStringPointer([]string{"testID"}),
-		RPCAPIOpts:               make(map[string]interface{}),
-	}
-
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err != nil {
-		t.Error(err)
-	}
-
-	if !reflect.DeepEqual(exp, eeOpts) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(eeOpts))
-	}
-
-	//check with empty json config
-	eeSJson = nil
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestLoadFromJsonParseErrors(t *testing.T) {
-	eeOpts := &EventExporterOpts{}
-
-	eeSJson := &EventExporterOptsJson{
-		CSVFieldSeparator:        utils.StringPointer(","),
-		ElsIndex:                 utils.StringPointer("idx1"),
-		ElsIfPrimaryTerm:         utils.IntPointer(1),
-		ElsIfSeqNo:               utils.IntPointer(2),
-		ElsOpType:                utils.StringPointer("op_type"),
-		ElsPipeline:              utils.StringPointer("pipeline"),
-		ElsRouting:               utils.StringPointer("routing"),
-		ElsTimeout:               utils.StringPointer("2c"),
-		ElsVersion:               utils.IntPointer(1),
-		ElsVersionType:           utils.StringPointer("version_type"),
-		ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-		SQLMaxIdleConns:          utils.IntPointer(5),
-		SQLMaxOpenConns:          utils.IntPointer(10),
-		SQLConnMaxLifetime:       utils.StringPointer("2s"),
-		SQLTableName:             utils.StringPointer("cdrs"),
-		SQLDBName:                utils.StringPointer("cgrates"),
-		PgSSLMode:                utils.StringPointer("sslm"),
-		KafkaTopic:               utils.StringPointer("topic1"),
-		AMQPRoutingKey:           utils.StringPointer("routing_key"),
-		AMQPQueueID:              utils.StringPointer("queue_id"),
-		AMQPExchange:             utils.StringPointer("amqp_exchange"),
-		AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-		AWSRegion:                utils.StringPointer("utc"),
-		AWSKey:                   utils.StringPointer("aws_key"),
-		AWSSecret:                utils.StringPointer("aws_secret"),
-		AWSToken:                 utils.StringPointer("aws_token"),
-		SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-		S3BucketID:               utils.StringPointer("s3_bucket_id"),
-		S3FolderPath:             utils.StringPointer("s3_folder_path"),
-		NATSJetStream:            utils.BoolPointer(false),
-		NATSSubject:              utils.StringPointer("ees_nats"),
-		NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-		NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-		NATSCertificateAuthority: utils.StringPointer("ca"),
-		NATSClientCertificate:    utils.StringPointer("cc"),
-		NATSClientKey:            utils.StringPointer("ck"),
-		NATSJetStreamMaxWait:     utils.StringPointer("2s"),
-		RPCCodec:                 utils.StringPointer("rpccodec"),
-		ServiceMethod:            utils.StringPointer("service_method"),
-		KeyPath:                  utils.StringPointer("/path/to/key"),
-		CertPath:                 utils.StringPointer("cp"),
-		CAPath:                   utils.StringPointer("ca_path"),
-		TLS:                      utils.BoolPointer(false),
-		RPCConnTimeout:           utils.StringPointer("2s"),
-		RPCReplyTimeout:          utils.StringPointer("2s"),
-	}
-
-	errExp := `time: unknown unit "c" in duration "2c"`
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err.Error())
-	}
-	eeSJson.ElsTimeout = utils.StringPointer("2s")
-
-	///////
-
-	eeSJson.SQLConnMaxLifetime = utils.StringPointer("2c")
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err.Error())
-	}
-	eeSJson.SQLConnMaxLifetime = utils.StringPointer("2s")
-
-	//////
-
-	eeSJson.NATSJetStreamMaxWait = utils.StringPointer("2c")
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err.Error())
-	}
-	eeSJson.NATSJetStreamMaxWait = utils.StringPointer("2s")
-
-	/////
-
-	eeSJson.RPCConnTimeout = utils.StringPointer("2c")
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err.Error())
-	}
-	eeSJson.RPCConnTimeout = utils.StringPointer("2s")
-
-	/////
-
-	eeSJson.RPCReplyTimeout = utils.StringPointer("2c")
-	if err := eeOpts.loadFromJSONCfg(eeSJson); err == nil || err.Error() != errExp {
-		t.Errorf("Expected %v \n but received \n %v", errExp, err.Error())
-	}
-	eeSJson.RPCReplyTimeout = utils.StringPointer("2s")
-}
-
-func TestEEsAsMapInterface(t *testing.T) {
-	eeCfg := &EventExporterCfg{
-		Opts: &EventExporterOpts{
-			CSVFieldSeparator:        utils.StringPointer(","),
-			ElsIndex:                 utils.StringPointer("idx1"),
-			ElsIfPrimaryTerm:         utils.IntPointer(1),
-			ElsIfSeqNo:               utils.IntPointer(2),
-			ElsOpType:                utils.StringPointer("op_type"),
-			ElsPipeline:              utils.StringPointer("pipeline"),
-			ElsRouting:               utils.StringPointer("routing"),
-			ElsTimeout:               utils.DurationPointer(2 * time.Second),
-			ElsVersion:               utils.IntPointer(1),
-			ElsVersionType:           utils.StringPointer("version_type"),
-			ElsWaitForActiveShards:   utils.StringPointer("wfas"),
-			SQLMaxIdleConns:          utils.IntPointer(5),
-			SQLMaxOpenConns:          utils.IntPointer(10),
-			SQLConnMaxLifetime:       utils.DurationPointer(2 * time.Second),
-			SQLTableName:             utils.StringPointer("cdrs"),
-			SQLDBName:                utils.StringPointer("cgrates"),
-			PgSSLMode:                utils.StringPointer("sslm"),
-			KafkaTopic:               utils.StringPointer("topic1"),
-			KafkaCAPath:              utils.StringPointer("kafkaCAPath"),
-			KafkaSkipTLSVerify:       utils.BoolPointer(false),
-			AMQPRoutingKey:           utils.StringPointer("routing_key"),
-			AMQPQueueID:              utils.StringPointer("queue_id"),
-			AMQPExchange:             utils.StringPointer("amqp_exchange"),
-			AMQPExchangeType:         utils.StringPointer("amqp_exchange_type"),
-			AWSRegion:                utils.StringPointer("utc"),
-			AWSKey:                   utils.StringPointer("aws_key"),
-			AWSSecret:                utils.StringPointer("aws_secret"),
-			AWSToken:                 utils.StringPointer("aws_token"),
-			SQSQueueID:               utils.StringPointer("sqs_queue_id"),
-			S3BucketID:               utils.StringPointer("s3_bucket_id"),
-			S3FolderPath:             utils.StringPointer("s3_folder_path"),
-			NATSJetStream:            utils.BoolPointer(false),
-			NATSSubject:              utils.StringPointer("ees_nats"),
-			NATSJWTFile:              utils.StringPointer("/path/to/jwt"),
-			NATSSeedFile:             utils.StringPointer("/path/to/seed"),
-			NATSCertificateAuthority: utils.StringPointer("ca"),
-			NATSClientCertificate:    utils.StringPointer("cc"),
-			NATSClientKey:            utils.StringPointer("ck"),
-			NATSJetStreamMaxWait:     utils.DurationPointer(2 * time.Second),
-			RPCCodec:                 utils.StringPointer("rpccodec"),
-			ServiceMethod:            utils.StringPointer("service_method"),
-			KeyPath:                  utils.StringPointer("/path/to/key"),
-			CertPath:                 utils.StringPointer("cp"),
-			CAPath:                   utils.StringPointer("ca_path"),
-			TLS:                      utils.BoolPointer(false),
-			RPCConnTimeout:           utils.DurationPointer(2 * time.Second),
-			RPCReplyTimeout:          utils.DurationPointer(2 * time.Second),
-			KafkaTLS:                 utils.BoolPointer(false),
-			ConnIDs:                  utils.SliceStringPointer([]string{"testID"}),
-			RPCAPIOpts:               make(map[string]interface{}),
-		},
-	}
-
-	exp := map[string]interface{}{
-		"opts": map[string]interface{}{
-			"tls":                      false,
-			"amqpExchange":             "amqp_exchange",
-			"amqpExchangeType":         "amqp_exchange_type",
-			"amqpQueueID":              "queue_id",
-			"amqpRoutingKey":           "routing_key",
-			"awsKey":                   "aws_key",
-			"awsRegion":                "utc",
-			"awsSecret":                "aws_secret",
-			"awsToken":                 "aws_token",
-			"caPath":                   "ca_path",
-			"certPath":                 "cp",
-			"csvFieldSeparator":        ",",
-			"elsIfPrimaryTerm":         1,
-			"elsIfSeqNo":               2,
-			"elsIndex":                 "idx1",
-			"elsOpType":                "op_type",
-			"elsPipeline":              "pipeline",
-			"elsRouting":               "routing",
-			"elsTimeout":               "2s",
-			"elsVersion":               1,
-			"elsVersionType":           "version_type",
-			"elsWaitForActiveShards":   "wfas",
-			"kafkaTopic":               "topic1",
-			"kafkaCAPath":              "kafkaCAPath",
-			"kafkaSkipTLSVerify":       false,
-			"keyPath":                  "/path/to/key",
-			"natsCertificateAuthority": "ca",
-			"natsClientCertificate":    "cc",
-			"natsClientKey":            "ck",
-			"natsJWTFile":              "/path/to/jwt",
-			"natsJetStream":            false,
-			"natsJetStreamMaxWait":     "2s",
-			"natsSeedFile":             "/path/to/seed",
-			"natsSubject":              "ees_nats",
-			"rpcCodec":                 "rpccodec",
-			"rpcConnTimeout":           "2s",
-			"rpcReplyTimeout":          "2s",
-			"s3BucketID":               "s3_bucket_id",
-			"s3FolderPath":             "s3_folder_path",
-			"serviceMethod":            "service_method",
-			"sqlConnMaxLifetime":       "2s",
-			"sqlDBName":                "cgrates",
-			"sqlMaxIdleConns":          5,
-			"sqlMaxOpenConns":          10,
-			"sqlTableName":             "cdrs",
-			"sqsQueueID":               "sqs_queue_id",
-			"pgSSLMode":                "sslm",
-			"kafkaTLS":                 false,
-			"connIDs":                  []string{"testID"},
-			"rpcAPIOpts":               make(map[string]interface{}),
-		},
-	}
-
-	rcv := eeCfg.AsMapInterface(",")
-
-	if !reflect.DeepEqual(exp[utils.OptsCfg], rcv[utils.OptsCfg]) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp["opts"]), utils.ToJSON(rcv["opts"]))
 	}
 }

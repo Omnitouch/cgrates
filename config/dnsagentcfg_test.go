@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestDNSAgentCfgloadFromJsonCfg(t *testing.T) {
@@ -35,7 +35,7 @@ func TestDNSAgentCfgloadFromJsonCfg(t *testing.T) {
 			{
 				ID:             utils.StringPointer("OutboundAUTHDryRun"),
 				Filters:        &[]string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
-				Flags:          &[]string{"*dryRun"},
+				Flags:          &[]string{"*dryrun"},
 				Timezone:       utils.StringPointer("UTC"),
 				Request_fields: &[]*FcTemplateJsonCfg{},
 				Reply_fields: &[]*FcTemplateJsonCfg{
@@ -72,10 +72,6 @@ func TestDNSAgentCfgloadFromJsonCfg(t *testing.T) {
 		t.Error(err)
 	} else if !reflect.DeepEqual(jsonCfg.dnsAgentCfg, expected) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsonCfg.dnsAgentCfg))
-	}
-	jsnCfg = nil
-	if err = jsonCfg.dnsAgentCfg.loadFromJSONCfg(jsnCfg, jsonCfg.generalCfg.RSRSep); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -227,7 +223,7 @@ func TestDNSAgentCfgAsMapInterface1(t *testing.T) {
 				"id": "OutboundAUTHDryRun",
 				"filters": ["*string:~*req.request_type:OutboundAUTH","*string:~*req.Msisdn:497700056231"],
 				"tenant": "cgrates.org",
-				"flags": ["*dryRun"],
+				"flags": ["*dryrun"],
                 "timezone": "UTC",
 				"request_fields":[],
 				"reply_fields":[
@@ -257,7 +253,7 @@ func TestDNSAgentCfgAsMapInterface1(t *testing.T) {
 				utils.IDCfg:            "OutboundAUTHDryRun",
 				utils.FiltersCfg:       []string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 				utils.TenantCfg:        "cgrates.org",
-				utils.FlagsCfg:         []string{"*dryRun"},
+				utils.FlagsCfg:         []string{"*dryrun"},
 				utils.TimezoneCfg:      "UTC",
 				utils.RequestFieldsCfg: []map[string]interface{}{},
 				utils.ReplyFieldsCfg: []map[string]interface{}{
@@ -330,84 +326,5 @@ func TestDNSAgentCfgClone(t *testing.T) {
 	}
 	if rcv.RequestProcessors[0].ID = ""; ban.RequestProcessors[0].ID != "OutboundAUTHDryRun" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffDNSAgentJsonCfg(t *testing.T) {
-	var d *DNSAgentJsonCfg
-
-	v1 := &DNSAgentCfg{
-		Enabled:           false,
-		Listen:            "localhost:8080",
-		ListenNet:         "tcp",
-		SessionSConns:     []string{"*localhost"},
-		Timezone:          "UTC",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	v2 := &DNSAgentCfg{
-		Enabled:       true,
-		Listen:        "localhost:8037",
-		ListenNet:     "udp",
-		SessionSConns: []string{"*birpc"},
-		Timezone:      "EEST",
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID: "id",
-			},
-		},
-	}
-
-	expected := &DNSAgentJsonCfg{
-		Enabled:        utils.BoolPointer(true),
-		Listen:         utils.StringPointer("localhost:8037"),
-		Listen_net:     utils.StringPointer("udp"),
-		Sessions_conns: &[]string{"*birpc"},
-		Timezone:       utils.StringPointer("EEST"),
-		Request_processors: &[]*ReqProcessorJsnCfg{
-			{
-				ID: utils.StringPointer("id"),
-			},
-		},
-	}
-
-	rcv := diffDNSAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v2_2 := v1
-	expected2 := &DNSAgentJsonCfg{
-		Request_processors: &[]*ReqProcessorJsnCfg{},
-	}
-
-	rcv = diffDNSAgentJsonCfg(d, v1, v2_2, ";")
-	if !reflect.DeepEqual(rcv, expected2) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
-	}
-}
-
-func TestDnsAgentCloneSection(t *testing.T) {
-	dnsCfg := &DNSAgentCfg{
-		Enabled:           false,
-		Listen:            "localhost:8080",
-		ListenNet:         "tcp",
-		SessionSConns:     []string{"*localhost"},
-		Timezone:          "UTC",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	exp := &DNSAgentCfg{
-		Enabled:           false,
-		Listen:            "localhost:8080",
-		ListenNet:         "tcp",
-		SessionSConns:     []string{"*localhost"},
-		Timezone:          "UTC",
-		RequestProcessors: []*RequestProcessor{},
-	}
-
-	rcv := dnsCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

@@ -23,13 +23,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
-type IndexHealthArgs struct {
-	Tenant              string
+type IndexHealthArgsWith2Ch struct {
+	IndexCacheLimit     int
+	IndexCacheTTL       time.Duration
+	IndexCacheStaticTTL bool
+
+	ObjectCacheLimit     int
+	ObjectCacheTTL       time.Duration
+	ObjectCacheStaticTTL bool
+}
+
+type IndexHealthArgsWith3Ch struct {
 	IndexCacheLimit     int
 	IndexCacheTTL       time.Duration
 	IndexCacheStaticTTL bool
@@ -41,7 +49,239 @@ type IndexHealthArgs struct {
 	FilterCacheLimit     int
 	FilterCacheTTL       time.Duration
 	FilterCacheStaticTTL bool
-	APIOpts              map[string]interface{} // Only for dispatcher.
+}
+
+type AccountActionPlanIHReply struct {
+	MissingAccountActionPlans map[string][]string // list of missing indexes for each object (the map has the key as the indexKey and a list of objects)
+	BrokenReferences          map[string][]string // list of broken references (the map has the key as the objectID and a list of indexes)
+}
+
+// add cache in args API
+func GetAccountActionPlansIndexHealth(dm *DataManager, objLimit, indexLimit int, objTTL, indexTTL time.Duration, objStaticTTL, indexStaticTTL bool) (rply *AccountActionPlanIHReply, err error) {
+	// posible errors
+	brokenRef := map[string][]string{}    // the actionPlans match the index but they are missing the account // broken reference
+	missingIndex := map[string][]string{} // the indexes are not present but the action plans points to that account // misingAccounts
+
+	// local cache
+	indexesCache := ltcache.NewCache(objLimit, objTTL, objStaticTTL, nil)
+	objectsCache := ltcache.NewCache(indexLimit, indexTTL, indexStaticTTL, nil)
+
+	getCachedIndex := func(acntID string) (apIDs []string, err error) {
+		if x, ok := indexesCache.Get(acntID); ok {
+			if x == nil {
+				return nil, utils.ErrNotFound
+			}
+			return x.([]string), nil
+		}
+		if apIDs, err = dm.GetAccountActionPlans(acntID, true, false, utils.NonTransactional); err != nil { // read from cache but do not write if not there
+			if err == utils.ErrNotFound {
+				indexesCache.Set(acntID, nil, nil)
+			}
+			return
+		}
+		indexesCache.Set(acntID, apIDs, nil)
+		return
+	}
+
+	getCachedObject := func(apID string) (obj *ActionPlan, err error) {
+		if x, ok := objectsCache.Get(apID); ok {
+			if x == nil {
+				return nil, utils.ErrNotFound
+			}
+			return x.(*ActionPlan), nil
+		}
+		if obj, err = dm.GetActionPlan(apID, true, false, utils.NonTransactional); err != nil { // read from cache but do not write if not there
+			if err == utils.ErrNotFound {
+				objectsCache.Set(apID, nil, nil)
+			}
+			return
+		}
+		objectsCache.Set(apID, obj, nil)
+		return
+	}
+
+	var acntIDs []string // start with the indexes and check the references
+	if acntIDs, err = dm.DataDB().GetKeysForPrefix(utils.AccountActionPlansPrefix); err != nil {
+		err = fmt.Errorf("error <%s> querying keys for accountActionPlans", err.Error())
+		return
+	}
+
+	for _, acntID := range acntIDs {
+		acntID = strings.TrimPrefix(acntID, utils.AccountActionPlansPrefix) //
+		var apIDs []string
+		if apIDs, err = getCachedIndex(acntID); err != nil { // read from cache but do not write if not there
+			err = fmt.Errorf("error <%s> querying the accountActionPlan: <%v>", err.Error(), acntID)
+			return
+		}
+		for _, apID := range apIDs {
+			var ap *ActionPlan
+			if ap, err = getCachedObject(apID); err != nil {
+				if err != utils.ErrNotFound {
+					err = fmt.Errorf("error <%s> querying the actionPlan: <%v>", err.Error(), apID)
+					return
+				}
+				err = nil
+				brokenRef[apID] = nil
+				continue
+
+			}
+			if !ap.AccountIDs.HasKey(acntID) { // the action plan exists but doesn't point towards the account we have index
+				brokenRef[apID] = append(brokenRef[apID], acntID)
+			}
+		}
+	}
+
+	var apIDs []string // we have all the indexes in cache now do a reverse check
+	if apIDs, err = dm.DataDB().GetKeysForPrefix(utils.ActionPlanPrefix); err != nil {
+		err = fmt.Errorf("error <%s> querying keys for actionPlans", err.Error())
+		return
+	}
+
+	for _, apID := range apIDs {
+		apID = strings.TrimPrefix(apID, utils.ActionPlanPrefix) //
+		var ap *ActionPlan
+		if ap, err = getCachedObject(apID); err != nil {
+			err = fmt.Errorf("error <%s> querying the actionPlan: <%v>", err.Error(), apID)
+			return
+		}
+		for acntID := range ap.AccountIDs {
+			var ids []string
+			if ids, err = getCachedIndex(acntID); err != nil { // read from cache but do not write if not there
+				if err != utils.ErrNotFound {
+					err = fmt.Errorf("error <%s> querying the accountActionPlan: <%v>", err.Error(), acntID)
+					return
+				}
+				err = nil
+				missingIndex[acntID] = append(missingIndex[acntID], apID)
+				continue
+			}
+			if !utils.IsSliceMember(ids, apID) { // the index doesn't exits for this actionPlan
+				missingIndex[acntID] = append(missingIndex[acntID], apID)
+			}
+		}
+	}
+
+	rply = &AccountActionPlanIHReply{
+		MissingAccountActionPlans: missingIndex,
+		BrokenReferences:          brokenRef,
+	}
+	return
+}
+
+type ReverseDestinationsIHReply struct {
+	MissingReverseDestinations map[string][]string // list of missing indexes for each object (the map has the key as the indexKey and a list of objects)
+	BrokenReferences           map[string][]string // list of broken references (the map has the key as the objectID and a list of indexes)
+}
+
+// add cache in args API
+func GetReverseDestinationsIndexHealth(dm *DataManager, objLimit, indexLimit int, objTTL, indexTTL time.Duration, objStaticTTL, indexStaticTTL bool) (rply *ReverseDestinationsIHReply, err error) {
+	// posible errors
+	brokenRef := map[string][]string{}    // the actionPlans match the index but they are missing the account // broken reference
+	missingIndex := map[string][]string{} // the indexes are not present but the action plans points to that account // misingAccounts
+
+	// local cache
+	indexesCache := ltcache.NewCache(objLimit, objTTL, objStaticTTL, nil)
+	objectsCache := ltcache.NewCache(indexLimit, indexTTL, indexStaticTTL, nil)
+
+	getCachedIndex := func(prefix string) (dstIDs []string, err error) {
+		if x, ok := indexesCache.Get(prefix); ok {
+			if x == nil {
+				return nil, utils.ErrNotFound
+			}
+			return x.([]string), nil
+		}
+		if dstIDs, err = dm.GetReverseDestination(prefix, true, false, utils.NonTransactional); err != nil { // read from cache but do not write if not there
+			if err == utils.ErrNotFound {
+				indexesCache.Set(prefix, nil, nil)
+			}
+			return
+		}
+		indexesCache.Set(prefix, dstIDs, nil)
+		return
+	}
+
+	getCachedObject := func(dstID string) (obj *Destination, err error) {
+		if x, ok := objectsCache.Get(dstID); ok {
+			if x == nil {
+				return nil, utils.ErrNotFound
+			}
+			return x.(*Destination), nil
+		}
+		if obj, err = dm.GetDestination(dstID, true, false, utils.NonTransactional); err != nil { // read from cache but do not write if not there
+			if err == utils.ErrNotFound {
+				objectsCache.Set(dstID, nil, nil)
+			}
+			return
+		}
+		objectsCache.Set(dstID, obj, nil)
+		return
+	}
+
+	var prefixes []string // start with the indexes and check the references
+	if prefixes, err = dm.DataDB().GetKeysForPrefix(utils.ReverseDestinationPrefix); err != nil {
+		err = fmt.Errorf("error <%s> querying keys for reverseDestinations", err.Error())
+		return
+	}
+
+	for _, prefix := range prefixes {
+		prefix = strings.TrimPrefix(prefix, utils.ReverseDestinationPrefix) //
+		var dstIDs []string
+		if dstIDs, err = getCachedIndex(prefix); err != nil { // read from cache but do not write if not there
+			err = fmt.Errorf("error <%s> querying the reverseDestination: <%v>", err.Error(), prefix)
+			return
+		}
+		for _, dstID := range dstIDs {
+			var dst *Destination
+			if dst, err = getCachedObject(dstID); err != nil {
+				if err != utils.ErrNotFound {
+					err = fmt.Errorf("error <%s> querying the destination: <%v>", err.Error(), dstID)
+					return
+				}
+				err = nil
+				brokenRef[dstID] = nil
+				continue
+			}
+			if !utils.IsSliceMember(dst.Prefixes, prefix) { // the action plan exists but doesn't point towards the account we have index
+				brokenRef[dstID] = append(brokenRef[dstID], prefix)
+			}
+		}
+	}
+
+	var dstIDs []string // we have all the indexes in cache now do a reverse check
+	if dstIDs, err = dm.DataDB().GetKeysForPrefix(utils.DestinationPrefix); err != nil {
+		err = fmt.Errorf("error <%s> querying keys for destinations", err.Error())
+		return
+	}
+
+	for _, dstID := range dstIDs {
+		dstID = strings.TrimPrefix(dstID, utils.DestinationPrefix) //
+		var dst *Destination
+		if dst, err = getCachedObject(dstID); err != nil {
+			err = fmt.Errorf("error <%s> querying the destination: <%v>", err.Error(), dstID)
+			return
+		}
+		for _, prefix := range dst.Prefixes {
+			var ids []string
+			if ids, err = getCachedIndex(prefix); err != nil { // read from cache but do not write if not there
+				if err != utils.ErrNotFound {
+					err = fmt.Errorf("error <%s> querying the reverseDestination: <%v>", err.Error(), prefix)
+					return
+				}
+				err = nil
+				missingIndex[prefix] = append(missingIndex[prefix], dstID)
+				continue
+			}
+			if !utils.IsSliceMember(ids, dstID) { // the index doesn't exits for this actionPlan
+				missingIndex[prefix] = append(missingIndex[prefix], dstID)
+			}
+		}
+	}
+
+	rply = &ReverseDestinationsIHReply{
+		MissingReverseDestinations: missingIndex,
+		BrokenReferences:           brokenRef,
+	}
+	return
 }
 
 type FilterIHReply struct {
@@ -60,102 +300,94 @@ type ReverseFilterIHReply struct {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// getFilters returns the filtreIDs and context(if any) for that object
-func getFilters(ctx *context.Context, dm *DataManager, indxType, tnt, id string) (filterIDs []string, err error) { // add contexts
+// getFiltersAndContexts returns the filtreIDs and context(if any) for that object
+func getFiltersAndContexts(dm *DataManager, indxType, tnt, id string) (filterIDs []string, contexts *[]string, err error) { // add contexts
 	switch indxType {
 	case utils.CacheResourceFilterIndexes:
 		var rs *ResourceProfile
-		if rs, err = dm.GetResourceProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if rs, err = dm.GetResourceProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = rs.FilterIDs
 	case utils.CacheStatFilterIndexes:
 		var st *StatQueueProfile
-		if st, err = dm.GetStatQueueProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if st, err = dm.GetStatQueueProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = st.FilterIDs
 	case utils.CacheThresholdFilterIndexes:
 		var th *ThresholdProfile
-		if th, err = dm.GetThresholdProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if th, err = dm.GetThresholdProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = th.FilterIDs
 	case utils.CacheRouteFilterIndexes:
 		var rt *RouteProfile
-		if rt, err = dm.GetRouteProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if rt, err = dm.GetRouteProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = rt.FilterIDs
 	case utils.CacheAttributeFilterIndexes:
 		var at *AttributeProfile
-		if at, err = dm.GetAttributeProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if at, err = dm.GetAttributeProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = at.FilterIDs
+		contexts = &at.Contexts
 	case utils.CacheChargerFilterIndexes:
 		var ch *ChargerProfile
-		if ch, err = dm.GetChargerProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if ch, err = dm.GetChargerProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = ch.FilterIDs
 	case utils.CacheDispatcherFilterIndexes:
 		var ds *DispatcherProfile
-		if ds, err = dm.GetDispatcherProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
+		if ds, err = dm.GetDispatcherProfile(tnt, id, true, false, utils.NonTransactional); err != nil {
 			return
 		}
 		filterIDs = ds.FilterIDs
-
-	case utils.CacheRateProfilesFilterIndexes:
-		var rp *utils.RateProfile
-		if rp, err = dm.GetRateProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
-			return
-		}
-		filterIDs = rp.FilterIDs
-	case utils.CacheActionProfilesFilterIndexes:
-		var ap *ActionProfile
-		if ap, err = dm.GetActionProfile(ctx, tnt, id, true, false, utils.NonTransactional); err != nil {
-			return
-		}
-		filterIDs = ap.FilterIDs
-	case utils.CacheAccountsFilterIndexes:
-		var ac *utils.Account
-		if ac, err = dm.GetAccount(ctx, tnt, id); err != nil {
-			return
-		}
-		filterIDs = ac.FilterIDs
+		contexts = &ds.Subsystems
 	default:
-		return nil, fmt.Errorf("unsupported index type:<%q>", indxType)
-	}
-	if filterIDs == nil { // nil means ErrNotFound in cache
-		filterIDs = make([]string, 0)
+		return nil, nil, fmt.Errorf("unsupported index type:<%q>", indxType)
 	}
 	return
 }
 
+// objFIH keeps only the FilterIDs and Contexts from objects
+type objFIH struct {
+	filterIDs []string
+	contexts  *[]string
+}
+
 // getIHObjFromCache returns all information that is needed from the mentioned object
 // uses an extra cache(controled by the API) to optimize data management
-func getIHObjFromCache(ctx *context.Context, dm *DataManager, objCache *ltcache.Cache, indxType, tnt, id string) (filtIDs []string, err error) {
+func getIHObjFromCache(dm *DataManager, objCache *ltcache.Cache, indxType, tnt, id string) (obj *objFIH, err error) {
 	cacheKey := utils.ConcatenatedKey(tnt, id)
 	if objVal, ok := objCache.Get(cacheKey); ok {
 		if objVal == nil {
 			return nil, utils.ErrNotFound
 		}
-		return objVal.([]string), nil
+		return objVal.(*objFIH), nil
 	}
-	if filtIDs, err = getFilters(ctx, dm, indxType, tnt, id); err != nil {
+	var filtIDs []string
+	var contexts *[]string
+	if filtIDs, contexts, err = getFiltersAndContexts(dm, indxType, tnt, id); err != nil {
 		if err == utils.ErrNotFound || err == utils.ErrDSPProfileNotFound || err == utils.ErrDSPHostNotFound {
 			objCache.Set(cacheKey, nil, nil)
 		}
 		return
 	}
-	objCache.Set(cacheKey, filtIDs, nil)
+	obj = &objFIH{
+		filterIDs: filtIDs,
+		contexts:  contexts,
+	}
+	objCache.Set(cacheKey, obj, nil)
 	return
 }
 
 // getIHFltrFromCache returns the Filter
 // uses an extra cache(controled by the API) to optimize data management
-func getIHFltrFromCache(ctx *context.Context, dm *DataManager, fltrCache *ltcache.Cache, tnt, id string) (fltr *Filter, err error) {
+func getIHFltrFromCache(dm *DataManager, fltrCache *ltcache.Cache, tnt, id string) (fltr *Filter, err error) {
 	cacheKey := utils.ConcatenatedKey(tnt, id)
 	if fltrVal, ok := fltrCache.Get(cacheKey); ok {
 		if fltrVal == nil {
@@ -163,7 +395,7 @@ func getIHFltrFromCache(ctx *context.Context, dm *DataManager, fltrCache *ltcach
 		}
 		return fltrVal.(*Filter), nil
 	}
-	if fltr, err = dm.GetFilter(ctx, tnt, id,
+	if fltr, err = dm.GetFilter(tnt, id,
 		true, false, utils.NonTransactional); err != nil {
 		if err == utils.ErrNotFound {
 			fltrCache.Set(cacheKey, nil, nil)
@@ -176,8 +408,8 @@ func getIHFltrFromCache(ctx *context.Context, dm *DataManager, fltrCache *ltcach
 
 // getIHFltrIdxFromCache returns the Filter index
 // uses an extra cache(controled by the API) to optimize data management
-func getIHFltrIdxFromCache(ctx *context.Context, dm *DataManager, fltrIdxCache *ltcache.Cache, idxItmType, tntGrp, idxKey string) (idx utils.StringSet, err error) {
-	cacheKey := utils.ConcatenatedKey(tntGrp, idxKey)
+func getIHFltrIdxFromCache(dm *DataManager, fltrIdxCache *ltcache.Cache, idxItmType, tntCtx, idxKey string) (idx utils.StringSet, err error) {
+	cacheKey := utils.ConcatenatedKey(tntCtx, idxKey)
 	if fltrVal, ok := fltrIdxCache.Get(cacheKey); ok {
 		if fltrVal == nil {
 			return nil, utils.ErrNotFound
@@ -185,7 +417,7 @@ func getIHFltrIdxFromCache(ctx *context.Context, dm *DataManager, fltrIdxCache *
 		return fltrVal.(utils.StringSet), nil
 	}
 	var indexes map[string]utils.StringSet
-	if indexes, err = dm.GetIndexes(ctx, idxItmType, tntGrp, idxKey, utils.NonTransactional, true, false); err != nil {
+	if indexes, err = dm.GetIndexes(idxItmType, tntCtx, idxKey, true, false); err != nil {
 		if err == utils.ErrNotFound {
 			fltrIdxCache.Set(cacheKey, nil, nil)
 		}
@@ -197,7 +429,7 @@ func getIHFltrIdxFromCache(ctx *context.Context, dm *DataManager, fltrIdxCache *
 }
 
 // getFilterAsIndexSet will parse the rules of filter and add them to the index map
-func getFilterAsIndexSet(ctx *context.Context, dm *DataManager, fltrIdxCache *ltcache.Cache, idxItmType, tntGrp string, fltr *Filter) (indexes map[string]utils.StringSet, err error) {
+func getFilterAsIndexSet(dm *DataManager, fltrIdxCache *ltcache.Cache, idxItmType, tntCtx string, fltr *Filter) (indexes map[string]utils.StringSet, err error) {
 	indexes = make(map[string]utils.StringSet)
 	for _, flt := range fltr.Rules {
 		if !FilterIndexTypes.Has(flt.Type) ||
@@ -223,7 +455,7 @@ func getFilterAsIndexSet(ctx *context.Context, dm *DataManager, fltrIdxCache *lt
 			}
 			var rcvIndx utils.StringSet
 			// only read from cache in case if we do not find the index to not cache the negative response
-			if rcvIndx, err = getIHFltrIdxFromCache(ctx, dm, fltrIdxCache, idxItmType, tntGrp, idxKey); err != nil {
+			if rcvIndx, err = getIHFltrIdxFromCache(dm, fltrIdxCache, idxItmType, tntCtx, idxKey); err != nil {
 				if err != utils.ErrNotFound {
 					return
 				}
@@ -237,18 +469,18 @@ func getFilterAsIndexSet(ctx *context.Context, dm *DataManager, fltrIdxCache *lt
 }
 
 // updateFilterIHMisingIndx updates the reply with the missing indexes for a specific object( obj->filter->index relation)
-func updateFilterIHMisingIndx(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxCache *ltcache.Cache, filterIDs []string, indxType, tnt, tntGrp, itmID string, rply *FilterIHReply) (_ *FilterIHReply, err error) {
+func updateFilterIHMisingIndx(dm *DataManager, fltrCache, fltrIdxCache *ltcache.Cache, filterIDs []string, indxType, tnt, tntCtx, itmID string, missingFltrs utils.StringSet, rply *FilterIHReply) (_ *FilterIHReply, err error) {
 	if len(filterIDs) == 0 { // no filter so check the *none:*any:*any index
 		idxKey := utils.ConcatenatedKey(utils.MetaNone, utils.MetaAny, utils.MetaAny)
 		var rcvIndx utils.StringSet
-		if rcvIndx, err = getIHFltrIdxFromCache(ctx, dm, fltrIdxCache, indxType, tntGrp, idxKey); err != nil {
+		if rcvIndx, err = getIHFltrIdxFromCache(dm, fltrCache, indxType, tntCtx, idxKey); err != nil {
 			if err != utils.ErrNotFound {
 				return
 			}
-			key := utils.ConcatenatedKey(tntGrp, idxKey)
+			key := utils.ConcatenatedKey(tntCtx, idxKey)
 			rply.MissingIndexes[key] = append(rply.MissingIndexes[key], itmID)
 		} else if !rcvIndx.Has(itmID) {
-			key := utils.ConcatenatedKey(tntGrp, idxKey)
+			key := utils.ConcatenatedKey(tntCtx, idxKey)
 			rply.MissingIndexes[key] = append(rply.MissingIndexes[key], itmID)
 		}
 
@@ -256,30 +488,34 @@ func updateFilterIHMisingIndx(ctx *context.Context, dm *DataManager, fltrCache, 
 	}
 	for _, fltrID := range filterIDs { // parse all the filters
 		var fltr *Filter
-		if fltr, err = getIHFltrFromCache(ctx, dm, fltrCache, tnt, fltrID); err != nil {
+		if fltr, err = getIHFltrFromCache(dm, fltrCache, tnt, fltrID); err != nil {
 			if err != utils.ErrNotFound {
 				return
 			}
 			fltrID = utils.ConcatenatedKey(tnt, fltrID)
-			rply.MissingFilters[fltrID] = append(rply.MissingFilters[fltrID], itmID)
+			if tntIdxFltr := utils.ConcatenatedKey(fltrID, itmID); !missingFltrs.Has(tntIdxFltr) { // tntIdxFltr = tnt:idx:id verification to not set the same ID
+				missingFltrs.Add(tntIdxFltr)
+				rply.MissingFilters[fltrID] = append(rply.MissingFilters[fltrID], itmID)
+			}
 			continue
 		}
 		var indexes map[string]utils.StringSet
-		if indexes, err = getFilterAsIndexSet(ctx, dm, fltrIdxCache, indxType, tntGrp, fltr); err != nil { // build the index from filter
+		if indexes, err = getFilterAsIndexSet(dm, fltrIdxCache, indxType, tntCtx, fltr); err != nil { // build the index from filter
 			return
 		}
 		for key, idx := range indexes { // check if the item is in the indexes
 			if !idx.Has(itmID) {
-				key = utils.ConcatenatedKey(tntGrp, key)
+				key = utils.ConcatenatedKey(tntCtx, key)
 				rply.MissingIndexes[key] = append(rply.MissingIndexes[key], itmID)
 			}
 		}
 	}
+
 	return rply, nil
 }
 
 // GetFltrIdxHealth returns the missing indexes for all objects
-func GetFltrIdxHealth(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxCache, objCache *ltcache.Cache, indxType string) (rply *FilterIHReply, err error) {
+func GetFltrIdxHealth(dm *DataManager, fltrCache, fltrIdxCache, objCache *ltcache.Cache, indxType string) (rply *FilterIHReply, err error) {
 	// check the objects ( obj->filter->index relation)
 	rply = &FilterIHReply{ // prepare the reply
 		MissingIndexes: make(map[string][]string),
@@ -288,48 +524,63 @@ func GetFltrIdxHealth(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxC
 	}
 	objPrfx := utils.CacheIndexesToPrefix[indxType]
 	var ids []string
-	if ids, err = dm.dataDB.GetKeysForPrefix(ctx, objPrfx); err != nil {
+	if ids, err = dm.dataDB.GetKeysForPrefix(objPrfx); err != nil {
 		return
 	}
-	for _, id := range ids { // get all the objects from DB
+	missingFltrs := utils.StringSet{} // for checking multiple filters that are missing(to not append the same ID in case)
+	for _, id := range ids {          // get all the objects from DB
 		id = strings.TrimPrefix(id, objPrfx)
 		tntID := utils.NewTenantID(id)
-		var filterIDs []string
-		if filterIDs, err = getIHObjFromCache(ctx, dm, objCache, indxType, tntID.Tenant, tntID.ID); err != nil {
+		var obj *objFIH
+		if obj, err = getIHObjFromCache(dm, objCache, indxType, tntID.Tenant, tntID.ID); err != nil {
 			return
 		}
-
-		if rply, err = updateFilterIHMisingIndx(ctx, dm, fltrCache, fltrIdxCache, filterIDs, indxType, tntID.Tenant, tntID.Tenant, tntID.ID, rply); err != nil { // update the reply
-			return
+		if obj.contexts == nil { // update the reply
+			if rply, err = updateFilterIHMisingIndx(dm, fltrCache, fltrIdxCache, obj.filterIDs,
+				indxType, tntID.Tenant, tntID.Tenant, tntID.ID, missingFltrs, rply); err != nil {
+				return
+			}
+		} else {
+			for _, ctx := range *obj.contexts {
+				if rply, err = updateFilterIHMisingIndx(dm, fltrCache, fltrIdxCache,
+					obj.filterIDs, indxType, tntID.Tenant, utils.ConcatenatedKey(tntID.Tenant, ctx), tntID.ID, missingFltrs, rply); err != nil {
+					return
+				}
+			}
 		}
 	}
 
 	// check the indexes( index->filter->obj relation)
 	idxPrfx := utils.CacheInstanceToPrefix[indxType]
 	var indexKeys []string
-	if indexKeys, err = dm.dataDB.GetKeysForPrefix(ctx, idxPrfx); err != nil {
+	if indexKeys, err = dm.dataDB.GetKeysForPrefix(idxPrfx); err != nil {
 		return
 	}
 	missingObj := utils.StringSet{}
 	for _, dataID := range indexKeys { // get all the indexes
 		dataID = strings.TrimPrefix(dataID, idxPrfx)
 
-		splt := utils.SplitConcatenatedKey(dataID) // tntGrp:filterType:fieldName:fieldVal
+		splt := utils.SplitConcatenatedKey(dataID) // tntCtx:filterType:fieldName:fieldVal
 		lsplt := len(splt)
 		if lsplt < 4 {
 			err = fmt.Errorf("WRONG_IDX_KEY_FORMAT<%s>", dataID)
 			return
 		}
-		tnt := utils.ConcatenatedKey(splt[:lsplt-3]...) // prefix may contain context/subsystems
+		tnt := splt[0]
+		var ctx *string
+		if lsplt-3 == 2 {
+			ctx = &splt[1]
+		}
+		tntCtx := utils.ConcatenatedKey(splt[:lsplt-3]...) // prefix may contain context/subsystems
 		idxKey := utils.ConcatenatedKey(splt[lsplt-3:]...)
 
 		var idx utils.StringSet
-		if idx, err = getIHFltrIdxFromCache(ctx, dm, fltrIdxCache, indxType, tnt, idxKey); err != nil {
+		if idx, err = getIHFltrIdxFromCache(dm, fltrIdxCache, indxType, tntCtx, idxKey); err != nil {
 			return
 		}
 		for itmID := range idx {
-			var filterIDs []string
-			if filterIDs, err = getIHObjFromCache(ctx, dm, objCache, indxType, tnt, itmID); err != nil {
+			var obj *objFIH
+			if obj, err = getIHObjFromCache(dm, objCache, indxType, tnt, itmID); err != nil {
 				if err != utils.ErrNotFound && err != utils.ErrDSPHostNotFound && err != utils.ErrDSPProfileNotFound {
 					return
 				}
@@ -337,16 +588,22 @@ func GetFltrIdxHealth(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxC
 				err = nil
 				continue
 			}
-			if len(filterIDs) == 0 { // check if the index is *none:*any:*any
+			if ctx != nil &&
+				(obj.contexts == nil || !utils.IsSliceMember(*obj.contexts, *ctx)) { // check the contexts if present
+				key := utils.ConcatenatedKey(tntCtx, idxKey)
+				rply.MissingIndexes[key] = append(rply.MissingIndexes[key], itmID)
+				continue
+			}
+			if len(obj.filterIDs) == 0 { // check if the index is *none:*any:*any
 				if utils.ConcatenatedKey(utils.MetaNone, utils.MetaAny, utils.MetaAny) != idxKey {
 					rply.BrokenIndexes[dataID] = append(rply.BrokenIndexes[dataID], itmID)
 				}
 				continue
 			}
-			var hasIndx bool                   // just one filter needs to be the index
-			for _, fltrID := range filterIDs { // get the index for each filter from the object
+			var hasIndx bool                       // just one filter needs to be the index
+			for _, fltrID := range obj.filterIDs { // get the index for each filter from the object
 				var fltr *Filter
-				if fltr, err = getIHFltrFromCache(ctx, dm, fltrCache, tnt, fltrID); err != nil {
+				if fltr, err = getIHFltrFromCache(dm, fltrCache, tnt, fltrID); err != nil {
 					if err != utils.ErrNotFound {
 						return
 					}
@@ -354,7 +611,7 @@ func GetFltrIdxHealth(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxC
 					continue
 				}
 				var indexes map[string]utils.StringSet
-				if indexes, err = getFilterAsIndexSet(ctx, dm, fltrIdxCache, indxType, tnt, fltr); err != nil {
+				if indexes, err = getFilterAsIndexSet(dm, fltrIdxCache, indxType, tntCtx, fltr); err != nil {
 					return
 				}
 				idx, has := indexes[idxKey]
@@ -373,7 +630,7 @@ func GetFltrIdxHealth(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxC
 }
 
 // getRevFltrIdxHealthFromObj returns the missing reverse indexes for all objects of the given type
-func getRevFltrIdxHealthFromObj(ctx *context.Context, dm *DataManager, fltrCache, revFltrIdxCache, objCache *ltcache.Cache, indxType string) (rply *ReverseFilterIHReply, err error) {
+func getRevFltrIdxHealthFromObj(dm *DataManager, fltrCache, revFltrIdxCache, objCache *ltcache.Cache, indxType string) (rply *ReverseFilterIHReply, err error) {
 	// check the objects ( obj->filter->index relation)
 	rply = &ReverseFilterIHReply{ // prepare the reply
 		MissingReverseIndexes: make(map[string][]string),
@@ -382,41 +639,74 @@ func getRevFltrIdxHealthFromObj(ctx *context.Context, dm *DataManager, fltrCache
 	}
 	objPrfx := utils.CacheIndexesToPrefix[indxType]
 	var ids []string
-	if ids, err = dm.dataDB.GetKeysForPrefix(ctx, objPrfx); err != nil {
+	if ids, err = dm.dataDB.GetKeysForPrefix(objPrfx); err != nil {
 		return
 	}
 	for _, id := range ids { // get all the objects
 		id = strings.TrimPrefix(id, objPrfx)
 		tntID := utils.NewTenantID(id)
-		var filterIDs []string
-		if filterIDs, err = getIHObjFromCache(ctx, dm, objCache, indxType, tntID.Tenant, tntID.ID); err != nil {
+		var obj *objFIH
+		if obj, err = getIHObjFromCache(dm, objCache, indxType, tntID.Tenant, tntID.ID); err != nil {
 			return
 		}
 
-		for _, fltrID := range filterIDs {
-			if strings.HasPrefix(fltrID, utils.Meta) {
-				continue
-			}
-			if _, err = getIHFltrFromCache(ctx, dm, fltrCache, tntID.Tenant, fltrID); err != nil { // check if the filter exists
-				if err != utils.ErrNotFound {
-					return
-				}
-				err = nil
-				key := utils.ConcatenatedKey(tntID.Tenant, fltrID)
-				rply.MissingFilters[key] = append(rply.MissingFilters[key], tntID.ID)
-				continue
-			}
-			var revIdx utils.StringSet
-			if revIdx, err = getIHFltrIdxFromCache(ctx, dm, revFltrIdxCache, utils.CacheReverseFilterIndexes, utils.ConcatenatedKey(tntID.Tenant, fltrID), indxType); err != nil { // check the reverese index
-				if err == utils.ErrNotFound {
-					rply.MissingReverseIndexes[id] = append(rply.MissingReverseIndexes[id], fltrID)
-					err = nil
+		if obj.contexts == nil { // no contexts
+			for _, fltrID := range obj.filterIDs {
+				if strings.HasPrefix(fltrID, utils.Meta) {
 					continue
 				}
-				return
+				if _, err = getIHFltrFromCache(dm, fltrCache, tntID.Tenant, fltrID); err != nil { // check if the filter exists
+					if err != utils.ErrNotFound {
+						return
+					}
+					err = nil
+					key := utils.ConcatenatedKey(tntID.Tenant, fltrID)
+					rply.MissingFilters[key] = append(rply.MissingFilters[key], tntID.ID)
+					continue
+				}
+				var revIdx utils.StringSet
+				if revIdx, err = getIHFltrIdxFromCache(dm, revFltrIdxCache, utils.CacheReverseFilterIndexes, utils.ConcatenatedKey(tntID.Tenant, fltrID), indxType); err != nil { // check the reverese index
+					if err == utils.ErrNotFound {
+						rply.MissingReverseIndexes[id] = append(rply.MissingReverseIndexes[id], fltrID)
+						err = nil
+						continue
+					}
+					return
+				}
+				if !revIdx.Has(tntID.ID) {
+					rply.MissingReverseIndexes[id] = append(rply.MissingReverseIndexes[id], fltrID)
+				}
 			}
-			if !revIdx.Has(tntID.ID) {
-				rply.MissingReverseIndexes[id] = append(rply.MissingReverseIndexes[id], fltrID)
+		} else {
+			for _, fltrID := range obj.filterIDs {
+				if strings.HasPrefix(fltrID, utils.Meta) {
+					continue
+				}
+				if _, err = getIHFltrFromCache(dm, fltrCache, tntID.Tenant, fltrID); err != nil { // check if the filter exists
+					if err != utils.ErrNotFound {
+						return
+					}
+					err = nil
+					key := utils.ConcatenatedKey(tntID.Tenant, fltrID)
+					rply.MissingFilters[key] = append(rply.MissingFilters[key], tntID.ID)
+					continue
+				}
+				var revIdx utils.StringSet
+				if revIdx, err = getIHFltrIdxFromCache(dm, revFltrIdxCache, utils.CacheReverseFilterIndexes, utils.ConcatenatedKey(tntID.Tenant, fltrID), indxType); err != nil { // check the reverese index
+					if err == utils.ErrNotFound {
+						for _, ctx := range *obj.contexts {
+							rply.MissingReverseIndexes[id] = append(rply.MissingReverseIndexes[id], utils.ConcatenatedKey(fltrID, ctx))
+						}
+						err = nil
+						continue
+					}
+					return
+				}
+				for _, ctx := range *obj.contexts { // check the context
+					if !revIdx.Has(utils.ConcatenatedKey(id, ctx)) {
+						rply.MissingReverseIndexes[id] = append(rply.MissingReverseIndexes[id], utils.ConcatenatedKey(fltrID, ctx))
+					}
+				}
 			}
 		}
 	}
@@ -424,9 +714,9 @@ func getRevFltrIdxHealthFromObj(ctx *context.Context, dm *DataManager, fltrCache
 }
 
 // getRevFltrIdxHealthFromReverse parses the reverse indexes and updates the reply
-func getRevFltrIdxHealthFromReverse(ctx *context.Context, dm *DataManager, fltrCache, revFltrIdxCache *ltcache.Cache, objCaches map[string]*ltcache.Cache, rply map[string]*ReverseFilterIHReply) (_ map[string]*ReverseFilterIHReply, err error) {
+func getRevFltrIdxHealthFromReverse(dm *DataManager, fltrCache, revFltrIdxCache *ltcache.Cache, objCaches map[string]*ltcache.Cache, rply map[string]*ReverseFilterIHReply) (_ map[string]*ReverseFilterIHReply, err error) {
 	var revIndexKeys []string
-	if revIndexKeys, err = dm.dataDB.GetKeysForPrefix(ctx, utils.FilterIndexPrfx); err != nil {
+	if revIndexKeys, err = dm.dataDB.GetKeysForPrefix(utils.FilterIndexPrfx); err != nil {
 		return
 	}
 	missingObj := utils.StringSet{}
@@ -447,43 +737,34 @@ func getRevFltrIdxHealthFromReverse(ctx *context.Context, dm *DataManager, fltrC
 		}
 
 		var revIdx utils.StringSet
-		if revIdx, err = getIHFltrIdxFromCache(ctx, dm, revFltrIdxCache, utils.CacheReverseFilterIndexes, revIdxKey, indxType); err != nil {
+		if revIdx, err = getIHFltrIdxFromCache(dm, revFltrIdxCache, utils.CacheReverseFilterIndexes, revIdxKey, indxType); err != nil {
 			return
 		}
-		for id := range revIdx {
-			var filterIDs []string
-			if indxType == utils.CacheRateFilterIndexes {
-				spl := strings.SplitN(id, utils.ConcatenatedKeySep, 2)
-				rateID := spl[0]
-				rprfID := spl[1]
-				var rates map[string]*utils.Rate
-				if rates, err = getRatesFromCache(ctx, dm, objCache, tnt, rprfID); err != nil {
-					if err != utils.ErrNotFound {
-						return
-					}
-					missingObj.Add(utils.ConcatenatedKey(tnt, id))
-					rply[indxType].MissingObjects = missingObj.AsSlice()
-					err = nil
-					continue
-				}
-				if rate, has := rates[rateID]; !has {
-					missingObj.Add(utils.ConcatenatedKey(tnt, id))
-					rply[indxType].MissingObjects = missingObj.AsSlice()
-					continue
-				} else {
-					filterIDs = rate.FilterIDs
-				}
-			} else if filterIDs, err = getIHObjFromCache(ctx, dm, objCache, indxType, tnt, id); err != nil {
+		for itemIDCtx := range revIdx {
+			var id, ctx string // split the id and context
+			if !strings.Contains(itemIDCtx, utils.ConcatenatedKeySep) {
+				id = itemIDCtx
+			} else {
+				spl := strings.SplitN(itemIDCtx, utils.ConcatenatedKeySep, 2)
+				id = spl[0]
+				ctx = spl[1]
+			}
+			var obj *objFIH
+			if obj, err = getIHObjFromCache(dm, objCache, indxType, tnt, id); err != nil { // get the object
 				if err == utils.ErrNotFound {
 					missingObj.Add(utils.ConcatenatedKey(tnt, id))
 					rply[indxType].MissingObjects = missingObj.AsSlice()
+					//rply[indxType].MissingObjects = append(rply[indxType].MissingObjects, utils.ConcatenatedKey(tnt, id))
 					err = nil
 					continue
 				}
 				return
 			}
-			if !utils.IsSliceMember(filterIDs, fltrID) { // check the filters
-				key := utils.ConcatenatedKey(tnt, id)
+			if !utils.IsSliceMember(obj.filterIDs, fltrID) { // check the filters
+				key := utils.ConcatenatedKey(tnt, itemIDCtx)
+				rply[indxType].BrokenReverseIndexes[key] = append(rply[indxType].BrokenReverseIndexes[key], fltrID)
+			} else if obj.contexts != nil && !utils.IsSliceMember(*obj.contexts, ctx) { // and the contexts
+				key := utils.ConcatenatedKey(tnt, itemIDCtx)
 				rply[indxType].BrokenReverseIndexes[key] = append(rply[indxType].BrokenReverseIndexes[key], fltrID)
 			}
 		}
@@ -492,204 +773,23 @@ func getRevFltrIdxHealthFromReverse(ctx *context.Context, dm *DataManager, fltrC
 }
 
 // GetRevFltrIdxHealth will return all the broken indexes
-func GetRevFltrIdxHealth(ctx *context.Context, dm *DataManager, fltrCache, revFltrIdxCache *ltcache.Cache, objCaches map[string]*ltcache.Cache) (rply map[string]*ReverseFilterIHReply, err error) {
+func GetRevFltrIdxHealth(dm *DataManager, fltrCache, revFltrIdxCache *ltcache.Cache, objCaches map[string]*ltcache.Cache) (rply map[string]*ReverseFilterIHReply, err error) {
 	rply = make(map[string]*ReverseFilterIHReply)
 	for indxType := range utils.CacheIndexesToPrefix { // parse all posible filter indexes
 		if indxType == utils.CacheReverseFilterIndexes { // ommit the reverse indexes
 			continue
 		}
-		if rply[indxType], err = getRevFltrIdxHealthFromObj(ctx, dm, fltrCache, revFltrIdxCache, objCaches[indxType], indxType); err != nil {
+		if rply[indxType], err = getRevFltrIdxHealthFromObj(dm, fltrCache, revFltrIdxCache, objCaches[indxType], indxType); err != nil {
 			return
 		}
 	}
-	if rply[utils.CacheRateFilterIndexes], err = getRevFltrIdxHealthFromRateRates(ctx, dm, fltrCache, revFltrIdxCache, objCaches[utils.CacheRateFilterIndexes]); err != nil {
-		return
-	}
-	rply, err = getRevFltrIdxHealthFromReverse(ctx, dm, fltrCache, revFltrIdxCache, objCaches, rply)
+	rply, err = getRevFltrIdxHealthFromReverse(dm, fltrCache, revFltrIdxCache, objCaches, rply)
 	for k, v := range rply { // should be a safe for (even on rply==nil)
 		if len(v.MissingFilters) == 0 && // remove nonpopulated objects
 			len(v.MissingObjects) == 0 &&
 			len(v.BrokenReverseIndexes) == 0 &&
 			len(v.MissingReverseIndexes) == 0 {
 			delete(rply, k)
-		}
-	}
-	return
-}
-
-// getRatesFromCache returns all rates from rateprofile
-// uses an extra cache(controled by the API) to optimize data management
-func getRatesFromCache(ctx *context.Context, dm *DataManager, objCache *ltcache.Cache, tnt, rprfID string) (_ map[string]*utils.Rate, err error) {
-	cacheKey := utils.ConcatenatedKey(tnt, rprfID)
-	if objVal, ok := objCache.Get(cacheKey); ok {
-		if objVal == nil {
-			return nil, utils.ErrNotFound
-		}
-		rprf := objVal.(*utils.RateProfile)
-		return rprf.Rates, nil
-	}
-
-	var rprf *utils.RateProfile
-	if rprf, err = dm.GetRateProfile(ctx, tnt, rprfID, true, false, utils.NonTransactional); err != nil {
-		if err == utils.ErrNotFound {
-			objCache.Set(cacheKey, nil, nil)
-		}
-		return
-	}
-	objCache.Set(cacheKey, rprf, nil)
-	return rprf.Rates, nil
-}
-
-// GetFltrIdxHealth returns the missing indexes for all objects
-func GetFltrIdxHealthForRateRates(ctx *context.Context, dm *DataManager, fltrCache, fltrIdxCache, objCache *ltcache.Cache) (rply *FilterIHReply, err error) {
-	// check the objects ( obj->filter->index relation)
-	rply = &FilterIHReply{
-		MissingIndexes: make(map[string][]string),
-		BrokenIndexes:  make(map[string][]string),
-		MissingFilters: make(map[string][]string),
-	}
-	var ids []string
-	if ids, err = dm.dataDB.GetKeysForPrefix(ctx, utils.RateProfilePrefix); err != nil {
-		return
-	}
-	for _, id := range ids {
-		id = strings.TrimPrefix(id, utils.RateProfilePrefix)
-		tntID := utils.NewTenantID(id)
-
-		var rates map[string]*utils.Rate
-		if rates, err = getRatesFromCache(ctx, dm, objCache, tntID.Tenant, tntID.ID); err != nil {
-			return
-		}
-		for rtID, rate := range rates {
-			if rply, err = updateFilterIHMisingIndx(ctx, dm, fltrCache, fltrIdxCache, rate.FilterIDs, utils.CacheRateFilterIndexes, tntID.Tenant, utils.ConcatenatedKey(tntID.Tenant, tntID.ID), rtID, rply); err != nil {
-				return
-			}
-		}
-	}
-
-	// check the indexes( index->filter->obj relation)
-	var indexKeys []string
-	if indexKeys, err = dm.dataDB.GetKeysForPrefix(ctx, utils.RateFilterIndexPrfx); err != nil {
-		return
-	}
-	for _, dataID := range indexKeys {
-		dataID = strings.TrimPrefix(dataID, utils.RateFilterIndexPrfx)
-
-		splt := utils.SplitConcatenatedKey(dataID) // tntGrp:filterType:fieldName:fieldVal
-		lsplt := len(splt)
-		if lsplt < 4 {
-			err = fmt.Errorf("WRONG_IDX_KEY_FORMAT<%s>", dataID)
-			return
-		}
-		tnt := splt[0]
-		rpID := splt[1]
-		tntGrp := utils.ConcatenatedKey(splt[:lsplt-3]...) // prefix may contain context/subsystems
-		idxKey := utils.ConcatenatedKey(splt[lsplt-3:]...)
-
-		var idx utils.StringSet
-		if idx, err = getIHFltrIdxFromCache(ctx, dm, fltrIdxCache, utils.CacheRateFilterIndexes, tntGrp, idxKey); err != nil {
-			return
-		}
-		for itmID := range idx {
-			var rates map[string]*utils.Rate
-			if rates, err = getRatesFromCache(ctx, dm, objCache, tnt, rpID); err != nil {
-				if err != utils.ErrNotFound {
-					return
-				}
-				rply.MissingObjects = append(rply.MissingObjects, utils.ConcatenatedKey(tntGrp, itmID))
-				err = nil
-				continue
-			}
-			var filterIDs []string
-			if rate, has := rates[itmID]; !has {
-				rply.MissingObjects = append(rply.MissingObjects, utils.ConcatenatedKey(tntGrp, itmID))
-				continue
-			} else {
-				filterIDs = rate.FilterIDs
-			}
-			if len(filterIDs) == 0 {
-				if utils.ConcatenatedKey(utils.MetaNone, utils.MetaAny, utils.MetaAny) != idxKey {
-					rply.BrokenIndexes[dataID] = append(rply.BrokenIndexes[dataID], itmID)
-				}
-				continue
-			}
-			var hasIndx bool
-			for _, fltrID := range filterIDs {
-				var fltr *Filter
-				if fltr, err = getIHFltrFromCache(ctx, dm, fltrCache, tnt, fltrID); err != nil {
-					if err != utils.ErrNotFound {
-						return
-					}
-					err = nil // should be already logged when we parsed all the objects
-					continue
-				}
-				var indexes map[string]utils.StringSet
-				if indexes, err = getFilterAsIndexSet(ctx, dm, fltrIdxCache, utils.CacheRateFilterIndexes, tntGrp, fltr); err != nil {
-					return
-				}
-				idx, has := indexes[idxKey]
-				if hasIndx = has && idx.Has(itmID); hasIndx {
-					break
-				}
-			}
-			if !hasIndx {
-				key := utils.ConcatenatedKey(tnt, idxKey)
-				rply.BrokenIndexes[key] = append(rply.BrokenIndexes[key], itmID)
-			}
-		}
-	}
-
-	return
-}
-
-func getRevFltrIdxHealthFromRateRates(ctx *context.Context, dm *DataManager, fltrCache, revFltrIdxCache, objCache *ltcache.Cache) (rply *ReverseFilterIHReply, err error) {
-	// check the objects ( obj->filter->index relation)
-	rply = &ReverseFilterIHReply{
-		MissingReverseIndexes: make(map[string][]string),
-		BrokenReverseIndexes:  make(map[string][]string),
-		MissingFilters:        make(map[string][]string),
-	}
-	var ids []string
-	if ids, err = dm.dataDB.GetKeysForPrefix(ctx, utils.RateProfilePrefix); err != nil {
-		return
-	}
-	for _, id := range ids {
-		id = strings.TrimPrefix(id, utils.RateProfilePrefix)
-		tntID := utils.NewTenantID(id)
-		var rates map[string]*utils.Rate
-		if rates, err = getRatesFromCache(ctx, dm, objCache, tntID.Tenant, tntID.ID); err != nil {
-			return
-		}
-		for rtID, rate := range rates {
-			itmID := utils.ConcatenatedKey(rtID, tntID.ID)
-			itmIDWithTnt := utils.ConcatenatedKey(id, rtID)
-
-			for _, fltrID := range rate.FilterIDs {
-				if strings.HasPrefix(fltrID, utils.Meta) {
-					continue
-				}
-				if _, err = getIHFltrFromCache(ctx, dm, fltrCache, tntID.Tenant, fltrID); err != nil {
-					if err != utils.ErrNotFound {
-						return
-					}
-					err = nil
-					key := utils.ConcatenatedKey(tntID.Tenant, fltrID)
-					rply.MissingFilters[key] = append(rply.MissingFilters[key], itmID)
-					continue
-				}
-				var revIdx utils.StringSet
-				if revIdx, err = getIHFltrIdxFromCache(ctx, dm, revFltrIdxCache, utils.CacheReverseFilterIndexes, utils.ConcatenatedKey(tntID.Tenant, fltrID), utils.CacheRateFilterIndexes); err != nil {
-					if err == utils.ErrNotFound {
-						rply.MissingReverseIndexes[itmIDWithTnt] = append(rply.MissingReverseIndexes[itmIDWithTnt], fltrID)
-						err = nil
-						continue
-					}
-					return
-				}
-				if !revIdx.Has(itmID) {
-					rply.MissingReverseIndexes[itmIDWithTnt] = append(rply.MissingReverseIndexes[itmIDWithTnt], fltrID)
-				}
-			}
 		}
 	}
 	return

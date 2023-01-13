@@ -26,11 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 
 	// libs for sql DBs
 	"gorm.io/driver/mysql"
@@ -99,6 +98,23 @@ func (rdr *SQLEventReader) Config() *config.EventReaderCfg {
 	return rdr.cgrCfg.ERsCfg().Readers[rdr.cfgIdx]
 }
 
+func (rdr *SQLEventReader) openDB(dialect gorm.Dialector) (err error) {
+	var db *gorm.DB
+	if db, err = gorm.Open(dialect, &gorm.Config{AllowGlobalUpdate: true}); err != nil {
+		return
+	}
+	var sqlDB *sql.DB
+	if sqlDB, err = db.DB(); err != nil {
+		return
+	}
+	sqlDB.SetMaxOpenConns(10)
+	if rdr.Config().RunDelay == time.Duration(0) { // 0 disables the automatic read, maybe done per API
+		return
+	}
+	go rdr.readLoop(db, sqlDB) // read until the connection is closed
+	return
+}
+
 // Serve will start the gorutines needed to watch the sql topic
 func (rdr *SQLEventReader) Serve() (err error) {
 	var dialect gorm.Dialector
@@ -110,22 +126,7 @@ func (rdr *SQLEventReader) Serve() (err error) {
 	default:
 		return fmt.Errorf("db type <%s> not supported", rdr.connType)
 	}
-	var db *gorm.DB
-	if db, err = gorm.Open(dialect, &gorm.Config{AllowGlobalUpdate: true}); err != nil {
-		return
-	}
-	var sqlDB *sql.DB
-	if sqlDB, err = db.DB(); err != nil {
-		return
-	}
-	sqlDB.SetMaxOpenConns(10)
-	if err = sqlDB.Ping(); err != nil {
-		return
-	}
-	if rdr.Config().RunDelay == time.Duration(0) { // 0 disables the automatic read, maybe done per API
-		return
-	}
-	go rdr.readLoop(db, sqlDB) // read until the connection is closed
+	err = rdr.openDB(dialect)
 	return
 }
 
@@ -245,7 +246,7 @@ func (rdr *SQLEventReader) processMessage(msg map[string]interface{}) (err error
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
 	var pass bool
-	if pass, err = rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err = rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
 		return
 	}
@@ -277,7 +278,7 @@ func (rdr *SQLEventReader) setURL(inURL, outURL string, opts *config.EventReader
 	if opts.SQLDBName != nil {
 		dbname = *opts.SQLDBName
 	}
-	ssl := utils.SQLDefaultPgSSLMode
+	ssl := utils.SQLDefaultSSLMode
 	if opts.PgSSLMode != nil {
 		ssl = *opts.PgSSLMode
 	}
@@ -328,7 +329,7 @@ func (rdr *SQLEventReader) setURL(inURL, outURL string, opts *config.EventReader
 	if processedOpt.SQLDBName != nil {
 		outDBname = *processedOpt.SQLDBName
 	}
-	outSSL = utils.SQLDefaultPgSSLMode
+	outSSL = utils.SQLDefaultSSLMode
 	if processedOpt.PgSSLMode != nil {
 		outSSL = *processedOpt.PgSSLMode
 	}

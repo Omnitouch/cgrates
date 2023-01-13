@@ -21,10 +21,18 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
+
+// NewDfltRemoteHost returns the first cached default value for a RemoteHost connection
+func NewDfltRemoteHost() *RemoteHost {
+	if dfltRemoteHost == nil {
+		return new(RemoteHost) // No defaults, most probably we are building the defaults now
+	}
+	dfltVal := *dfltRemoteHost // Copy the value instead of it's pointer
+	return &dfltVal
+}
 
 // NewDfltRPCConn returns the default value for a RPCConn
 func NewDfltRPCConn() *RPCConn {
@@ -34,65 +42,14 @@ func NewDfltRPCConn() *RPCConn {
 // RPCConns the config for all rpc pools
 type RPCConns map[string]*RPCConn
 
-// loadRPCConns loads the RPCConns section of the configuration
-func (rC RPCConns) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnRPCConns := make(RPCConnsJson)
-	if err = jsnCfg.GetSection(ctx, RPCConnsJSON, &jsnRPCConns); err != nil {
-		return
-	}
-	rC.loadFromJSONCfg(jsnRPCConns)
-	return
-}
-
-func (rC RPCConns) loadFromJSONCfg(jsn RPCConnsJson) {
-	// hardoded the *internal connection
-	rC[utils.MetaInternal] = &RPCConn{
-		Strategy: rpcclient.PoolFirst,
-		PoolSize: 0,
-		Conns: []*RemoteHost{{
-			Address: utils.MetaInternal,
-		}},
-	}
-	rC[rpcclient.BiRPCInternal] = &RPCConn{
-		Strategy: rpcclient.PoolFirst,
-		PoolSize: 0,
-		Conns: []*RemoteHost{{
-			Address: rpcclient.BiRPCInternal,
-		}},
-	}
-	rC[utils.MetaLocalHost] = &RPCConn{
-		Strategy: rpcclient.PoolFirst,
-		PoolSize: 0,
-		Conns: []*RemoteHost{{
-			Address:   "127.0.0.1:2012",
-			Transport: utils.MetaJSON,
-		}},
-	}
-	rC[utils.MetaBiJSONLocalHost] = &RPCConn{
-		Strategy: rpcclient.PoolFirst,
-		PoolSize: 0,
-		Conns: []*RemoteHost{{
-			Address:   "127.0.0.1:2014",
-			Transport: rpcclient.BiRPCJSON,
-		}},
-	}
-	for key, val := range jsn {
-		rC[key] = NewDfltRPCConn()
-		rC[key].loadFromJSONCfg(val)
-	}
-}
-
 // AsMapInterface returns the config as a map[string]interface{}
-func (rC RPCConns) AsMapInterface(string) interface{} {
-	rpcConns := make(map[string]interface{})
+func (rC RPCConns) AsMapInterface() (rpcConns map[string]interface{}) {
+	rpcConns = make(map[string]interface{})
 	for key, value := range rC {
 		rpcConns[key] = value.AsMapInterface()
 	}
-	return rpcConns
+	return
 }
-
-func (RPCConns) SName() string            { return RPCConnsJSON }
-func (rC RPCConns) CloneSection() Section { return rC.Clone() }
 
 // Clone returns a deep copy of RPCConns
 func (rC RPCConns) Clone() (cln RPCConns) {
@@ -105,13 +62,12 @@ func (rC RPCConns) Clone() (cln RPCConns) {
 
 // RPCConn the connection pool config
 type RPCConn struct {
-	Strategy     string
-	PoolSize     int
-	ReplyTimeout time.Duration
-	Conns        []*RemoteHost
+	Strategy string
+	PoolSize int
+	Conns    []*RemoteHost
 }
 
-func (rC *RPCConn) loadFromJSONCfg(jsnCfg *RPCConnJson) (err error) {
+func (rC *RPCConn) loadFromJSONCfg(jsnCfg *RPCConnsJson) {
 	if jsnCfg == nil {
 		return
 	}
@@ -121,36 +77,27 @@ func (rC *RPCConn) loadFromJSONCfg(jsnCfg *RPCConnJson) (err error) {
 	if jsnCfg.PoolSize != nil {
 		rC.PoolSize = *jsnCfg.PoolSize
 	}
-	if jsnCfg.Reply_timeout != nil {
-		if rC.ReplyTimeout, err = utils.ParseDurationWithNanosecs(*jsnCfg.Reply_timeout); err != nil {
-			return
-		}
-	}
 	if jsnCfg.Conns != nil {
 		rC.Conns = make([]*RemoteHost, len(*jsnCfg.Conns))
 		for idx, jsnHaCfg := range *jsnCfg.Conns {
-			rC.Conns[idx] = getDftRemHstCfg()
+			rC.Conns[idx] = NewDfltRemoteHost()
 			rC.Conns[idx].loadFromJSONCfg(jsnHaCfg) //To review if the function signature changes
 		}
 	}
-	return
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (rC *RPCConn) AsMapInterface() (mp map[string]interface{}) {
-	mp = map[string]interface{}{
+func (rC *RPCConn) AsMapInterface() (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
 		utils.StrategyCfg: rC.Strategy,
 		utils.PoolSize:    rC.PoolSize,
-	}
-	if rC.ReplyTimeout != 0 {
-		mp[utils.ReplyTimeoutCfg] = rC.ReplyTimeout
 	}
 	if rC.Conns != nil {
 		conns := make([]map[string]interface{}, len(rC.Conns))
 		for i, item := range rC.Conns {
 			conns[i] = item.AsMapInterface()
 		}
-		mp[utils.Conns] = conns
+		initialMP[utils.Conns] = conns
 	}
 	return
 }
@@ -158,9 +105,8 @@ func (rC *RPCConn) AsMapInterface() (mp map[string]interface{}) {
 // Clone returns a deep copy of RPCConn
 func (rC RPCConn) Clone() (cln *RPCConn) {
 	cln = &RPCConn{
-		Strategy:     rC.Strategy,
-		PoolSize:     rC.PoolSize,
-		ReplyTimeout: rC.ReplyTimeout,
+		Strategy: rC.Strategy,
+		PoolSize: rC.PoolSize,
 	}
 	if rC.Conns != nil {
 		cln.Conns = make([]*RemoteHost, len(rC.Conns))
@@ -206,17 +152,17 @@ func (rh *RemoteHost) loadFromJSONCfg(jsnCfg *RemoteHostJson) (err error) {
 	if jsnCfg.Tls != nil {
 		rh.TLS = *jsnCfg.Tls
 	}
-	if jsnCfg.Client_key != nil {
-		rh.ClientKey = *jsnCfg.Client_key
+	if jsnCfg.Key_path != nil {
+		rh.ClientKey = *jsnCfg.Key_path
 	}
-	if jsnCfg.Client_certificate != nil {
-		rh.ClientCertificate = *jsnCfg.Client_certificate
+	if jsnCfg.Cert_path != nil {
+		rh.ClientCertificate = *jsnCfg.Cert_path
 	}
-	if jsnCfg.Ca_certificate != nil {
-		rh.CaCertificate = *jsnCfg.Ca_certificate
+	if jsnCfg.Ca_path != nil {
+		rh.CaCertificate = *jsnCfg.Ca_path
 	}
-	if jsnCfg.Connect_attempts != nil {
-		rh.ConnectAttempts = *jsnCfg.Connect_attempts
+	if jsnCfg.Conn_attempts != nil {
+		rh.ConnectAttempts = *jsnCfg.Conn_attempts
 	}
 	if jsnCfg.Reconnects != nil {
 		rh.Reconnects = *jsnCfg.Reconnects
@@ -267,7 +213,7 @@ func (rh *RemoteHost) AsMapInterface() (mp map[string]interface{}) {
 		mp[utils.ReconnectsCfg] = rh.Reconnects
 	}
 	if rh.MaxReconnectInterval != 0 {
-		mp[utils.MaxReconnectIntervalCfg] = rh.MaxReconnectInterval.String()
+		mp[utils.MaxReconnectIntervalCfg] = rh.MaxReconnectInterval
 	}
 	if rh.ConnectTimeout != 0 {
 		mp[utils.ConnectTimeoutCfg] = rh.ConnectTimeout
@@ -284,15 +230,15 @@ func (rh RemoteHost) Clone() (cln *RemoteHost) {
 		ID:                   rh.ID,
 		Address:              rh.Address,
 		Transport:            rh.Transport,
-		TLS:                  rh.TLS,
-		ClientKey:            rh.ClientKey,
-		ClientCertificate:    rh.ClientCertificate,
-		CaCertificate:        rh.CaCertificate,
 		ConnectAttempts:      rh.ConnectAttempts,
 		Reconnects:           rh.Reconnects,
 		MaxReconnectInterval: rh.MaxReconnectInterval,
 		ConnectTimeout:       rh.ConnectTimeout,
 		ReplyTimeout:         rh.ReplyTimeout,
+		TLS:                  rh.TLS,
+		ClientKey:            rh.ClientKey,
+		ClientCertificate:    rh.ClientCertificate,
+		CaCertificate:        rh.CaCertificate,
 	}
 }
 
@@ -309,15 +255,15 @@ func UpdateRPCCons(rpcConns RPCConns, newHosts map[string]*RemoteHost) (connIDs 
 			connIDs.Add(rpcKey)
 			rh.Address = newHost.Address
 			rh.Transport = newHost.Transport
-			rh.TLS = newHost.TLS
-			rh.ClientKey = newHost.ClientKey
-			rh.ClientCertificate = newHost.ClientCertificate
-			rh.CaCertificate = newHost.CaCertificate
 			rh.ConnectAttempts = newHost.ConnectAttempts
 			rh.Reconnects = newHost.Reconnects
 			rh.MaxReconnectInterval = newHost.MaxReconnectInterval
 			rh.ConnectTimeout = newHost.ConnectTimeout
 			rh.ReplyTimeout = newHost.ReplyTimeout
+			rh.TLS = newHost.TLS
+			rh.ClientKey = newHost.ClientKey
+			rh.ClientCertificate = newHost.ClientCertificate
+			rh.CaCertificate = newHost.CaCertificate
 		}
 	}
 	return
@@ -335,151 +281,16 @@ func RemoveRPCCons(rpcConns RPCConns, hosts utils.StringSet) (connIDs utils.Stri
 			connIDs.Add(rpcKey)
 			rh.Address = ""
 			rh.Transport = ""
-			rh.TLS = false
-			rh.ClientKey = ""
-			rh.ClientCertificate = ""
-			rh.CaCertificate = ""
 			rh.ConnectAttempts = 0
 			rh.Reconnects = 0
 			rh.MaxReconnectInterval = 0
 			rh.ConnectTimeout = 0
 			rh.ReplyTimeout = 0
+			rh.TLS = false
+			rh.ClientKey = ""
+			rh.ClientCertificate = ""
+			rh.CaCertificate = ""
 		}
 	}
 	return
-}
-
-// Represents one connection instance towards a rater/cdrs server
-type RemoteHostJson struct {
-	Id                     *string
-	Address                *string
-	Transport              *string
-	Connect_attempts       *int
-	Reconnects             *int
-	Max_reconnect_interval *string
-	Connect_timeout        *string
-	Reply_timeout          *string
-	Tls                    *bool
-	Client_certificate     *string
-	Client_key             *string
-	Ca_certificate         *string
-}
-
-func diffRemoteHostJson(v1, v2 *RemoteHost) (d *RemoteHostJson) {
-	d = new(RemoteHostJson)
-	if v1.ID != v2.ID {
-		d.Id = utils.StringPointer(v2.ID)
-	}
-	if v1.Address != v2.Address {
-		d.Address = utils.StringPointer(v2.Address)
-	}
-	if v1.Transport != v2.Transport {
-		d.Transport = utils.StringPointer(v2.Transport)
-	}
-	if v1.TLS != v2.TLS {
-		d.Tls = utils.BoolPointer(v2.TLS)
-	}
-	if v1.ClientKey != v2.ClientKey {
-		d.Client_key = utils.StringPointer(v2.ClientKey)
-	}
-	if v1.ClientCertificate != v2.ClientCertificate {
-		d.Client_certificate = utils.StringPointer(v2.ClientCertificate)
-	}
-	if v1.ClientCertificate != v2.ClientCertificate {
-		d.Ca_certificate = utils.StringPointer(v2.CaCertificate)
-	}
-	if v1.ConnectAttempts != v2.ConnectAttempts {
-		d.Connect_attempts = utils.IntPointer(v2.ConnectAttempts)
-	}
-	if v1.Reconnects != v2.Reconnects {
-		d.Reconnects = utils.IntPointer(v2.Reconnects)
-	}
-	if v1.MaxReconnectInterval != v2.MaxReconnectInterval {
-		d.Max_reconnect_interval = utils.StringPointer(v2.MaxReconnectInterval.String())
-	}
-	if v1.ConnectTimeout != v2.ConnectTimeout {
-		d.Connect_timeout = utils.StringPointer(v2.ConnectTimeout.String())
-	}
-	if v1.ReplyTimeout != v2.ReplyTimeout {
-		d.Reply_timeout = utils.StringPointer(v2.ReplyTimeout.String())
-	}
-	return
-}
-
-type RPCConnJson struct {
-	Strategy      *string
-	PoolSize      *int
-	Reply_timeout *string
-	Conns         *[]*RemoteHostJson
-}
-
-func diffRPCConnJson(d *RPCConnJson, v1, v2 *RPCConn) *RPCConnJson {
-	if d == nil {
-		d = new(RPCConnJson)
-	}
-	if v1.Strategy != v2.Strategy {
-		d.Strategy = utils.StringPointer(v2.Strategy)
-	}
-	if v1.PoolSize != v2.PoolSize {
-		d.PoolSize = utils.IntPointer(v2.PoolSize)
-	}
-	if v1.ReplyTimeout != v2.ReplyTimeout {
-		d.Reply_timeout = utils.StringPointer(v2.ReplyTimeout.String())
-	}
-	if v2.Conns != nil {
-		conns := make([]*RemoteHostJson, len(v2.Conns))
-		dft := getDftRemHstCfg()
-		for i, conn := range v2.Conns {
-			conns[i] = diffRemoteHostJson(dft, conn)
-		}
-		d.Conns = &conns
-	}
-	return d
-}
-
-func equalsRemoteHosts(v1, v2 []*RemoteHost) bool {
-	if len(v1) != len(v2) {
-		return false
-	}
-	for i := range v2 {
-		if v1[i].ID != v2[i].ID ||
-			v1[i].Address != v2[i].Address ||
-			v1[i].Transport != v2[i].Transport ||
-			v1[i].TLS != v2[i].TLS ||
-			v1[i].ClientKey != v2[i].ClientKey ||
-			v1[i].ClientCertificate != v2[i].ClientCertificate ||
-			v1[i].CaCertificate != v2[i].CaCertificate ||
-			v1[i].ConnectAttempts != v2[i].ConnectAttempts ||
-			v1[i].Reconnects != v2[i].Reconnects ||
-			v1[i].MaxReconnectInterval != v2[i].MaxReconnectInterval ||
-			v1[i].ConnectTimeout != v2[i].ConnectTimeout ||
-			v1[i].ReplyTimeout != v2[i].ReplyTimeout {
-			return false
-		}
-	}
-	return true
-}
-
-func equalsRPCConn(v1, v2 *RPCConn) bool {
-	return (v1 == nil && v2 == nil) ||
-		(v1 != nil && v2 != nil &&
-			v1.Strategy == v2.Strategy &&
-			v1.PoolSize == v2.PoolSize &&
-			v1.ReplyTimeout == v2.ReplyTimeout &&
-			equalsRemoteHosts(v1.Conns, v2.Conns))
-}
-
-type RPCConnsJson map[string]*RPCConnJson
-
-func diffRPCConnsJson(d RPCConnsJson, v1, v2 RPCConns) RPCConnsJson {
-	if d == nil {
-		d = make(RPCConnsJson)
-	}
-	dft := NewDfltRPCConn()
-	for k, val := range v2 {
-		if !equalsRPCConn(v1[k], val) {
-			d[k] = diffRPCConnJson(d[k], dft, val)
-		}
-	}
-	return d
 }

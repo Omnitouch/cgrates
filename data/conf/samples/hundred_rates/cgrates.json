@@ -1,0 +1,33 @@
+{
+
+  "general": {
+    "rounding_decimals": 20,
+  },
+
+  "data_db": {
+    "db_type": "redis",
+    "db_port": 6379,
+    "db_name": "10",
+  },
+
+  "stor_db": {
+    "db_password": "CGRateS.org",
+  },
+
+
+
+  "rals": {
+    "enabled": true,
+  },
+
+
+  "schedulers": {
+    "enabled": true
+  },
+
+  "apiers": {
+    "enabled": true,
+  },
+  
+
+}

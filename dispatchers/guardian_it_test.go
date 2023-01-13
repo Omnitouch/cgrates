@@ -26,8 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/guardian"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var sTestsDspGrd = []func(t *testing.T){
@@ -90,7 +89,7 @@ func testDspGrdLock(t *testing.T) {
 		Timeout:     500 * time.Millisecond,
 	}
 	var reply string
-	if err := dispEngine.RPC.Call(utils.GuardianSv1RemoteLock, &guardian.AttrRemoteLockWithAPIOpts{
+	if err := dispEngine.RPC.Call(utils.GuardianSv1RemoteLock, &AttrRemoteLockWithAPIOpts{
 		AttrRemoteLock: args,
 		Tenant:         "cgrates.org",
 		APIOpts: map[string]interface{}{
@@ -101,7 +100,7 @@ func testDspGrdLock(t *testing.T) {
 	}
 
 	var unlockReply []string
-	if err := dispEngine.RPC.Call(utils.GuardianSv1RemoteUnlock, &guardian.AttrRemoteUnlockWithAPIOpts{
+	if err := dispEngine.RPC.Call(utils.GuardianSv1RemoteUnlock, &AttrRemoteUnlockWithAPIOpts{
 		RefID:  reply,
 		Tenant: "cgrates.org",
 		APIOpts: map[string]interface{}{

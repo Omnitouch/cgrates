@@ -21,11 +21,12 @@ package ers
 import (
 	"fmt"
 	"sort"
+	"time"
 
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func getProcessOptions(erOpts *config.EventReaderOpts) (eeOpts *config.EventExporterOpts) {
@@ -82,24 +83,6 @@ func getProcessOptions(erOpts *config.EventReaderOpts) (eeOpts *config.EventExpo
 			eeOpts = new(config.EventExporterOpts)
 		}
 		eeOpts.KafkaTopic = erOpts.KafkaTopicProcessed
-	}
-	if erOpts.KafkaTLSProcessed != nil {
-		if eeOpts == nil {
-			eeOpts = new(config.EventExporterOpts)
-		}
-		eeOpts.KafkaTLS = erOpts.KafkaTLSProcessed
-	}
-	if erOpts.KafkaCAPathProcessed != nil {
-		if eeOpts == nil {
-			eeOpts = new(config.EventExporterOpts)
-		}
-		eeOpts.KafkaCAPath = erOpts.KafkaCAPathProcessed
-	}
-	if erOpts.KafkaSkipTLSVerifyProcessed != nil {
-		if eeOpts == nil {
-			eeOpts = new(config.EventExporterOpts)
-		}
-		eeOpts.KafkaSkipTLSVerify = erOpts.KafkaSkipTLSVerifyProcessed
 	}
 	if erOpts.NATSCertificateAuthorityProcessed != nil {
 		if eeOpts == nil {
@@ -228,6 +211,7 @@ func mergePartialEvents(cgrEvs []*utils.CGREvent, cfg *config.EventReaderCfg, fl
 		cgrEv = &utils.CGREvent{
 			Tenant:  cgrEvs[0].Tenant,
 			ID:      utils.UUIDSha1Prefix(),
+			Time:    utils.TimePointer(time.Now()),
 			Event:   make(map[string]interface{}),
 			APIOpts: make(map[string]interface{}),
 		}

@@ -26,11 +26,11 @@ import (
 	"path"
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -51,12 +51,12 @@ var sTestsDspIT = []func(t *testing.T){
 func TestDispatcherITMove1(t *testing.T) {
 	var err error
 	dspPathIn = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	dspCfgIn, err = config.NewCGRConfigFromPath(context.Background(), dspPathIn)
+	dspCfgIn, err = config.NewCGRConfigFromPath(dspPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dspPathOut = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	dspCfgOut, err = config.NewCGRConfigFromPath(context.Background(), dspPathOut)
+	dspCfgOut, err = config.NewCGRConfigFromPath(dspPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +70,12 @@ func TestDispatcherITMove1(t *testing.T) {
 func TestDispatcherITMove2(t *testing.T) {
 	var err error
 	dspPathIn = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	dspCfgIn, err = config.NewCGRConfigFromPath(context.Background(), dspPathIn)
+	dspCfgIn, err = config.NewCGRConfigFromPath(dspPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dspPathOut = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	dspCfgOut, err = config.NewCGRConfigFromPath(context.Background(), dspPathOut)
+	dspCfgOut, err = config.NewCGRConfigFromPath(dspPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,17 +83,18 @@ func TestDispatcherITMove2(t *testing.T) {
 	for _, stest := range sTestsDspIT {
 		t.Run("TestDispatcherITMove", stest)
 	}
+	dcMigrator.Close()
 }
 
 func TestDispatcherITMoveEncoding(t *testing.T) {
 	var err error
 	dspPathIn = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	dspCfgIn, err = config.NewCGRConfigFromPath(context.Background(), dspPathIn)
+	dspCfgIn, err = config.NewCGRConfigFromPath(dspPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dspPathOut = path.Join(*dataDir, "conf", "samples", "tutmongojson")
-	dspCfgOut, err = config.NewCGRConfigFromPath(context.Background(), dspPathOut)
+	dspCfgOut, err = config.NewCGRConfigFromPath(dspPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,17 +102,18 @@ func TestDispatcherITMoveEncoding(t *testing.T) {
 	for _, stest := range sTestsDspIT {
 		t.Run("TestDispatcherITMoveEncoding", stest)
 	}
+	dcMigrator.Close()
 }
 
 func TestDispatcherITMoveEncoding2(t *testing.T) {
 	var err error
 	dspPathIn = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	dspCfgIn, err = config.NewCGRConfigFromPath(context.Background(), dspPathIn)
+	dspCfgIn, err = config.NewCGRConfigFromPath(dspPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dspPathOut = path.Join(*dataDir, "conf", "samples", "tutmysqljson")
-	dspCfgOut, err = config.NewCGRConfigFromPath(context.Background(), dspPathOut)
+	dspCfgOut, err = config.NewCGRConfigFromPath(dspPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +121,7 @@ func TestDispatcherITMoveEncoding2(t *testing.T) {
 	for _, stest := range sTestsDspIT {
 		t.Run("TestDispatcherITMoveEncoding2", stest)
 	}
+	dcMigrator.Close()
 }
 
 func testDspITConnect(t *testing.T) {
@@ -126,7 +129,7 @@ func testDspITConnect(t *testing.T) {
 		dspCfgIn.DataDbCfg().Host, dspCfgIn.DataDbCfg().Port,
 		dspCfgIn.DataDbCfg().Name, dspCfgIn.DataDbCfg().User,
 		dspCfgIn.DataDbCfg().Password, dspCfgIn.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), dspCfgIn.DataDbCfg().Opts, dspCfgIn.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), dspCfgIn.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -134,16 +137,16 @@ func testDspITConnect(t *testing.T) {
 		dspCfgOut.DataDbCfg().Host, dspCfgOut.DataDbCfg().Port,
 		dspCfgOut.DataDbCfg().Name, dspCfgOut.DataDbCfg().User,
 		dspCfgOut.DataDbCfg().Password, dspCfgOut.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), dspCfgOut.DataDbCfg().Opts, dspCfgOut.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), dspCfgOut.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if reflect.DeepEqual(dspPathIn, dspPathOut) {
-		dspMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, true)
+		dspMigrator, err = NewMigrator(dataDBIn, dataDBOut, nil, nil,
+			false, true, false, false)
 	} else {
-		dspMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, false)
+		dspMigrator, err = NewMigrator(dataDBIn, dataDBOut, nil, nil,
+			false, false, false, false)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -179,9 +182,13 @@ func testDspITMigrateAndMove(t *testing.T) {
 	dspPrf := &engine.DispatcherProfile{
 		Tenant:    "cgrates.org",
 		ID:        "Dsp1",
-		FilterIDs: []string{"*string:~*req.Accont:1001", "*ai:~*req.AnswerTime:2014-07-14T14:25:00Z|2014-07-14T14:26:00Z"},
-		Strategy:  utils.MetaRandom,
-		Weight:    20,
+		FilterIDs: []string{"*string:~*req.Accont:1001"},
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			ExpiryTime:     time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+		},
+		Strategy: utils.MetaRandom,
+		Weight:   20,
 	}
 	dspHost := &engine.DispatcherHost{
 		Tenant: "cgrates.org",
@@ -191,10 +198,10 @@ func testDspITMigrateAndMove(t *testing.T) {
 			Transport: utils.MetaJSON,
 		},
 	}
-	if err := dspMigrator.dmIN.DataManager().SetDispatcherProfile(context.TODO(), dspPrf, false); err != nil {
+	if err := dspMigrator.dmIN.DataManager().SetDispatcherProfile(dspPrf, false); err != nil {
 		t.Error(err)
 	}
-	if err := dspMigrator.dmIN.DataManager().SetDispatcherHost(context.TODO(), dspHost); err != nil {
+	if err := dspMigrator.dmIN.DataManager().SetDispatcherHost(dspHost); err != nil {
 		t.Error(err)
 	}
 	currentVersion := engine.CurrentDataDBVersions()
@@ -203,7 +210,7 @@ func testDspITMigrateAndMove(t *testing.T) {
 		t.Error("Error when setting version for Dispatchers ", err.Error())
 	}
 
-	_, err = dspMigrator.dmOut.DataManager().GetDispatcherProfile(context.TODO(), "cgrates.org",
+	_, err = dspMigrator.dmOut.DataManager().GetDispatcherProfile("cgrates.org",
 		"Dsp1", false, false, utils.NonTransactional)
 	if err != utils.ErrDSPProfileNotFound {
 		t.Error(err)
@@ -213,7 +220,7 @@ func testDspITMigrateAndMove(t *testing.T) {
 	if err != nil {
 		t.Error("Error when migrating Dispatchers ", err.Error())
 	}
-	result, err := dspMigrator.dmOut.DataManager().GetDispatcherProfile(context.TODO(), "cgrates.org",
+	result, err := dspMigrator.dmOut.DataManager().GetDispatcherProfile("cgrates.org",
 		"Dsp1", false, false, utils.NonTransactional)
 	if err != nil {
 		t.Error(err)
@@ -221,13 +228,13 @@ func testDspITMigrateAndMove(t *testing.T) {
 	if !reflect.DeepEqual(result, dspPrf) {
 		t.Errorf("Expecting: %+v, received: %+v", dspPrf, result)
 	}
-	result, err = dspMigrator.dmIN.DataManager().GetDispatcherProfile(context.TODO(), "cgrates.org",
+	result, err = dspMigrator.dmIN.DataManager().GetDispatcherProfile("cgrates.org",
 		"Dsp1", false, false, utils.NonTransactional)
-	if err != utils.ErrDSPProfileNotFound {
+	if err != utils.ErrNotFound {
 		t.Error(err)
 	}
 
-	resultHost, err := dspMigrator.dmOut.DataManager().GetDispatcherHost(context.TODO(), "cgrates.org",
+	resultHost, err := dspMigrator.dmOut.DataManager().GetDispatcherHost("cgrates.org",
 		"ALL", false, false, utils.NonTransactional)
 	if err != nil {
 		t.Error(err)
@@ -235,7 +242,7 @@ func testDspITMigrateAndMove(t *testing.T) {
 	if !reflect.DeepEqual(resultHost, dspHost) {
 		t.Errorf("Expecting: %+v, received: %+v", dspHost, resultHost)
 	}
-	resultHost, err = dspMigrator.dmIN.DataManager().GetDispatcherHost(context.TODO(), "cgrates.org",
+	resultHost, err = dspMigrator.dmIN.DataManager().GetDispatcherHost("cgrates.org",
 		"ALL", false, false, utils.NonTransactional)
 	if err != utils.ErrDSPHostNotFound {
 		t.Error(err)

@@ -21,14 +21,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package sessions
 
 import (
+	"fmt"
 	"net/rpc"
 	"path"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -40,16 +41,14 @@ var (
 	sessionsITtests = []func(t *testing.T){
 		testSessionsItInitCfg,
 		testSessionsItResetDataDb,
-		/*
-			testSessionsItStartEngine,
-			testSessionsItApierRpcConn,
-			testSessionsItTPFromFolder,
-			testSessionsItTerminatNonexist,
-			testSessionsItUpdateNonexist,
-			testSessionsItTerminatePassive,
-			testSessionsItEventCostCompressing,
-
-		*/
+		testSessionsItResetStorDb,
+		testSessionsItStartEngine,
+		testSessionsItApierRpcConn,
+		testSessionsItTPFromFolder,
+		testSessionsItTerminatNonexist,
+		testSessionsItUpdateNonexist,
+		testSessionsItTerminatePassive,
+		testSessionsItEventCostCompressing,
 		testSessionsItStopCgrEngine,
 	}
 )
@@ -76,7 +75,7 @@ func TestSessionsIt(t *testing.T) {
 func testSessionsItInitCfg(t *testing.T) {
 	sItCfgPath = path.Join(*dataDir, "conf", "samples", sItCfgDIR)
 	var err error
-	sItCfg, err = config.NewCGRConfigFromPath(context.Background(), sItCfgPath)
+	sItCfg, err = config.NewCGRConfigFromPath(sItCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -84,7 +83,14 @@ func testSessionsItInitCfg(t *testing.T) {
 
 // Remove data in both rating and accounting db
 func testSessionsItResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(sItCfg); err != nil {
+	if err := engine.InitDataDb(sItCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testSessionsItResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(sItCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -104,8 +110,6 @@ func testSessionsItApierRpcConn(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-/*
 
 // Load the tariff plan, creating accounts and their balances
 func testSessionsItTPFromFolder(t *testing.T) {
@@ -289,7 +293,7 @@ func testSessionsItTerminatePassive(t *testing.T) {
 		utils.Usage:        time.Minute,
 	})
 
-	cgrID := GetSetOptsOriginID(sEv)
+	cgrID := GetSetCGRID(sEv)
 	s := &Session{
 		CGRID:      cgrID,
 		EventStart: sEv,
@@ -475,8 +479,6 @@ func testSessionsItEventCostCompressing(t *testing.T) {
 	}
 
 }
-
-*/
 
 func testSessionsItStopCgrEngine(t *testing.T) {
 	if err := engine.KillEngine(*waitRater); err != nil {

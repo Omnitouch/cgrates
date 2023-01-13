@@ -23,15 +23,40 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
+
+type v2ActionTrigger struct {
+	ID                string // original csv tag
+	UniqueID          string // individual id
+	ThresholdType     string //*min_event_counter, *max_event_counter, *min_balance_counter, *max_balance_counter, *min_balance, *max_balance, *balance_expired
+	ThresholdValue    float64
+	Recurrent         bool          // reset excuted flag each run
+	MinSleep          time.Duration // Minimum duration between two executions in case of recurrent triggers
+	ExpirationDate    time.Time
+	ActivationDate    time.Time
+	Balance           *engine.BalanceFilter //filtru
+	Weight            float64
+	ActionsID         string
+	MinQueuedItems    int // Trigger actions only if this number is hit (stats only) MINHITS
+	Executed          bool
+	LastExecutionTime time.Time
+}
 
 func (m *Migrator) migrateCurrentThresholds() (err error) {
 	var ids []string
+	//Thresholds
+	for _, id := range ids {
+		tntID := strings.SplitN(strings.TrimPrefix(id, utils.ThresholdPrefix), utils.InInFieldSep, 2)
+		if len(tntID) < 2 {
+			return fmt.Errorf("Invalid key <%s> when migrating thresholds", id)
+		}
+
+	}
 	//ThresholdProfiles
-	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(context.TODO(), utils.ThresholdProfilePrefix)
+	ids, err = m.dmIN.DataManager().DataDB().GetKeysForPrefix(utils.ThresholdProfilePrefix)
 	if err != nil {
 		return err
 	}
@@ -40,30 +65,43 @@ func (m *Migrator) migrateCurrentThresholds() (err error) {
 		if len(tntID) < 2 {
 			return fmt.Errorf("Invalid key <%s> when migrating threshold profiles", id)
 		}
-		thps, err := m.dmIN.DataManager().GetThresholdProfile(context.TODO(), tntID[0], tntID[1], false, false, utils.NonTransactional)
+		thps, err := m.dmIN.DataManager().GetThresholdProfile(tntID[0], tntID[1], false, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
-		ths, err := m.dmIN.DataManager().GetThreshold(context.TODO(), tntID[0], tntID[1], false, false, utils.NonTransactional)
+		ths, err := m.dmIN.DataManager().GetThreshold(tntID[0], tntID[1], false, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
 		if thps == nil || m.dryRun {
 			continue
 		}
-		if err := m.dmOut.DataManager().SetThresholdProfile(context.TODO(), thps, true); err != nil {
+		if err := m.dmOut.DataManager().SetThresholdProfile(thps, true); err != nil {
 			return err
 		}
 		// update the threshold in the new DB
 		if ths != nil {
-			if err := m.dmOut.DataManager().SetThreshold(context.TODO(), ths); err != nil {
+			if err := m.dmOut.DataManager().SetThreshold(ths); err != nil {
 				return err
 			}
 		}
-		if err := m.dmIN.DataManager().RemoveThresholdProfile(context.TODO(), tntID[0], tntID[1], false); err != nil {
+		if err := m.dmIN.DataManager().RemoveThresholdProfile(tntID[0], tntID[1], false); err != nil {
 			return err
 		}
 		m.stats[utils.Thresholds]++
+	}
+	return
+}
+
+func (m *Migrator) migrateV2ActionTriggers() (thp *engine.ThresholdProfile, th *engine.Threshold, filter *engine.Filter, err error) {
+	var v2ACT *v2ActionTrigger
+	if v2ACT, err = m.dmIN.getV2ActionTrigger(); err != nil {
+		return
+	}
+	if v2ACT.ID != "" {
+		if thp, th, filter, err = v2ACT.AsThreshold(); err != nil {
+			return
+		}
 	}
 	return
 }
@@ -125,6 +163,9 @@ func (m *Migrator) migrateThresholds() (err error) {
 					return
 				}
 			case 1:
+				if v3, th, filter, err = m.migrateV2ActionTriggers(); err != nil && err != utils.ErrNoMoreData {
+					return
+				}
 				version = 3
 			case 2:
 				if v3, err = m.migrateV2Thresholds(); err != nil && err != utils.ErrNoMoreData {
@@ -150,15 +191,15 @@ func (m *Migrator) migrateThresholds() (err error) {
 		if !m.dryRun {
 			//set threshond
 			if migratedFrom == 1 {
-				if err = m.dmOut.DataManager().SetFilter(context.TODO(), filter, true); err != nil {
+				if err = m.dmOut.DataManager().SetFilter(filter, true); err != nil {
 					return
 				}
 			}
-			if err = m.dmOut.DataManager().SetThresholdProfile(context.TODO(), v4, true); err != nil {
+			if err = m.dmOut.DataManager().SetThresholdProfile(v4, true); err != nil {
 				return
 			}
 			if migratedFrom == 1 { // do it after SetThresholdProfile to overwrite the created threshold
-				if err = m.dmOut.DataManager().SetThreshold(context.TODO(), th); err != nil {
+				if err = m.dmOut.DataManager().SetThreshold(th); err != nil {
 					return
 				}
 			}
@@ -181,6 +222,184 @@ func (m *Migrator) migrateThresholds() (err error) {
 	return m.ensureIndexesDataDB(engine.ColTps)
 }
 
+func (v2ATR v2ActionTrigger) AsThreshold() (thp *engine.ThresholdProfile, th *engine.Threshold, filter *engine.Filter, err error) {
+	var filterIDS []string
+	var filters []*engine.FilterRule
+	if v2ATR.Balance.ID != nil && *v2ATR.Balance.ID != "" {
+		//TO DO:
+		// if v2ATR.Balance.ExpirationDate != nil { //MetaLess
+		// 	x, err := engine.NewRequestFilter(utils.MetaTimings, "ExpirationDate", v2ATR.Balance.ExpirationDate)
+		// 	if err != nil {
+		// 		return nil, nil, err
+		// 	}
+		// 	filters = append(filters, x)
+		// }
+		// if v2ATR.Balance.Weight != nil { //MetaLess /MetaRSRFields
+		// 	x, err := engine.NewRequestFilter(utils.MetaLessOrEqual, "Weight", []string{strconv.FormatFloat(*v2ATR.Balance.Weight, 'f', 6, 64)})
+		// 	if err != nil {
+		// 		return nil, nil, err
+		// 	}
+		// 	filters = append(filters, x)
+		// }
+		if v2ATR.Balance.DestinationIDs != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaDestinations, "DestinationIDs", v2ATR.Balance.DestinationIDs.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.RatingSubject != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "RatingSubject", []string{*v2ATR.Balance.RatingSubject})
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.Categories != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "Categories", v2ATR.Balance.Categories.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.SharedGroups != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "SharedGroups", v2ATR.Balance.SharedGroups.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.TimingIDs != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "TimingIDs", v2ATR.Balance.TimingIDs.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+
+		filter = &engine.Filter{
+			Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+			ID:     *v2ATR.Balance.ID,
+			Rules:  filters}
+		filterIDS = append(filterIDS, filter.ID)
+
+	}
+	thp = &engine.ThresholdProfile{
+		ID:     v2ATR.ID,
+		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+		Weight: v2ATR.Weight,
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: v2ATR.ActivationDate,
+			ExpiryTime:     v2ATR.ExpirationDate},
+		FilterIDs: []string{},
+		MinSleep:  v2ATR.MinSleep,
+	}
+	th = &engine.Threshold{
+		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:     v2ATR.ID,
+	}
+	return thp, th, filter, nil
+}
+
+func (m *Migrator) SasThreshold(v2ATR *engine.ActionTrigger) (err error) {
+	var vrs engine.Versions
+	if m.dmOut.DataManager().DataDB() == nil {
+		return utils.NewCGRError(utils.Migrator,
+			utils.MandatoryIEMissingCaps,
+			utils.NoStorDBConnection,
+			"no connection to datadb")
+	}
+	if v2ATR.ID != "" {
+		thp, th, filter, err := AsThreshold2(*v2ATR)
+		if err != nil {
+			return err
+		}
+		if filter != nil {
+			if err := m.dmOut.DataManager().SetFilter(filter, true); err != nil {
+				return err
+			}
+		}
+		if err := m.dmOut.DataManager().SetThresholdProfile(thp, true); err != nil {
+			return err
+		}
+		if err := m.dmOut.DataManager().SetThreshold(th); err != nil {
+			return err
+		}
+		m.stats[utils.Thresholds]++
+	}
+	// All done, update version wtih current one
+	vrs = engine.Versions{utils.Thresholds: engine.CurrentStorDBVersions()[utils.Thresholds]}
+	if err = m.dmOut.DataManager().DataDB().SetVersions(vrs, false); err != nil {
+		return utils.NewCGRError(utils.Migrator,
+			utils.ServerErrorCaps,
+			err.Error(),
+			fmt.Sprintf("error: <%s> when updating Thresholds version into dataDB", err.Error()))
+	}
+	return
+}
+
+func AsThreshold2(v2ATR engine.ActionTrigger) (thp *engine.ThresholdProfile, th *engine.Threshold, filter *engine.Filter, err error) {
+	var filterIDS []string
+	var filters []*engine.FilterRule
+	if v2ATR.Balance.ID != nil && *v2ATR.Balance.ID != "" {
+		if v2ATR.Balance.DestinationIDs != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaDestinations, "DestinationIDs", v2ATR.Balance.DestinationIDs.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.RatingSubject != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "RatingSubject", []string{*v2ATR.Balance.RatingSubject})
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.Categories != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "Categories", v2ATR.Balance.Categories.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.SharedGroups != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "SharedGroups", v2ATR.Balance.SharedGroups.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		if v2ATR.Balance.TimingIDs != nil { //MetaLess /RSRfields
+			x, err := engine.NewFilterRule(utils.MetaPrefix, "TimingIDs", v2ATR.Balance.TimingIDs.Slice())
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			filters = append(filters, x)
+		}
+		filter = &engine.Filter{
+			Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+			ID:     *v2ATR.Balance.ID,
+			Rules:  filters}
+		filterIDS = append(filterIDS, filter.ID)
+	}
+	th = &engine.Threshold{
+		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:     v2ATR.ID,
+	}
+
+	thp = &engine.ThresholdProfile{
+		ID:                 v2ATR.ID,
+		Tenant:             config.CgrConfig().GeneralCfg().DefaultTenant,
+		Weight:             v2ATR.Weight,
+		ActivationInterval: &utils.ActivationInterval{ActivationTime: v2ATR.ActivationDate, ExpiryTime: v2ATR.ExpirationDate},
+		FilterIDs:          filterIDS,
+		MinSleep:           v2ATR.MinSleep,
+	}
+
+	return thp, th, filter, nil
+}
+
 type v2Threshold struct {
 	Tenant             string
 	ID                 string
@@ -197,19 +416,16 @@ type v2Threshold struct {
 
 func (v2T v2Threshold) V2toV3Threshold() (th *engine.ThresholdProfile) {
 	th = &engine.ThresholdProfile{
-		Tenant:    v2T.Tenant,
-		ID:        v2T.ID,
-		FilterIDs: v2T.FilterIDs,
-		MinHits:   v2T.MinHits,
-		MinSleep:  v2T.MinSleep,
-		Blocker:   v2T.Blocker,
-		Weights: utils.DynamicWeights{
-			{
-				Weight: v2T.Weight,
-			},
-		},
-		ActionProfileIDs: v2T.ActionIDs,
-		Async:            v2T.Async,
+		Tenant:             v2T.Tenant,
+		ID:                 v2T.ID,
+		FilterIDs:          v2T.FilterIDs,
+		ActivationInterval: v2T.ActivationInterval,
+		MinHits:            v2T.MinHits,
+		MinSleep:           v2T.MinSleep,
+		Blocker:            v2T.Blocker,
+		Weight:             v2T.Weight,
+		ActionIDs:          v2T.ActionIDs,
+		Async:              v2T.Async,
 	}
 	th.MaxHits = 1
 	if v2T.Recurrent {

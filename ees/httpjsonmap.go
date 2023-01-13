@@ -27,10 +27,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewHTTPjsonMapEE(cfg *config.EventExporterCfg, cgrCfg *config.CGRConfig, filterS *engine.FilterS,
@@ -62,7 +61,7 @@ func (httpEE *HTTPjsonMapEE) composeHeader(cgrCfg *config.CGRConfig, filterS *en
 		return
 	}
 	var exp *utils.OrderedNavigableMap
-	if exp, err = composeHeaderTrailer(context.Background(), utils.MetaHdr, httpEE.Cfg().HeaderFields(), httpEE.dc, cgrCfg, filterS); err != nil {
+	if exp, err = composeHeaderTrailer(utils.MetaHdr, httpEE.Cfg().HeaderFields(), httpEE.dc, cgrCfg, filterS); err != nil {
 		return
 	}
 	for el := exp.GetFirstElement(); el != nil; el = el.Next() {
@@ -78,12 +77,12 @@ func (httpEE *HTTPjsonMapEE) Cfg() *config.EventExporterCfg { return httpEE.cfg 
 
 func (httpEE *HTTPjsonMapEE) Connect() (_ error) { return }
 
-func (httpEE *HTTPjsonMapEE) ExportEvent(ctx *context.Context, content, _ interface{}) (err error) {
+func (httpEE *HTTPjsonMapEE) ExportEvent(content interface{}, _ string) (err error) {
 	httpEE.reqs.get()
 	defer httpEE.reqs.done()
 	pReq := content.(*HTTPPosterRequest)
 	var req *http.Request
-	if req, err = prepareRequest(ctx, httpEE.Cfg().ExportPath, utils.ContentJSON, pReq.Body, pReq.Header); err != nil {
+	if req, err = prepareRequest(httpEE.Cfg().ExportPath, utils.ContentJSON, pReq.Body, pReq.Header); err != nil {
 		return
 	}
 	_, err = sendHTTPReq(httpEE.client, req)
@@ -93,8 +92,6 @@ func (httpEE *HTTPjsonMapEE) ExportEvent(ctx *context.Context, content, _ interf
 func (httpEE *HTTPjsonMapEE) Close() (_ error) { return }
 
 func (httpEE *HTTPjsonMapEE) GetMetrics() *utils.SafeMapStorage { return httpEE.dc }
-
-func (httpEE *HTTPjsonMapEE) ExtraData(ev *utils.CGREvent) interface{} { return nil }
 
 func (httpEE *HTTPjsonMapEE) PrepareMap(mp *utils.CGREvent) (interface{}, error) {
 	body, err := json.Marshal(mp.Event)
@@ -119,7 +116,7 @@ func (httpEE *HTTPjsonMapEE) PrepareOrderMap(mp *utils.OrderedNavigableMap) (int
 	}, err
 }
 
-func prepareRequest(ctx *context.Context, addr, cType string, content interface{}, hdr http.Header) (req *http.Request, err error) {
+func prepareRequest(addr, cType string, content interface{}, hdr http.Header) (req *http.Request, err error) {
 	var body io.Reader
 	if cType == utils.ContentForm {
 		body = strings.NewReader(content.(url.Values).Encode())
@@ -131,7 +128,7 @@ func prepareRequest(ctx *context.Context, addr, cType string, content interface{
 		contentType = "application/json"
 	}
 	hdr.Set("Content-Type", contentType)
-	if req, err = http.NewRequestWithContext(ctx, http.MethodPost, addr, body); err != nil {
+	if req, err = http.NewRequest(http.MethodPost, addr, body); err != nil {
 		return
 	}
 	req.Header = hdr

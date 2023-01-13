@@ -21,18 +21,29 @@ package engine
 import (
 	"fmt"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	dataDBVers = map[string]string{
-		utils.Accounts:   "cgr-migrator -exec=*accounts",
-		utils.Attributes: "cgr-migrator -exec=*attributes",
-		utils.Actions:    "cgr-migrator -exec=*actions",
-		utils.Thresholds: "cgr-migrator -exec=*thresholds",
-		utils.LoadIDsVrs: "cgr-migrator -exec=*load_ids",
-		utils.RQF:        "cgr-migrator -exec=*filters",
-		utils.Routes:     "cgr-migrator -exec=*routes",
+		utils.Accounts:       "cgr-migrator -exec=*accounts",
+		utils.Attributes:     "cgr-migrator -exec=*attributes",
+		utils.Actions:        "cgr-migrator -exec=*actions",
+		utils.ActionTriggers: "cgr-migrator -exec=*action_triggers",
+		utils.ActionPlans:    "cgr-migrator -exec=*action_plans",
+		utils.SharedGroups:   "cgr-migrator -exec=*shared_groups",
+		utils.Thresholds:     "cgr-migrator -exec=*thresholds",
+		// utils.LoadIDsVrs:     "cgr-migrator -exec=*load_ids",
+		utils.RQF:         "cgr-migrator -exec=*filters",
+		utils.Routes:      "cgr-migrator -exec=*routes",
+		utils.Dispatchers: "cgr-migrator -exec=*dispatchers",
+		utils.Chargers:    "cgr-migrator -exec=*chargers",
+		utils.StatS:       "cgr-migrator -exec=*stats",
+	}
+	storDBVers = map[string]string{
+		utils.CostDetails:   "cgr-migrator -exec=*cost_details",
+		utils.SessionSCosts: "cgr-migrator -exec=*sessions_costs",
+		utils.CDRs:          "cgr-migrator -exec=*cdrs",
 	}
 	allVers map[string]string // init will fill this with a merge of data+stor
 )
@@ -40,6 +51,9 @@ var (
 func init() {
 	allVers = make(map[string]string)
 	for k, v := range dataDBVers {
+		allVers[k] = v
+	}
+	for k, v := range storDBVers {
 		allVers[k] = v
 	}
 }
@@ -79,7 +93,10 @@ func CheckVersions(storage Storage) error {
 // relevant only for mongoDB
 func isDataDB(storage Storage) bool {
 	conv, ok := storage.(*MongoStorage)
-	return ok && conv.IsDataDB()
+	if !ok {
+		return false
+	}
+	return conv.IsDataDB()
 }
 
 func setDBVersions(storage Storage, overwrite bool) (err error) {
@@ -107,9 +124,15 @@ func (vers Versions) Compare(curent Versions, storType string, isDataDB bool) st
 	var message map[string]string
 	switch storType {
 	case utils.Mongo:
-		message = dataDBVers
+		if isDataDB {
+			message = dataDBVers
+		} else {
+			message = storDBVers
+		}
 	case utils.Internal:
 		message = allVers
+	case utils.Postgres, utils.MySQL:
+		message = storDBVers
 	case utils.Redis:
 		message = dataDBVers
 	}
@@ -124,28 +147,68 @@ func (vers Versions) Compare(curent Versions, storType string, isDataDB bool) st
 // CurrentDataDBVersions returns the needed DataDB versions
 func CurrentDataDBVersions() Versions {
 	return Versions{
-		utils.Stats:          4,
-		utils.Accounts:       3,
-		utils.Actions:        2,
-		utils.Thresholds:     4,
-		utils.Routes:         2,
-		utils.Attributes:     7,
-		utils.RQF:            5,
-		utils.Resource:       1,
-		utils.Subscribers:    1,
-		utils.Chargers:       2,
-		utils.Dispatchers:    2,
-		utils.LoadIDsVrs:     1,
-		utils.RateProfiles:   1,
-		utils.ActionProfiles: 1,
+		utils.StatS:               4,
+		utils.Accounts:            3,
+		utils.Actions:             2,
+		utils.ActionTriggers:      2,
+		utils.ActionPlans:         3,
+		utils.SharedGroups:        2,
+		utils.Thresholds:          4,
+		utils.Routes:              2,
+		utils.Attributes:          6,
+		utils.Timing:              1,
+		utils.RQF:                 5,
+		utils.Resource:            1,
+		utils.Subscribers:         1,
+		utils.Destinations:        1,
+		utils.ReverseDestinations: 1,
+		utils.RatingPlan:          1,
+		utils.RatingProfile:       1,
+		utils.Chargers:            2,
+		utils.Dispatchers:         2,
+		utils.LoadIDsVrs:          1,
 	}
 }
 
-// CurrentAllDBVersions returns the both DataDB
+// CurrentStorDBVersions returns the needed StorDB versions
+func CurrentStorDBVersions() Versions {
+	return Versions{
+		utils.CostDetails:        2,
+		utils.SessionSCosts:      3,
+		utils.CDRs:               2,
+		utils.TpRatingPlans:      1,
+		utils.TpFilters:          1,
+		utils.TpDestinationRates: 1,
+		utils.TpActionTriggers:   1,
+		utils.TpAccountActionsV:  1,
+		utils.TpActionPlans:      1,
+		utils.TpActions:          1,
+		utils.TpThresholds:       1,
+		utils.TpRoutes:           1,
+		utils.TpStats:            1,
+		utils.TpSharedGroups:     1,
+		utils.TpRatingProfiles:   1,
+		utils.TpResources:        1,
+		utils.TpRates:            1,
+		utils.TpTiming:           1,
+		utils.TpResource:         1,
+		utils.TpDestinations:     1,
+		utils.TpRatingPlan:       1,
+		utils.TpRatingProfile:    1,
+		utils.TpChargers:         1,
+		utils.TpDispatchers:      1,
+	}
+}
+
+// CurrentAllDBVersions returns the both DataDB and StorDB versions
 func CurrentAllDBVersions() Versions {
-	dataDBVersions := CurrentDataDBVersions()
+	dataDbVersions := CurrentDataDBVersions()
+	storDbVersions := CurrentStorDBVersions()
 	allVersions := make(Versions)
-	for k, v := range dataDBVersions {
+	for k, v := range dataDbVersions {
+		allVersions[k] = v
+	}
+	for k, v := range storDbVersions {
 		allVersions[k] = v
 	}
 	return allVersions
@@ -158,8 +221,11 @@ func CurrentDBVersions(storType string, isDataDB bool) Versions {
 		if isDataDB {
 			return CurrentDataDBVersions()
 		}
+		return CurrentStorDBVersions()
 	case utils.Internal:
 		return CurrentAllDBVersions()
+	case utils.Postgres, utils.MySQL:
+		return CurrentStorDBVersions()
 	case utils.Redis:
 		return CurrentDataDBVersions()
 	}

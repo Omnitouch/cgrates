@@ -20,19 +20,16 @@ package ers
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/cgrates/birpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/efs"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewSQSER(t *testing.T) {
@@ -56,7 +53,7 @@ func TestNewSQSER(t *testing.T) {
 		},
 	}
 	rdr, err := NewSQSER(cfg, 0, nil, nil,
-		nil, nil, nil, nil)
+		nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +81,7 @@ func TestSQSERServeRunDelay0(t *testing.T) {
 		},
 	}
 	rdr, err := NewSQSER(cfg, 0, nil, nil,
-		nil, nil, nil, nil)
+		nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +107,7 @@ func TestSQSERServe(t *testing.T) {
 		},
 	}
 	rdr, err := NewSQSER(cfg, 0, nil, nil,
-		nil, nil, nil, nil)
+		nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,17 +139,17 @@ func TestSQSERProcessMessage(t *testing.T) {
 	expEvent := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		Event: map[string]interface{}{
-			utils.OriginID: "testID",
+			utils.CGRID: "testCgrId",
 		},
-		APIOpts: make(map[string]interface{}),
+		APIOpts: map[string]interface{}{},
 	}
-	body := []byte(`{"OriginID":"testID"}`)
+	body := []byte(`{"CGRID":"testCgrId"}`)
 	rdr.Config().Fields = []*config.FCTemplate{
 		{
-			Tag:   "OriginID",
+			Tag:   "CGRID",
 			Type:  utils.MetaConstant,
-			Value: config.NewRSRParsersMustCompile("testID", utils.InfieldSep),
-			Path:  "*cgreq.OriginID",
+			Value: config.NewRSRParsersMustCompile("testCgrId", utils.InfieldSep),
+			Path:  "*cgreq.CGRID",
 		},
 	}
 	rdr.Config().Fields[0].ComputePath()
@@ -162,6 +159,7 @@ func TestSQSERProcessMessage(t *testing.T) {
 	select {
 	case data := <-rdr.rdrEvents:
 		expEvent.ID = data.cgrEvent.ID
+		expEvent.Time = data.cgrEvent.Time
 		if !reflect.DeepEqual(data.cgrEvent, expEvent) {
 			t.Errorf("Expected %v but received %v", utils.ToJSON(expEvent), utils.ToJSON(data.cgrEvent))
 		}
@@ -191,7 +189,7 @@ func TestSQSERProcessMessageError1(t *testing.T) {
 	rdr.Config().Fields = []*config.FCTemplate{
 		{},
 	}
-	body := []byte(`{"OriginID":"testOriginID"}`)
+	body := []byte(`{"CGRID":"testCgrId"}`)
 	errExpect := "unsupported type: <>"
 	if err := rdr.processMessage(body); err == nil || err.Error() != errExpect {
 		t.Errorf("Expected %v but received %v", errExpect, err)
@@ -200,7 +198,7 @@ func TestSQSERProcessMessageError1(t *testing.T) {
 
 func TestSQSERProcessMessageError2(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	data := engine.NewInternalDB(nil, nil, cfg.DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
 	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 	cfg.ERsCfg().Readers[0].ProcessedPath = ""
 	fltrs := engine.NewFilterS(cfg, nil, dm)
@@ -220,7 +218,7 @@ func TestSQSERProcessMessageError2(t *testing.T) {
 		session:   nil,
 		poster:    nil,
 	}
-	body := []byte(`{"OriginID":"testOriginID"}`)
+	body := []byte(`{"CGRID":"testCgrId"}`)
 	rdr.Config().Filters = []string{"Filter1"}
 	errExpect := "NOT_FOUND:Filter1"
 	if err := rdr.processMessage(body); err == nil || err.Error() != errExpect {
@@ -514,15 +512,7 @@ func TestSQSERReadMsgError2(t *testing.T) {
 
 func TestSQSERReadMsgError3(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
-	cfg.EFsCfg().Enabled = true
-	cfg.EEsCfg().Enabled = true
-	connMngr := engine.NewConnManager(cfg)
-	efSConn := make(chan birpc.ClientConnector, 1)
-	efsSrv, _ := birpc.NewServiceWithMethodsRename(efs.NewEfs(cfg, connMngr), utils.EfSv1, true, func(key string) (newKey string) { return strings.TrimPrefix(key, utils.V1Prfx) }) // update the name of the functions
-	efSConn <- efsSrv
-	connMngr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs), utils.EfSv1, efSConn)
 	rdr := &SQSER{
-		connMgr:   connMngr,
 		cgrCfg:    cfg,
 		cfgIdx:    0,
 		fltrS:     new(engine.FilterS),
@@ -537,11 +527,9 @@ func TestSQSERReadMsgError3(t *testing.T) {
 		queueID:   "cgrates_cdrs",
 		session:   nil,
 		poster: ees.NewSQSee(&config.EventExporterCfg{
-			ExportPath:     "url",
-			Attempts:       1,
-			FailedPostsDir: utils.MetaNone,
-			EFsConns:       []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEFs)},
-			Opts:           &config.EventExporterOpts{},
+			ExportPath: "url",
+			Attempts:   1,
+			Opts:       &config.EventExporterOpts{},
 		}, nil),
 	}
 	awsCfg := aws.Config{Endpoint: aws.String(rdr.Config().SourcePath)}

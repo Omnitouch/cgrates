@@ -22,7 +22,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
-	"io"
 	"net/rpc"
 	"os"
 	"path"
@@ -31,10 +30,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -47,7 +45,7 @@ var (
 		testCreateDirectory,
 		testFwvLoadConfig,
 		testFwvResetDataDB,
-
+		testFwvResetStorDb,
 		testFwvStartEngine,
 		testFwvRPCConn,
 		testFwvExportEvent,
@@ -67,13 +65,19 @@ func TestFwvExport(t *testing.T) {
 func testFwvLoadConfig(t *testing.T) {
 	var err error
 	fwvCfgPath = path.Join(*dataDir, "conf", "samples", fwvConfigDir)
-	if fwvCfg, err = config.NewCGRConfigFromPath(context.Background(), fwvCfgPath); err != nil {
+	if fwvCfg, err = config.NewCGRConfigFromPath(fwvCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testFwvResetDataDB(t *testing.T) {
-	if err := engine.InitDataDB(fwvCfg); err != nil {
+	if err := engine.InitDataDb(fwvCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testFwvResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(fwvCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -93,14 +97,15 @@ func testFwvRPCConn(t *testing.T) {
 }
 
 func testFwvExportEvent(t *testing.T) {
-	event := &utils.CGREventWithEeIDs{
+	event := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"FwvExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "Event",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-				utils.OrderID: 1,
-
+				utils.OrderID:      1,
+				utils.CGRID:        utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 20, 0, time.UTC).String()),
 				utils.ToR:          utils.MetaVoice,
 				utils.OriginID:     "dsafdsaf",
 				utils.OriginHost:   "192.168.1.1",
@@ -113,13 +118,9 @@ func testFwvExportEvent(t *testing.T) {
 				utils.SetupTime:    time.Date(2013, 11, 7, 8, 42, 20, 0, time.UTC),
 				utils.AnswerTime:   time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC),
 				utils.Usage:        10 * time.Second,
-
-				utils.Cost:    2.34567,
-				"ExtraFields": map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"},
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 20, 0, time.UTC).String()),
 				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         2.34567,
+				"ExtraFields":      map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"},
 			},
 		},
 	}
@@ -173,7 +174,7 @@ func TestFileFwvInit(t *testing.T) {
 		cfg:    cgrCfg.EEsCfg().Exporters[0],
 		dc:     dc,
 	}
-	if err := fFwv.init(io.Discard); err != nil {
+	if err := fFwv.init(); err != nil {
 		t.Error(err)
 	}
 	if err := os.RemoveAll("/tmp/TestInitFileCSV"); err != nil {

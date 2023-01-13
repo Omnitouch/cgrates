@@ -26,8 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var mfCgrCfg *CGRConfig
@@ -39,7 +38,7 @@ func TestMfInitConfig(t *testing.T) {
 		os.Setenv(key, val)
 	}
 	var err error
-	if mfCgrCfg, err = NewCGRConfigFromPath(context.Background(), "/usr/share/cgrates/conf/samples/multifiles"); err != nil {
+	if mfCgrCfg, err = NewCGRConfigFromPath("/usr/share/cgrates/conf/samples/multifiles"); err != nil {
 		t.Fatal("Got config error: ", err.Error())
 	}
 }
@@ -56,9 +55,13 @@ func TestMfGeneralItems(t *testing.T) {
 func TestMfEnvReaderITRead(t *testing.T) {
 	expected := GeneralCfg{
 		NodeID:           "d80fac5",
+		Logger:           "*syslog",
+		LogLevel:         6,
 		RoundingDecimals: 5,
 		DBDataEncoding:   "msgpack",
 		TpExportPath:     "/var/spool/cgrates/tpe",
+		PosterAttempts:   3,
+		FailedPostsDir:   "/var/spool/cgrates/failed_posts",
 		DefaultReqType:   utils.MetaPseudoPrepaid,
 		DefaultCategory:  "call",
 		DefaultTenant:    "cgrates.org",
@@ -73,9 +76,7 @@ func TestMfEnvReaderITRead(t *testing.T) {
 		DigestEqual:      ":",
 		RSRSep:           ";",
 		MaxParallelConns: 100,
-		Opts: &GeneralOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
+		FailedPostsTTL:   5 * time.Second,
 	}
 	if !reflect.DeepEqual(expected, *mfCgrCfg.generalCfg) {
 		t.Errorf("Expected: %+v\n, received: %+v", utils.ToJSON(expected), utils.ToJSON(*mfCgrCfg.generalCfg))
@@ -98,7 +99,7 @@ func TestMfHttpAgentMultipleFields(t *testing.T) {
 					ID:            "OutboundAUTHDryRun",
 					Filters:       []string{},
 					Tenant:        NewRSRParsersMustCompile("cgrates.org", utils.InfieldSep),
-					Flags:         utils.FlagsWithParams{"*dryRun": {}},
+					Flags:         utils.FlagsWithParams{"*dryrun": {}},
 					RequestFields: []*FCTemplate{},
 					ReplyFields: []*FCTemplate{{
 						Tag:       "Allow",

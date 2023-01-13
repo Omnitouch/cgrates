@@ -26,9 +26,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewSQSee creates a poster for sqs
@@ -130,10 +129,10 @@ func (pstr *SQSee) Connect() (err error) {
 	return
 }
 
-func (pstr *SQSee) ExportEvent(ctx *context.Context, message, _ interface{}) (err error) {
+func (pstr *SQSee) ExportEvent(message interface{}, _ string) (err error) {
 	pstr.reqs.get()
 	pstr.RLock()
-	_, err = pstr.svc.SendMessageWithContext(ctx,
+	_, err = pstr.svc.SendMessage(
 		&sqs.SendMessageInput{
 			MessageBody: aws.String(string(message.([]byte))),
 			QueueUrl:    pstr.queueURL,
@@ -147,5 +146,3 @@ func (pstr *SQSee) ExportEvent(ctx *context.Context, message, _ interface{}) (er
 func (pstr *SQSee) Close() (_ error) { return }
 
 func (pstr *SQSee) GetMetrics() *utils.SafeMapStorage { return pstr.dc }
-
-func (pstr *SQSee) ExtraData(ev *utils.CGREvent) interface{} { return nil }

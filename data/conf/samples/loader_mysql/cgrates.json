@@ -21,6 +21,9 @@
 	"db_name": "10", 						// data_db database name to connect to
 },
 
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
 
 
 "rals": {
@@ -93,24 +96,20 @@
 
 
 "migrator":{
-
+	"out_stordb_password": "CGRateS.org",
 	"users_filters":["Account"],
 },
 
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },
 
 
 "filters": {								
-	"accounts_conns": ["*internal"],
-},
-
-"accounts": {
-    "enabled": true
+	"apiers_conns": ["*internal"],
 },
 
 "loader": {											// loader for tariff plans out of .csv files

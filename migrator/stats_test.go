@@ -20,12 +20,15 @@ package migrator
 import (
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
-/*
 func TestV1StatsAsStats(t *testing.T) {
+	tim := time.Date(0001, time.January, 1, 2, 0, 0, 0, time.UTC)
 	var filters []*engine.FilterRule
 	v1Sts := &v1Stat{
 		Id:              "test",      // Config id, unique per config instance
@@ -52,6 +55,22 @@ func TestV1StatsAsStats(t *testing.T) {
 		RatedAccount:    []string{},
 		RatedSubject:    []string{},
 		CostInterval:    []float64{},
+		Triggers: engine.ActionTriggers{&engine.ActionTrigger{
+			ID: "TestB",
+			Balance: &engine.BalanceFilter{
+				ID:             utils.StringPointer("TESTB"),
+				Timings:        []*engine.RITiming{},
+				ExpirationDate: utils.TimePointer(tim),
+				Type:           utils.StringPointer(utils.MetaMonetary),
+			},
+			ExpirationDate:    tim,
+			LastExecutionTime: tim,
+			ActivationDate:    tim,
+			ThresholdType:     utils.TriggerMaxBalance,
+			ThresholdValue:    2,
+			ActionsID:         "TEST_ACTIONS",
+			Executed:          true,
+		}},
 	}
 
 	x, _ := engine.NewFilterRule(utils.MetaGreaterOrEqual, "SetupInterval", []string{v1Sts.SetupInterval[0].String()})
@@ -124,14 +143,12 @@ func TestV1StatsAsStats(t *testing.T) {
 		t.Errorf("Expecting: %+v, received: %+v", sqp.Weight, newsqp.Weight)
 	}
 	if !reflect.DeepEqual(sqp, newsqp) {
-		t.Errorf("Expecting: %+v, received: %+v", utils.ToJSON(sqp), utils.ToJSON(newsqp))
+		t.Errorf("Expecting: %+v, received: %+v", sqp, newsqp)
 	}
 	if !reflect.DeepEqual(filter, fltr) {
 		t.Errorf("Expecting: %+v, received: %+v", filter, fltr)
 	}
 }
-
-*/
 
 func TestRemakeQueue(t *testing.T) {
 	sq := &engine.StatQueue{

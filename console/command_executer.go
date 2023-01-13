@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (

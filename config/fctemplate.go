@@ -22,8 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewFCTemplateFromFCTemplateJSONCfg creates a FCTemplate from json
@@ -42,7 +41,10 @@ func NewFCTemplateFromFCTemplateJSONCfg(jsnCfg *FcTemplateJsonCfg, separator str
 		fcTmp.Tag = *jsnCfg.Tag
 	}
 	if jsnCfg.Filters != nil {
-		fcTmp.Filters = utils.CloneStringSlice(*jsnCfg.Filters)
+		fcTmp.Filters = make([]string, len(*jsnCfg.Filters))
+		for i, fltr := range *jsnCfg.Filters {
+			fcTmp.Filters[i] = fltr
+		}
 	}
 	if jsnCfg.Value != nil {
 		if fcTmp.Value, err = NewRSRParsers(*jsnCfg.Value, separator); err != nil {
@@ -128,7 +130,7 @@ func FCTemplatesFromFCTemplatesJSONCfg(jsnCfgFlds []*FcTemplateJsonCfg, separato
 }
 
 // InflateTemplates will replace the *template fields with template content out msgTpls
-func InflateTemplates(fcts []*FCTemplate, msgTpls FCTemplates) ([]*FCTemplate, error) {
+func InflateTemplates(fcts []*FCTemplate, msgTpls map[string][]*FCTemplate) ([]*FCTemplate, error) {
 	var hasTpl bool
 	for i := 0; i < len(fcts); {
 		if fcts[i].Type == utils.MetaTemplate {
@@ -191,47 +193,17 @@ func (fc FCTemplate) Clone() (cln *FCTemplate) {
 	return
 }
 
-// FCTemplates the config for the templates
-type FCTemplates map[string][]*FCTemplate
-
-// loadTemplateSCfg loads the Template section of the configuration
-func (sCft FCTemplates) Load(ctx *context.Context, jsnCfg ConfigDB, cfg *CGRConfig) (err error) {
-	jsnTemplateCfg := make(map[string][]*FcTemplateJsonCfg)
-	if err = jsnCfg.GetSection(ctx, TemplatesJSON, &jsnTemplateCfg); err != nil {
-		return
-	}
-	for k, val := range jsnTemplateCfg {
-		if sCft[k], err = FCTemplatesFromFCTemplatesJSONCfg(val, cfg.generalCfg.RSRSep); err != nil {
-			return
-		}
-	}
-	return
-}
+// FcTemplates the config for the templates
+type FcTemplates map[string][]*FCTemplate
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (sCft FCTemplates) AsMapInterface(separator string) interface{} {
-	mp := make(map[string][]map[string]interface{})
+func (sCft FcTemplates) AsMapInterface(separator string) (initialMP map[string][]map[string]interface{}) {
+	initialMP = make(map[string][]map[string]interface{})
 	for key, value := range sCft {
-		mp[key] = make([]map[string]interface{}, len(value))
+		initialMP[key] = make([]map[string]interface{}, len(value))
 		for i, item := range value {
-			mp[key][i] = item.AsMapInterface(separator)
+			initialMP[key][i] = item.AsMapInterface(separator)
 		}
-	}
-	return mp
-}
-
-func (FCTemplates) SName() string              { return TemplatesJSON }
-func (sCft FCTemplates) CloneSection() Section { return sCft.Clone() }
-
-// Clone returns a deep copy of FcTemplates
-func (sCft FCTemplates) Clone() (cln FCTemplates) {
-	cln = make(FCTemplates)
-	for k, fcs := range sCft {
-		fcln := make([]*FCTemplate, len(fcs))
-		for i, fc := range fcs {
-			fcln[i] = fc.Clone()
-		}
-		cln[k] = fcln
 	}
 	return
 }
@@ -306,135 +278,18 @@ func (fc *FCTemplate) ComputePath() {
 	fc.pathSlice = utils.CompilePath(fc.Path)
 }
 
-func (fc *FCTemplate) Equals(fc2 *FCTemplate) bool {
-	return (fc == nil && fc2 == nil) ||
-		(fc != nil && fc2 != nil &&
-			fc.Tag == fc2.Tag &&
-			fc.Type == fc2.Type &&
-			fc.Path == fc2.Path &&
-			utils.SliceStringEqual(fc.Filters, fc2.Filters) &&
-			utils.SliceStringEqual(fc.Value.AsStringSlice(), fc2.Value.AsStringSlice()) &&
-			fc.Width == fc2.Width &&
-			fc.Strip == fc2.Strip &&
-			fc.Padding == fc2.Padding &&
-			fc.Mandatory == fc2.Mandatory &&
-			fc.AttributeID == fc2.AttributeID &&
-			fc.NewBranch == fc2.NewBranch &&
-			fc.Timezone == fc2.Timezone &&
-			fc.Blocker == fc2.Blocker &&
-			fc.Layout == fc2.Layout &&
-			fc.CostShiftDigits == fc2.CostShiftDigits &&
-			fc.MaskDestID == fc2.MaskDestID &&
-			fc.MaskLen == fc2.MaskLen &&
-			((fc.RoundingDecimals == nil && fc2.RoundingDecimals == nil) ||
-				(fc.RoundingDecimals != nil && fc2.RoundingDecimals != nil &&
-					*fc.RoundingDecimals == *fc2.RoundingDecimals)))
-}
-
-type FcTemplatesJsonCfg map[string][]*FcTemplateJsonCfg
-type FcTemplateJsonCfg struct {
-	Tag                  *string
-	Type                 *string
-	Path                 *string
-	Attribute_id         *string
-	Filters              *[]string
-	Value                *string
-	Width                *int
-	Strip                *string
-	Padding              *string
-	Mandatory            *bool
-	New_branch           *bool
-	Timezone             *string
-	Blocker              *bool
-	Layout               *string
-	Cost_shift_digits    *int
-	Rounding_decimals    *int
-	Mask_destinationd_id *string
-	Mask_length          *int
-}
-
-func fcTemplatesEqual(v1, v2 []*FCTemplate) bool {
-	if len(v1) != len(v2) {
-		return false
+// Clone returns a deep copy of FcTemplates
+func (sCft FcTemplates) Clone() (cln FcTemplates) {
+	if sCft == nil {
+		return
 	}
-	for i := range v1 {
-		if !v1[i].Equals(v2[i]) {
-			return false
+	cln = make(FcTemplates)
+	for k, fcs := range sCft {
+		fcln := make([]*FCTemplate, len(fcs))
+		for i, fc := range fcs {
+			fcln[i] = fc.Clone()
 		}
+		cln[k] = fcln
 	}
-	return true
-}
-
-func diffFcTemplateJsonCfg(d []*FcTemplateJsonCfg, v1, v2 []*FCTemplate, separator string) []*FcTemplateJsonCfg {
-	if !fcTemplatesEqual(v1, v2) {
-		d = make([]*FcTemplateJsonCfg, len(v2))
-		for i, v := range v2 {
-			d[i] = new(FcTemplateJsonCfg)
-			if v.Tag != utils.EmptyString {
-				d[i].Tag = utils.StringPointer(v.Tag)
-			}
-			if v.Type != utils.EmptyString {
-				d[i].Type = utils.StringPointer(v.Type)
-			}
-			if v.Path != utils.EmptyString {
-				d[i].Path = utils.StringPointer(v.Path)
-			}
-			if v.Filters != nil {
-				d[i].Filters = &v.Filters
-			}
-			if v.Value != nil {
-				d[i].Value = utils.StringPointer(v.Value.GetRule(separator))
-			}
-			if v.Width != 0 {
-				d[i].Width = utils.IntPointer(v.Width)
-			}
-			if v.Strip != utils.EmptyString {
-				d[i].Strip = utils.StringPointer(v.Strip)
-			}
-			if v.Padding != utils.EmptyString {
-				d[i].Padding = utils.StringPointer(v.Padding)
-			}
-			if v.Mandatory {
-				d[i].Mandatory = utils.BoolPointer(v.Mandatory)
-			}
-			if v.AttributeID != utils.EmptyString {
-				d[i].Attribute_id = utils.StringPointer(v.AttributeID)
-			}
-			if v.NewBranch {
-				d[i].New_branch = utils.BoolPointer(v.NewBranch)
-			}
-			if v.Timezone != utils.EmptyString {
-				d[i].Timezone = utils.StringPointer(v.Timezone)
-			}
-			if v.Blocker {
-				d[i].Blocker = utils.BoolPointer(v.Blocker)
-			}
-			if v.Layout != time.RFC3339 {
-				d[i].Layout = utils.StringPointer(v.Layout)
-			}
-			if v.CostShiftDigits != 0 {
-				d[i].Cost_shift_digits = utils.IntPointer(v.CostShiftDigits)
-			}
-			if v.RoundingDecimals != nil {
-				d[i].Rounding_decimals = utils.IntPointer(*v.RoundingDecimals)
-			}
-			if v.MaskDestID != utils.EmptyString {
-				d[i].Mask_destinationd_id = utils.StringPointer(v.MaskDestID)
-			}
-			if v.MaskLen != 0 {
-				d[i].Mask_length = utils.IntPointer(v.MaskLen)
-			}
-		}
-	}
-	return d
-}
-
-func diffFcTemplatesJsonCfg(d FcTemplatesJsonCfg, v1, v2 FCTemplates, separator string) FcTemplatesJsonCfg {
-	if d == nil {
-		d = make(FcTemplatesJsonCfg)
-	}
-	for k, val := range v2 {
-		d[k] = diffFcTemplateJsonCfg(d[k], v1[k], val, separator)
-	}
-	return d
+	return
 }

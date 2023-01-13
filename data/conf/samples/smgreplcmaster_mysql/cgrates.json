@@ -12,6 +12,10 @@
 	"http": "127.0.0.1:2080",
 },
 
+"stor_db": {								// database used to store offline tariff plans and CDRs
+	"db_password": "CGRateS.org",			// password to use when connecting to stordb
+},
+
 
 "rpc_conns": {
 	"rplConn": {
@@ -20,7 +24,12 @@
 	},
 },
 
-"rates": {
+
+"rals": {
+	"enabled": true,
+},
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -41,13 +50,14 @@
 "sessions": {
 	"enabled": true,
 	"replication_conns": ["rplConn"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 }

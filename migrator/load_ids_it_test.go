@@ -26,10 +26,9 @@ import (
 	"path"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -62,11 +61,11 @@ func TestLoadIDsITMigrateMongo2Redis(t *testing.T) {
 
 func testLoadIdsStart(testName string, t *testing.T) {
 	var err error
-	if loadCfgIn, err = config.NewCGRConfigFromPath(context.Background(), inPath); err != nil {
+	if loadCfgIn, err = config.NewCGRConfigFromPath(inPath); err != nil {
 		t.Fatal(err)
 	}
 	config.SetCgrConfig(loadCfgIn)
-	if loadCfgOut, err = config.NewCGRConfigFromPath(context.Background(), outPath); err != nil {
+	if loadCfgOut, err = config.NewCGRConfigFromPath(outPath); err != nil {
 		t.Fatal(err)
 	}
 	for _, stest := range sTestsLoadIdsIT {
@@ -80,7 +79,7 @@ func testLoadIdsITConnect(t *testing.T) {
 		loadCfgIn.DataDbCfg().Host, loadCfgIn.DataDbCfg().Port,
 		loadCfgIn.DataDbCfg().Name, loadCfgIn.DataDbCfg().User,
 		loadCfgIn.DataDbCfg().Password, loadCfgIn.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), loadCfgIn.DataDbCfg().Opts, loadCfgIn.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), loadCfgIn.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,16 +87,16 @@ func testLoadIdsITConnect(t *testing.T) {
 		loadCfgOut.DataDbCfg().Host, loadCfgOut.DataDbCfg().Port,
 		loadCfgOut.DataDbCfg().Name, loadCfgOut.DataDbCfg().User,
 		loadCfgOut.DataDbCfg().Password, loadCfgOut.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), loadCfgOut.DataDbCfg().Opts, loadCfgOut.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), loadCfgOut.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if inPath == outPath {
 		loadMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, true)
+			nil, nil, false, true, false, false)
 	} else {
 		loadMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, false)
+			nil, nil, false, false, false, false)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -117,7 +116,7 @@ func testLoadIdsITFlush(t *testing.T) {
 
 func testLoadIdsITMigrateAndMove(t *testing.T) {
 
-	err := loadMigrator.dmIN.DataManager().DataDB().SetLoadIDsDrv(context.TODO(), map[string]int64{"account": 1}) // this will be deleated
+	err := loadMigrator.dmIN.DataManager().DataDB().SetLoadIDsDrv(map[string]int64{"account": 1}) // this will be deleated
 	if err != nil {
 		t.Error("Error when setting new loadID ", err.Error())
 	}
@@ -144,12 +143,12 @@ func testLoadIdsITMigrateAndMove(t *testing.T) {
 		t.Errorf("Unexpected version returned: %d", vrs[utils.LoadIDsVrs])
 	}
 	//check if user was migrate correctly
-	_, err = loadMigrator.dmOut.DataManager().DataDB().GetItemLoadIDsDrv(context.TODO(), "")
+	_, err = loadMigrator.dmOut.DataManager().DataDB().GetItemLoadIDsDrv("")
 	if err != utils.ErrNotFound {
 		t.Error("Error should be not found : ", err)
 	}
 	// no need to modify the LoadIDs from dmIN
-	// if _, err = loadMigrator.dmIN.DataManager().DataDB().GetItemLoadIDsDrv(context.TODO(),""); err != utils.ErrNotFound {
+	// if _, err = loadMigrator.dmIN.DataManager().DataDB().GetItemLoadIDsDrv(""); err != utils.ErrNotFound {
 	// 	t.Error("Error should be not found : ", err)
 	// }
 }

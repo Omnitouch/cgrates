@@ -37,7 +37,6 @@ func StringToInterface(s string) interface{} {
 		return s
 	}
 	// int64
-	s = strings.Trim(s, `"`)
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return i
 	}
@@ -61,6 +60,62 @@ func StringToInterface(s string) interface{} {
 	return s
 }
 
+// ReflectFieldInterface parses intf attepting to return the field value or error otherwise
+// Supports "ExtraFields" where additional fields are dynamically inserted in map with field name: extraFieldsLabel
+func ReflectFieldInterface(intf interface{}, fldName, extraFieldsLabel string) (retIf interface{}, err error) {
+	v := reflect.ValueOf(intf)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	var field reflect.Value
+	switch v.Kind() {
+	case reflect.Struct:
+		field = v.FieldByName(fldName)
+	case reflect.Map:
+		field = v.MapIndex(reflect.ValueOf(fldName))
+		if !field.IsValid() { // Not looking in extra fields anymore
+			return nil, ErrNotFound
+		}
+	default:
+		return nil, fmt.Errorf("Unsupported field kind: %v", v.Kind())
+	}
+
+	if !field.IsValid() {
+		if extraFieldsLabel == "" {
+			return nil, ErrNotFound
+		}
+		mpVal := v.FieldByName(extraFieldsLabel)
+		if !mpVal.IsValid() || mpVal.Kind() != reflect.Map {
+			return nil, ErrNotFound
+		}
+		field = mpVal.MapIndex(reflect.ValueOf(fldName))
+		if !field.IsValid() {
+			return nil, ErrNotFound
+		}
+	}
+	return field.Interface(), nil
+}
+
+// ReflectFieldAsString parses intf and attepting to return the field as string or error otherwise
+// Supports "ExtraFields" where additional fields are dynamically inserted in map with field name: extraFieldsLabel
+func ReflectFieldAsString(intf interface{}, fldName, extraFieldsLabel string) (string, error) {
+	field, err := ReflectFieldInterface(intf, fldName, extraFieldsLabel)
+	if err != nil {
+		return "", err
+	}
+	vOf := reflect.ValueOf(field)
+	switch vOf.Kind() {
+	case reflect.String:
+		return vOf.String(), nil
+	case reflect.Int, reflect.Int64:
+		return strconv.FormatInt(vOf.Int(), 10), nil
+	case reflect.Float64:
+		return strconv.FormatFloat(vOf.Float(), 'f', -1, 64), nil
+	default:
+		return "", fmt.Errorf("Cannot convert to string field type: %s", vOf.Kind().String())
+	}
+}
+
 func IfaceAsTime(itm interface{}, timezone string) (t time.Time, err error) {
 	switch v := itm.(type) {
 	case time.Time:
@@ -71,32 +126,6 @@ func IfaceAsTime(itm interface{}, timezone string) (t time.Time, err error) {
 		err = fmt.Errorf("cannot convert field: %+v to time.Time", itm)
 	}
 	return
-}
-
-func StringAsBig(itm string) (b *decimal.Big, err error) {
-	if len(itm) == 0 {
-		return decimal.New(0, 0), nil
-	}
-	if strings.HasSuffix(itm, NsSuffix) ||
-		strings.HasSuffix(itm, UsSuffix) ||
-		strings.HasSuffix(itm, µSuffix) ||
-		strings.HasSuffix(itm, MsSuffix) ||
-		strings.HasSuffix(itm, SSuffix) ||
-		strings.HasSuffix(itm, MSuffix) ||
-		strings.HasSuffix(itm, HSuffix) {
-		var tm time.Duration
-		if tm, err = time.ParseDuration(itm); err != nil {
-			return
-		}
-		return decimal.New(int64(tm), 0), nil
-	}
-	z, ok := decimal.WithContext(DecimalContext).SetString(itm)
-	// verify ok and check if the value was converted successfuly
-	// and the big is a valid number
-	if !ok || z.IsNaN(0) {
-		return nil, fmt.Errorf("can't convert <%+v> to decimal", itm)
-	}
-	return z, nil
 }
 
 func IfaceAsBig(itm interface{}) (b *decimal.Big, err error) {
@@ -114,27 +143,42 @@ func IfaceAsBig(itm interface{}) (b *decimal.Big, err error) {
 	case int64:
 		return decimal.New(it, 0), nil
 	case uint:
-		return decimal.WithContext(DecimalContext).SetUint64(uint64(it)), nil
+		return new(decimal.Big).SetUint64(uint64(it)), nil
 	case uint8:
-		return decimal.WithContext(DecimalContext).SetUint64(uint64(it)), nil
+		return new(decimal.Big).SetUint64(uint64(it)), nil
 	case uint16:
-		return decimal.WithContext(DecimalContext).SetUint64(uint64(it)), nil
+		return new(decimal.Big).SetUint64(uint64(it)), nil
 	case uint32:
-		return decimal.WithContext(DecimalContext).SetUint64(uint64(it)), nil
+		return new(decimal.Big).SetUint64(uint64(it)), nil
 	case uint64:
-		return decimal.WithContext(DecimalContext).SetUint64(it), nil
+		return new(decimal.Big).SetUint64(it), nil
 	case float32: // automatically hitting here also ints
-		return decimal.WithContext(DecimalContext).SetFloat64(float64(it)), nil
+		return new(decimal.Big).SetFloat64(float64(it)), nil
 	case float64: // automatically hitting here also ints
-		return decimal.WithContext(DecimalContext).SetFloat64(it), nil
+		return new(decimal.Big).SetFloat64(it), nil
 	case string:
-		return StringAsBig(it)
-	case *Decimal:
-		return it.Big, nil
-	case *decimal.Big:
-		return it, nil
+		if strings.HasSuffix(it, NsSuffix) ||
+			strings.HasSuffix(it, UsSuffix) ||
+			strings.HasSuffix(it, µSuffix) ||
+			strings.HasSuffix(it, MsSuffix) ||
+			strings.HasSuffix(it, SSuffix) ||
+			strings.HasSuffix(it, MSuffix) ||
+			strings.HasSuffix(it, HSuffix) {
+			var tm time.Duration
+			if tm, err = time.ParseDuration(it); err != nil {
+				return
+			}
+			return decimal.New(int64(tm), 0), nil
+		}
+		z, ok := new(decimal.Big).SetString(it)
+		// verify ok and check if the value was converted successfuly
+		// and the big is a valid number
+		if !ok || z.IsNaN(0) {
+			return nil, fmt.Errorf("can't convert <%+v> to decimal", it)
+		}
+		return z, nil
 	default:
-		err = fmt.Errorf("cannot convert field: %T to decimal.Big", it)
+		err = fmt.Errorf("cannot convert field: %+v to time.Duration", it)
 	}
 	return
 }
@@ -175,26 +219,8 @@ func IfaceAsDuration(itm interface{}) (d time.Duration, err error) {
 	return
 }
 
-func IfaceAsInt64(itm interface{}) (i int64, err error) {
-	switch it := itm.(type) {
-	case int:
-		return int64(it), nil
-	case time.Duration:
-		return it.Nanoseconds(), nil
-	case int32:
-		return int64(it), nil
-	case int64:
-		return it, nil
-	case string:
-		return strconv.ParseInt(it, 10, 64)
-	default:
-		err = fmt.Errorf("cannot convert field: %+v to int", it)
-	}
-	return
-}
-
 // IfaceAsTInt converts interface to type int
-func IfaceAsInt(itm interface{}) (i int, err error) {
+func IfaceAsTInt(itm interface{}) (i int, err error) {
 	switch it := itm.(type) {
 	case int:
 		return it, nil
@@ -212,6 +238,24 @@ func IfaceAsInt(itm interface{}) (i int, err error) {
 		return strconv.Atoi(it)
 	default:
 		err = fmt.Errorf("cannot convert field<%T>: %+v to int", it, it)
+	}
+	return
+}
+
+func IfaceAsInt64(itm interface{}) (i int64, err error) {
+	switch it := itm.(type) {
+	case int:
+		return int64(it), nil
+	case time.Duration:
+		return it.Nanoseconds(), nil
+	case int32:
+		return int64(it), nil
+	case int64:
+		return it, nil
+	case string:
+		return strconv.ParseInt(it, 10, 64)
+	default:
+		err = fmt.Errorf("cannot convert field: %+v to int", it)
 	}
 	return
 }
@@ -256,25 +300,40 @@ func IfaceAsFloat64(itm interface{}) (f float64, err error) {
 	}
 	return
 }
+func IfaceAsTFloat64(itm interface{}) (f float64, err error) {
+	switch it := itm.(type) {
+	case float64:
+		return it, nil
+	case time.Duration:
+		return float64(it.Nanoseconds()), nil
+	case int:
+		return float64(it), nil
+	case int64:
+		return float64(it), nil
+	case string:
+		if strings.HasSuffix(it, SSuffix) || strings.HasSuffix(it, MSuffix) || strings.HasSuffix(it, HSuffix) {
+			var tm time.Duration
+			if tm, err = time.ParseDuration(it); err != nil {
+				return
+			}
+			return float64(tm), nil
+		}
+		return strconv.ParseFloat(it, 64)
+	default:
+		err = fmt.Errorf("cannot convert field: %+v to float64", it)
+	}
+	return
+}
 
 func IfaceAsBool(itm interface{}) (b bool, err error) {
 	switch v := itm.(type) {
 	case bool:
 		return v, nil
 	case string:
-		if len(v) == 0 {
-			return
-		}
 		return strconv.ParseBool(v)
 	case int:
 		return v > 0, nil
-	case int32:
-		return v > 0, nil
 	case int64:
-		return v > 0, nil
-	case uint32:
-		return v > 0, nil
-	case uint64:
 		return v > 0, nil
 	case float64:
 		return v > 0, nil
@@ -317,6 +376,89 @@ func IfaceAsString(fld interface{}) (out string) {
 	default: // Maybe we are lucky and the value converts to string
 		return ToJSON(fld)
 	}
+}
+
+// IfaceAsSliceString is trying to convert the interface to a slice of strings
+func IfaceAsSliceString(fld interface{}) (out []string, err error) {
+	switch value := fld.(type) {
+	case nil:
+		return
+	case []int:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.Itoa(val)
+		}
+	case []int32:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatInt(int64(val), 10)
+		}
+	case []int64:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatInt(val, 10)
+		}
+	case []uint:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatUint(uint64(val), 10)
+		}
+	case []uint32:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatUint(uint64(val), 10)
+		}
+	case []uint64:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatUint(val, 10)
+		}
+	case []bool:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatBool(val)
+		}
+	case []float32:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatFloat(float64(val), 'f', -1, 64)
+		}
+	case []float64:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = strconv.FormatFloat(val, 'f', -1, 64)
+		}
+	case [][]uint8:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = string(val) // byte is an alias for uint8 conversions implicit
+		}
+	case []time.Duration:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = val.String()
+		}
+	case []time.Time:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = val.Format(time.RFC3339)
+		}
+	case []net.IP:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = val.String()
+		}
+	case []string:
+		out = value
+	case []interface{}:
+		out = make([]string, len(value))
+		for i, val := range value {
+			out[i] = IfaceAsString(val)
+		}
+	default:
+		err = fmt.Errorf("cannot convert field: %T to []string", value)
+	}
+	return
 }
 
 func GetUniformType(item interface{}) (interface{}, error) {
@@ -528,10 +670,14 @@ func Difference(tm string, items ...interface{}) (diff interface{}, err error) {
 		diff = d
 	case time.Time:
 		d := dt
-		for _, item := range items[1:] {
+		for i, item := range items[1:] {
 			if itmVal, err := IfaceAsTime(item, tm); err == nil {
 				diff = d.Sub(itmVal)
-				return diff, nil
+				if len(items) == i+1 {
+					return diff, nil
+				}
+				items[i] = diff
+				return Difference(tm, items[i:]...)
 			}
 
 			if itmVal, err := IfaceAsDuration(item); err != nil {
@@ -681,13 +827,12 @@ func ReflectFieldMethodInterface(obj interface{}, fldName string) (retIf interfa
 	case reflect.Slice, reflect.Array:
 		//convert fldName to int
 		idx, err := strconv.Atoi(fldName)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			if idx >= v.Len() {
+				return nil, fmt.Errorf("index out of range")
+			}
+			field = v.Index(idx)
 		}
-		if idx >= v.Len() {
-			return nil, fmt.Errorf("index out of range")
-		}
-		field = v.Index(idx)
 	default:
 		return nil, fmt.Errorf("unsupported field kind: %v", v.Kind())
 	}
@@ -719,93 +864,4 @@ func ReflectFieldMethodInterface(obj interface{}, fldName string) (retIf interfa
 		}
 	}
 	return field.Interface(), nil
-}
-
-func IfaceAsStringSlice(fld interface{}) (ss []string, err error) {
-	switch value := fld.(type) {
-	case nil:
-	case []string:
-		ss = value
-	case []int:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.Itoa(v)
-		}
-	case []int32:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatInt(int64(v), 10)
-		}
-	case []int64:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatInt(v, 10)
-		}
-	case []uint32:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatUint(uint64(v), 10)
-		}
-	case []uint64:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatUint(v, 10)
-		}
-	case []bool:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatBool(v)
-		}
-	case []float32:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatFloat(float64(v), 'f', -1, 64)
-		}
-	case []float64:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = strconv.FormatFloat(v, 'f', -1, 64)
-		}
-	case []interface{}:
-		ss = make([]string, len(value))
-		for i, v := range value {
-			ss[i] = IfaceAsString(v)
-		}
-	case string:
-		if value != EmptyString {
-			ss = strings.Split(value, InfieldSep)
-		}
-	default: // Maybe we are lucky and the value converts to string
-		err = fmt.Errorf("cannot convert field: %+v to []string", value)
-	}
-	return
-}
-
-func OptAsBool(opts map[string]interface{}, name string) (b bool) {
-	val, has := opts[name]
-	if !has {
-		return
-	}
-	b, _ = IfaceAsBool(val)
-	return
-}
-
-func OptAsBoolOrDef(opts map[string]interface{}, name string, def bool) (b bool) {
-	val, has := opts[name]
-	if !has {
-		return def
-	}
-	b, _ = IfaceAsBool(val)
-	return
-}
-
-func OptAsStringSlice(opts map[string]interface{}, name string) (b []string, err error) {
-	val, has := opts[name]
-	if !has {
-		return
-	}
-	if b, err = IfaceAsStringSlice(val); err != nil {
-		err = fmt.Errorf("error for option <%s>: %s", name, err)
-	}
-	return
 }

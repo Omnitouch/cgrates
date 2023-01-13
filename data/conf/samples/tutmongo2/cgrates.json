@@ -22,6 +22,10 @@
 },
 
 
+"stor_db": {
+	"db_type": "mongo",
+	"db_port": 27017,
+},
 
 
 
@@ -42,6 +46,7 @@
 	"enabled": true,
 	"extra_fields": ["~*req.PayPalAccount", "~*req.LCRProfile", "~*req.ResourceID"],
 	"chargers_conns":["*localhost"],
+	"store_cdrs": true,
 	"online_cdr_exports": [],
 	"ees_conns": ["*localhost"]
 },
@@ -53,14 +58,14 @@
 	"exporters": [
 		{
 			"id": "amqp_localhost",
-			"type": "*amqpJSONMap",
+			"type": "*amqp_json_map",
 			"export_path": "amqp://guest:guest@localhost:5672/",
 			"opts": {
 				"amqpQueueID":"cgrates_cdrs",
 			},
 			"attempts": 1,
 			"fields":[
-				{"tag": "*originID", "path": "*exp.*originID", "type": "*variable", "value": "~*opts.*originID"},
+				{"tag": "CGRID", "path": "*exp.CGRID", "type": "*variable", "value": "~*req.CGRID"},
 				{"tag": "RunID", "path": "*exp.RunID", "type": "*variable", "value": "~*req.RunID"},
 				{"tag": "ToR", "path": "*exp.ToR", "type": "*variable", "value": "~*req.ToR"},
 				{"tag": "OriginID", "path": "*exp.OriginID", "type": "*variable", "value": "~*req.OriginID"},
@@ -134,18 +139,14 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"scheduler_conns": ["*internal"],
 },
 
 
 "filters": {								
-	"accounts_conns": ["*internal"],
-},
-
-"accounts": {
-    "enabled": true
+	"apiers_conns": ["*internal"],
 },
 
 }

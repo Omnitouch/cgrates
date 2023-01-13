@@ -22,13 +22,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
-	"github.com/ericlagergren/decimal"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestGeneralCfgloadFromJsonCfg(t *testing.T) {
 	cfgJSON := &GeneralJsonCfg{
 		Node_id:              utils.StringPointer("randomID"),
+		Logger:               utils.StringPointer(utils.MetaSysLog),
+		Log_level:            utils.IntPointer(6),
 		Rounding_decimals:    utils.IntPointer(5),
 		Dbdata_encoding:      utils.StringPointer("msgpack"),
 		Tpexport_dir:         utils.StringPointer("/var/spool/cgrates/tpe"),
@@ -42,14 +43,18 @@ func TestGeneralCfgloadFromJsonCfg(t *testing.T) {
 		Reply_timeout:        utils.StringPointer("2s"),
 		Digest_separator:     utils.StringPointer(","),
 		Digest_equal:         utils.StringPointer(":"),
-		Opts:                 &GeneralOptsJson{},
+		Failed_posts_ttl:     utils.StringPointer("2"),
 	}
 
 	expected := &GeneralCfg{
 		NodeID:           "randomID",
+		Logger:           utils.MetaSysLog,
+		LogLevel:         6,
 		RoundingDecimals: 5,
 		DBDataEncoding:   "msgpack",
 		TpExportPath:     "/var/spool/cgrates/tpe",
+		PosterAttempts:   3,
+		FailedPostsDir:   "/var/spool/cgrates/failed_posts",
 		DefaultReqType:   utils.MetaRated,
 		DefaultCategory:  utils.Call,
 		DefaultTenant:    "cgrates.org",
@@ -63,9 +68,7 @@ func TestGeneralCfgloadFromJsonCfg(t *testing.T) {
 		MaxParallelConns: 100,
 		RSRSep:           ";",
 		DefaultCaching:   utils.MetaReload,
-		Opts: &GeneralOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
+		FailedPostsTTL:   2,
 	}
 	jsnCfg := NewDefaultCGRConfig()
 	if err = jsnCfg.generalCfg.loadFromJSONCfg(cfgJSON); err != nil {
@@ -73,8 +76,10 @@ func TestGeneralCfgloadFromJsonCfg(t *testing.T) {
 	} else if !reflect.DeepEqual(expected, jsnCfg.generalCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsnCfg.generalCfg))
 	}
-	cfgJSON = nil
-	if err = jsnCfg.generalCfg.loadFromJSONCfg(cfgJSON); err != nil {
+
+	cfgJSON.Max_reconnect_interval = utils.StringPointer("test1")
+
+	if err := jsnCfg.generalCfg.loadFromJSONCfg(cfgJSON); err == nil {
 		t.Error(err)
 	}
 }
@@ -97,6 +102,14 @@ func TestGeneralParseDurationCfgloadFromJsonCfg(t *testing.T) {
 		t.Errorf("Expected %+v, received %v", expected, err)
 	}
 
+	cfgJSON2 := &GeneralJsonCfg{
+		Failed_posts_ttl: utils.StringPointer("1ss"),
+	}
+	jsonCfg = NewDefaultCGRConfig()
+	if err = jsonCfg.generalCfg.loadFromJSONCfg(cfgJSON2); err == nil || err.Error() != expected {
+		t.Errorf("Expected %+v, received %v", expected, err)
+	}
+
 	cfgJSON3 := &GeneralJsonCfg{
 		Locking_timeout: utils.StringPointer("1ss"),
 	}
@@ -110,10 +123,15 @@ func TestGeneralParseDurationCfgloadFromJsonCfg(t *testing.T) {
 func TestGeneralCfgAsMapInterface(t *testing.T) {
 	cfgJSONStr := `{
 		"general": {
-			"node_id": "cgrates",																				
+			"node_id": "cgrates",											
+			"logger":"*syslog",										
+			"log_level": 6,											
 			"rounding_decimals": 5,									
 			"dbdata_encoding": "*msgpack",							
-			"tpexport_dir": "/var/spool/cgrates/tpe",											
+			"tpexport_dir": "/var/spool/cgrates/tpe",				
+			"poster_attempts": 3,									
+			"failed_posts_dir": "/var/spool/cgrates/failed_posts",	
+			"failed_posts_ttl": "5s",								
 			"default_request_type": "*rated",						
 			"default_category": "call",								
 			"default_tenant": "cgrates.org",						
@@ -127,22 +145,29 @@ func TestGeneralCfgAsMapInterface(t *testing.T) {
 			"digest_separator": ",",								
 			"digest_equal": ":",									
 			"rsr_separator": ";",									
-			"max_parallel_conns": 100,								
+			"max_parallel_conns": 100,
+			"max_reconnect_interval":"1s"
 		},
 	}`
+
 	eMap := map[string]interface{}{
 		utils.NodeIDCfg:               "cgrates",
+		utils.LoggerCfg:               "*syslog",
+		utils.LogLevelCfg:             6,
 		utils.RoundingDecimalsCfg:     5,
 		utils.DBDataEncodingCfg:       "*msgpack",
 		utils.TpExportPathCfg:         "/var/spool/cgrates/tpe",
+		utils.PosterAttemptsCfg:       3,
+		utils.FailedPostsDirCfg:       "/var/spool/cgrates/failed_posts",
+		utils.FailedPostsTTLCfg:       "5s",
 		utils.DefaultReqTypeCfg:       "*rated",
 		utils.DefaultCategoryCfg:      "call",
 		utils.DefaultTenantCfg:        "cgrates.org",
 		utils.DefaultTimezoneCfg:      "Local",
 		utils.DefaultCachingCfg:       "*reload",
 		utils.ConnectAttemptsCfg:      5,
-		utils.MaxReconnectIntervalCfg: "0",
 		utils.ReconnectsCfg:           -1,
+		utils.MaxReconnectIntervalCfg: "1s",
 		utils.ConnectTimeoutCfg:       "1s",
 		utils.ReplyTimeoutCfg:         "2s",
 		utils.LockingTimeoutCfg:       "1s",
@@ -150,17 +175,10 @@ func TestGeneralCfgAsMapInterface(t *testing.T) {
 		utils.DigestEqualCfg:          ":",
 		utils.RSRSepCfg:               ";",
 		utils.MaxParallelConnsCfg:     100,
-		utils.DecimalMaxScaleCfg:      0,
-		utils.DecimalMinScaleCfg:      0,
-		utils.DecimalPrecisionCfg:     0,
-		utils.DecimalRoundingModeCfg:  "*toNearestEven",
-		utils.OptsCfg: map[string]interface{}{
-			utils.MetaExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.generalCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.generalCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, recevied %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -170,7 +188,7 @@ func TestGeneralCfgAsMapInterface1(t *testing.T) {
       "general": {
             "node_id": "ENGINE1",
             "locking_timeout": "0",
-			"max_reconnect_interval": "5m",
+            "failed_posts_ttl": "0s",
             "connect_timeout": "0s",
             "reply_timeout": "0s",
             "max_call_duration": "0"
@@ -178,9 +196,14 @@ func TestGeneralCfgAsMapInterface1(t *testing.T) {
 }`
 	eMap := map[string]interface{}{
 		utils.NodeIDCfg:               "ENGINE1",
+		utils.LoggerCfg:               "*syslog",
+		utils.LogLevelCfg:             6,
 		utils.RoundingDecimalsCfg:     5,
 		utils.DBDataEncodingCfg:       "*msgpack",
 		utils.TpExportPathCfg:         "/var/spool/cgrates/tpe",
+		utils.PosterAttemptsCfg:       3,
+		utils.FailedPostsDirCfg:       "/var/spool/cgrates/failed_posts",
+		utils.FailedPostsTTLCfg:       "0",
 		utils.DefaultReqTypeCfg:       "*rated",
 		utils.DefaultCategoryCfg:      "call",
 		utils.DefaultTenantCfg:        "cgrates.org",
@@ -188,7 +211,7 @@ func TestGeneralCfgAsMapInterface1(t *testing.T) {
 		utils.DefaultCachingCfg:       "*reload",
 		utils.ConnectAttemptsCfg:      5,
 		utils.ReconnectsCfg:           -1,
-		utils.MaxReconnectIntervalCfg: "5m0s",
+		utils.MaxReconnectIntervalCfg: "0",
 		utils.ConnectTimeoutCfg:       "0",
 		utils.ReplyTimeoutCfg:         "0",
 		utils.LockingTimeoutCfg:       "0",
@@ -196,17 +219,10 @@ func TestGeneralCfgAsMapInterface1(t *testing.T) {
 		utils.DigestEqualCfg:          ":",
 		utils.RSRSepCfg:               ";",
 		utils.MaxParallelConnsCfg:     100,
-		utils.DecimalMaxScaleCfg:      0,
-		utils.DecimalMinScaleCfg:      0,
-		utils.DecimalPrecisionCfg:     0,
-		utils.DecimalRoundingModeCfg:  "*toNearestEven",
-		utils.OptsCfg: map[string]interface{}{
-			utils.MetaExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.generalCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.generalCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v \n, recevied %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -214,9 +230,13 @@ func TestGeneralCfgAsMapInterface1(t *testing.T) {
 func TestGeneralCfgClone(t *testing.T) {
 	ban := &GeneralCfg{
 		NodeID:           "randomID",
+		Logger:           utils.MetaSysLog,
+		LogLevel:         6,
 		RoundingDecimals: 5,
 		DBDataEncoding:   "msgpack",
 		TpExportPath:     "/var/spool/cgrates/tpe",
+		PosterAttempts:   3,
+		FailedPostsDir:   "/var/spool/cgrates/failed_posts",
 		DefaultReqType:   utils.MetaRated,
 		DefaultCategory:  utils.Call,
 		DefaultTenant:    "cgrates.org",
@@ -230,13 +250,7 @@ func TestGeneralCfgClone(t *testing.T) {
 		MaxParallelConns: 100,
 		RSRSep:           ";",
 		DefaultCaching:   utils.MetaReload,
-		Opts: &GeneralOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Value: []string{"*ees"},
-				},
-			},
-		},
+		FailedPostsTTL:   2,
 	}
 	rcv := ban.Clone()
 	if !reflect.DeepEqual(ban, rcv) {
@@ -244,203 +258,5 @@ func TestGeneralCfgClone(t *testing.T) {
 	}
 	if rcv.NodeID = ""; ban.NodeID != "randomID" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffGeneralJsonCfg(t *testing.T) {
-	var d *GeneralJsonCfg
-
-	v1 := &GeneralCfg{
-		NodeID:           "randomID2",
-		RoundingDecimals: 1,
-		DBDataEncoding:   "msgpack2",
-		TpExportPath:     "/var/spool/cgrates/tpe/test",
-		DefaultReqType:   utils.MetaPrepaid,
-		DefaultCategory:  utils.ForcedDisconnectCfg,
-		DefaultTenant:    "itsyscom.com",
-		DefaultTimezone:  "UTC",
-		ConnectAttempts:  5,
-		Reconnects:       2,
-		ConnectTimeout:   5 * time.Second,
-		ReplyTimeout:     1 * time.Second,
-		DigestSeparator:  "",
-		DigestEqual:      "",
-		MaxParallelConns: 50,
-		RSRSep:           "",
-		DefaultCaching:   utils.MetaClear,
-		Opts: &GeneralOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Value: []string{"*ees"},
-				},
-			},
-		},
-		MaxReconnectInterval: time.Duration(5),
-		DecimalMaxScale:      5,
-		DecimalMinScale:      5,
-		DecimalPrecision:     5,
-		DecimalRoundingMode:  decimal.ToNearestAway,
-	}
-
-	v2 := &GeneralCfg{
-		NodeID:           "randomID",
-		RoundingDecimals: 5,
-		DBDataEncoding:   "msgpack",
-		TpExportPath:     "/var/spool/cgrates/tpe",
-		DefaultReqType:   utils.MetaRated,
-		DefaultCategory:  utils.Call,
-		DefaultTenant:    "cgrates.org",
-		DefaultTimezone:  "Local",
-		ConnectAttempts:  3,
-		Reconnects:       -1,
-		ConnectTimeout:   time.Second,
-		ReplyTimeout:     2 * time.Second,
-		DigestSeparator:  ",",
-		DigestEqual:      ":",
-		MaxParallelConns: 100,
-		RSRSep:           ";",
-		DefaultCaching:   utils.MetaReload,
-		LockingTimeout:   2 * time.Second,
-		Opts: &GeneralOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Value: []string{"*syslog"},
-				},
-			},
-		},
-		MaxReconnectInterval: time.Duration(2),
-		DecimalMaxScale:      2,
-		DecimalMinScale:      2,
-		DecimalPrecision:     2,
-		DecimalRoundingMode:  decimal.ToNearestEven,
-	}
-
-	expected := &GeneralJsonCfg{
-		Node_id:              utils.StringPointer("randomID"),
-		Rounding_decimals:    utils.IntPointer(5),
-		Dbdata_encoding:      utils.StringPointer("msgpack"),
-		Tpexport_dir:         utils.StringPointer("/var/spool/cgrates/tpe"),
-		Default_request_type: utils.StringPointer(utils.MetaRated),
-		Default_category:     utils.StringPointer(utils.Call),
-		Default_tenant:       utils.StringPointer("cgrates.org"),
-		Default_timezone:     utils.StringPointer("Local"),
-		Default_caching:      utils.StringPointer(utils.MetaReload),
-		Connect_attempts:     utils.IntPointer(3),
-		Reconnects:           utils.IntPointer(-1),
-		Connect_timeout:      utils.StringPointer("1s"),
-		Reply_timeout:        utils.StringPointer("2s"),
-		Locking_timeout:      utils.StringPointer("2s"),
-		Digest_separator:     utils.StringPointer(","),
-		Rsr_separator:        utils.StringPointer(";"),
-		Digest_equal:         utils.StringPointer(":"),
-		Max_parallel_conns:   utils.IntPointer(100),
-		Opts: &GeneralOptsJson{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{
-				{
-					Value: []string{"*syslog"},
-				},
-			},
-		},
-		Max_reconnect_interval: utils.StringPointer("2ns"),
-		Decimal_max_scale:      utils.IntPointer(2),
-		Decimal_min_scale:      utils.IntPointer(2),
-		Decimal_precision:      utils.IntPointer(2),
-		Decimal_rounding_mode:  utils.StringPointer("ToNearestEven"),
-	}
-
-	rcv := diffGeneralJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &GeneralJsonCfg{
-		Opts: &GeneralOptsJson{},
-	}
-
-	rcv = diffGeneralJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestGeneralCfgCloneSection(t *testing.T) {
-	gnrCfg := &GeneralCfg{
-		NodeID:           "randomID2",
-		RoundingDecimals: 1,
-		DBDataEncoding:   "msgpack2",
-		TpExportPath:     "/var/spool/cgrates/tpe/test",
-		DefaultReqType:   utils.MetaPrepaid,
-		DefaultCategory:  utils.ForcedDisconnectCfg,
-		DefaultTenant:    "itsyscom.com",
-		DefaultTimezone:  "UTC",
-		ConnectAttempts:  5,
-		Reconnects:       2,
-		ConnectTimeout:   5 * time.Second,
-		ReplyTimeout:     1 * time.Second,
-		DigestSeparator:  "",
-		DigestEqual:      "",
-		MaxParallelConns: 50,
-		RSRSep:           "",
-		DefaultCaching:   utils.MetaClear,
-		Opts:             &GeneralOpts{},
-	}
-
-	exp := &GeneralCfg{
-		NodeID:           "randomID2",
-		RoundingDecimals: 1,
-		DBDataEncoding:   "msgpack2",
-		TpExportPath:     "/var/spool/cgrates/tpe/test",
-		DefaultReqType:   utils.MetaPrepaid,
-		DefaultCategory:  utils.ForcedDisconnectCfg,
-		DefaultTenant:    "itsyscom.com",
-		DefaultTimezone:  "UTC",
-		ConnectAttempts:  5,
-		Reconnects:       2,
-		ConnectTimeout:   5 * time.Second,
-		ReplyTimeout:     1 * time.Second,
-		DigestSeparator:  "",
-		DigestEqual:      "",
-		MaxParallelConns: 50,
-		RSRSep:           "",
-		DefaultCaching:   utils.MetaClear,
-		Opts: &GeneralOpts{
-			ExporterIDs: []*utils.DynamicStringSliceOpt{},
-		},
-	}
-
-	rcv := gnrCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestGeneralOptsLoadFromJSONCfgNilJson(t *testing.T) {
-	generalOpts := &GeneralOpts{}
-	var jsnCfg *GeneralOptsJson
-	generalOptsClone := &GeneralOpts{}
-	generalOpts.loadFromJSONCfg(jsnCfg)
-	if !reflect.DeepEqual(generalOptsClone, generalOpts) {
-		t.Errorf("Expected GeneralOpts to not change, Was <%+v>,\nNow is <%+v>",
-			generalOptsClone, generalOpts)
-	}
-}
-func TestGeneralCfgloadFromJsonCfgMaxReconnInterval(t *testing.T) {
-	cfgJSON := &GeneralJsonCfg{Max_reconnect_interval: utils.StringPointer("invalid time")}
-
-	expected := `time: invalid duration "invalid time"`
-	jsnCfg := NewDefaultCGRConfig()
-	if err = jsnCfg.generalCfg.loadFromJSONCfg(cfgJSON); err.Error() != expected {
-		t.Errorf("Expected error <%v>, Received error <%v>", expected, err.Error())
-	}
-}
-
-func TestGeneralOptsCloneNil(t *testing.T) {
-
-	var generalOpts *GeneralOpts
-	generalOptsClone := generalOpts.Clone()
-	if !reflect.DeepEqual(generalOptsClone, generalOpts) {
-		t.Errorf("Expected GeneralOpts to not change, Was <%+v>,\nNow is <%+v>",
-			generalOptsClone, generalOpts)
 	}
 }

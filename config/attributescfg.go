@@ -18,49 +18,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package config
 
-import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
-)
-
-var AttributesProfileIDsDftOpt = []string{}
-
-const (
-	AttributesProcessRunsDftOpt          = 1
-	AttributesProfileRunsDftOpt          = 0
-	AttributesProfileIgnoreFiltersDftOpt = false
-)
+import "github.com/cgrates/cgrates/utils"
 
 type AttributesOpts struct {
-	ProfileIDs           []*utils.DynamicStringSliceOpt
-	ProcessRuns          []*utils.DynamicIntOpt
-	ProfileRuns          []*utils.DynamicIntOpt
-	ProfileIgnoreFilters []*utils.DynamicBoolOpt
+	ProfileIDs           []string
+	ProfileRuns          int
+	ProfileIgnoreFilters bool
+	ProcessRuns          int
+	Context              *string
 }
 
 // AttributeSCfg is the configuration of attribute service
 type AttributeSCfg struct {
-	Enabled                bool
-	ResourceSConns         []string
-	StatSConns             []string
-	AccountSConns          []string
-	IndexedSelects         bool
-	StringIndexedFields    *[]string
-	PrefixIndexedFields    *[]string
-	SuffixIndexedFields    *[]string
-	ExistsIndexedFields    *[]string
-	NotExistsIndexedFields *[]string
-	NestedFields           bool
-	Opts                   *AttributesOpts
-}
-
-// loadAttributeSCfg loads the AttributeS section of the configuration
-func (alS *AttributeSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnAttributeSCfg := new(AttributeSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, AttributeSJSON, jsnAttributeSCfg); err != nil {
-		return
-	}
-	return alS.loadFromJSONCfg(jsnAttributeSCfg)
+	Enabled             bool
+	ResourceSConns      []string
+	StatSConns          []string
+	ApierSConns         []string
+	IndexedSelects      bool
+	StringIndexedFields *[]string
+	PrefixIndexedFields *[]string
+	SuffixIndexedFields *[]string
+	NestedFields        bool
+	AnyContext          bool
+	Opts                *AttributesOpts
 }
 
 func (attrOpts *AttributesOpts) loadFromJSONCfg(jsnCfg *AttributesOptsJson) {
@@ -68,16 +48,19 @@ func (attrOpts *AttributesOpts) loadFromJSONCfg(jsnCfg *AttributesOptsJson) {
 		return
 	}
 	if jsnCfg.ProfileIDs != nil {
-		attrOpts.ProfileIDs = append(attrOpts.ProfileIDs, jsnCfg.ProfileIDs...)
-	}
-	if jsnCfg.ProcessRuns != nil {
-		attrOpts.ProcessRuns = append(attrOpts.ProcessRuns, jsnCfg.ProcessRuns...)
+		attrOpts.ProfileIDs = *jsnCfg.ProfileIDs
 	}
 	if jsnCfg.ProfileRuns != nil {
-		attrOpts.ProfileRuns = append(attrOpts.ProfileRuns, jsnCfg.ProfileRuns...)
+		attrOpts.ProfileRuns = *jsnCfg.ProfileRuns
 	}
 	if jsnCfg.ProfileIgnoreFilters != nil {
-		attrOpts.ProfileIgnoreFilters = append(attrOpts.ProfileIgnoreFilters, jsnCfg.ProfileIgnoreFilters...)
+		attrOpts.ProfileIgnoreFilters = *jsnCfg.ProfileIgnoreFilters
+	}
+	if jsnCfg.ProcessRuns != nil {
+		attrOpts.ProcessRuns = *jsnCfg.ProcessRuns
+	}
+	if jsnCfg.Context != nil {
+		attrOpts.Context = jsnCfg.Context
 	}
 }
 
@@ -89,34 +72,64 @@ func (alS *AttributeSCfg) loadFromJSONCfg(jsnCfg *AttributeSJsonCfg) (err error)
 		alS.Enabled = *jsnCfg.Enabled
 	}
 	if jsnCfg.Stats_conns != nil {
-		alS.StatSConns = updateInternalConns(*jsnCfg.Stats_conns, utils.MetaStats)
+		alS.StatSConns = make([]string, len(*jsnCfg.Stats_conns))
+		for idx, connID := range *jsnCfg.Stats_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			alS.StatSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				alS.StatSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats)
+			}
+		}
 	}
 	if jsnCfg.Resources_conns != nil {
-		alS.ResourceSConns = updateInternalConns(*jsnCfg.Resources_conns, utils.MetaResources)
+		alS.ResourceSConns = make([]string, len(*jsnCfg.Resources_conns))
+		for idx, connID := range *jsnCfg.Resources_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			alS.ResourceSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				alS.ResourceSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources)
+			}
+		}
 	}
-	if jsnCfg.Accounts_conns != nil {
-		alS.AccountSConns = updateInternalConns(*jsnCfg.Accounts_conns, utils.MetaAccounts)
+	if jsnCfg.Apiers_conns != nil {
+		alS.ApierSConns = make([]string, len(*jsnCfg.Apiers_conns))
+		for idx, connID := range *jsnCfg.Apiers_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			alS.ApierSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				alS.ApierSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaApier)
+			}
+		}
 	}
 	if jsnCfg.Indexed_selects != nil {
 		alS.IndexedSelects = *jsnCfg.Indexed_selects
 	}
 	if jsnCfg.String_indexed_fields != nil {
-		alS.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.String_indexed_fields))
+		sif := make([]string, len(*jsnCfg.String_indexed_fields))
+		for i, fID := range *jsnCfg.String_indexed_fields {
+			sif[i] = fID
+		}
+		alS.StringIndexedFields = &sif
 	}
 	if jsnCfg.Prefix_indexed_fields != nil {
-		alS.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Prefix_indexed_fields))
+		pif := make([]string, len(*jsnCfg.Prefix_indexed_fields))
+		for i, fID := range *jsnCfg.Prefix_indexed_fields {
+			pif[i] = fID
+		}
+		alS.PrefixIndexedFields = &pif
 	}
 	if jsnCfg.Suffix_indexed_fields != nil {
-		alS.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Suffix_indexed_fields))
-	}
-	if jsnCfg.Exists_indexed_fields != nil {
-		alS.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Exists_indexed_fields))
-	}
-	if jsnCfg.Notexists_indexed_fields != nil {
-		alS.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*jsnCfg.Notexists_indexed_fields))
+		sif := make([]string, len(*jsnCfg.Suffix_indexed_fields))
+		for i, fID := range *jsnCfg.Suffix_indexed_fields {
+			sif[i] = fID
+		}
+		alS.SuffixIndexedFields = &sif
 	}
 	if jsnCfg.Nested_fields != nil {
 		alS.NestedFields = *jsnCfg.Nested_fields
+	}
+	if jsnCfg.Any_context != nil {
+		alS.AnyContext = *jsnCfg.Any_context
 	}
 	if jsnCfg.Opts != nil {
 		alS.Opts.loadFromJSONCfg(jsnCfg.Opts)
@@ -125,73 +138,90 @@ func (alS *AttributeSCfg) loadFromJSONCfg(jsnCfg *AttributeSJsonCfg) (err error)
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (alS AttributeSCfg) AsMapInterface(string) interface{} {
+func (alS *AttributeSCfg) AsMapInterface() (initialMP map[string]interface{}) {
 	opts := map[string]interface{}{
-		utils.MetaProfileIDs:           alS.Opts.ProfileIDs,
-		utils.MetaProcessRunsCfg:       alS.Opts.ProcessRuns,
-		utils.MetaProfileRunsCfg:       alS.Opts.ProfileRuns,
-		utils.MetaProfileIgnoreFilters: alS.Opts.ProfileIgnoreFilters,
+		utils.MetaProfileIDs:              alS.Opts.ProfileIDs,
+		utils.MetaProfileRuns:             alS.Opts.ProfileRuns,
+		utils.MetaProfileIgnoreFiltersCfg: alS.Opts.ProfileIgnoreFilters,
+		utils.MetaProcessRuns:             alS.Opts.ProcessRuns,
 	}
-	mp := map[string]interface{}{
+	if alS.Opts.Context != nil {
+		opts[utils.OptsContext] = *alS.Opts.Context
+	}
+	initialMP = map[string]interface{}{
 		utils.EnabledCfg:        alS.Enabled,
 		utils.IndexedSelectsCfg: alS.IndexedSelects,
 		utils.NestedFieldsCfg:   alS.NestedFields,
+		utils.AnyContextCfg:     alS.AnyContext,
 		utils.OptsCfg:           opts,
 	}
 	if alS.StringIndexedFields != nil {
-		mp[utils.StringIndexedFieldsCfg] = utils.CloneStringSlice(*alS.StringIndexedFields)
+		stringIndexedFields := make([]string, len(*alS.StringIndexedFields))
+		for i, item := range *alS.StringIndexedFields {
+			stringIndexedFields[i] = item
+		}
+		initialMP[utils.StringIndexedFieldsCfg] = stringIndexedFields
 	}
 	if alS.PrefixIndexedFields != nil {
-		mp[utils.PrefixIndexedFieldsCfg] = utils.CloneStringSlice(*alS.PrefixIndexedFields)
+		prefixIndexedFields := make([]string, len(*alS.PrefixIndexedFields))
+		for i, item := range *alS.PrefixIndexedFields {
+			prefixIndexedFields[i] = item
+		}
+		initialMP[utils.PrefixIndexedFieldsCfg] = prefixIndexedFields
 	}
 	if alS.SuffixIndexedFields != nil {
-		mp[utils.SuffixIndexedFieldsCfg] = utils.CloneStringSlice(*alS.SuffixIndexedFields)
-	}
-	if alS.ExistsIndexedFields != nil {
-		mp[utils.ExistsIndexedFieldsCfg] = utils.CloneStringSlice(*alS.ExistsIndexedFields)
-	}
-	if alS.NotExistsIndexedFields != nil {
-		mp[utils.NotExistsIndexedFieldsCfg] = utils.CloneStringSlice(*alS.NotExistsIndexedFields)
+		suffixIndexedFields := make([]string, len(*alS.SuffixIndexedFields))
+		for i, item := range *alS.SuffixIndexedFields {
+			suffixIndexedFields[i] = item
+		}
+		initialMP[utils.SuffixIndexedFieldsCfg] = suffixIndexedFields
 	}
 	if alS.StatSConns != nil {
-		mp[utils.StatSConnsCfg] = getInternalJSONConns(alS.StatSConns)
+		statSConns := make([]string, len(alS.StatSConns))
+		for i, item := range alS.StatSConns {
+			statSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats) {
+				statSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.StatSConnsCfg] = statSConns
 	}
+
 	if alS.ResourceSConns != nil {
-		mp[utils.ResourceSConnsCfg] = getInternalJSONConns(alS.ResourceSConns)
+		resourceSConns := make([]string, len(alS.ResourceSConns))
+		for i, item := range alS.ResourceSConns {
+			resourceSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources) {
+				resourceSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ResourceSConnsCfg] = resourceSConns
 	}
-	if alS.AccountSConns != nil {
-		mp[utils.AccountSConnsCfg] = getInternalJSONConns(alS.AccountSConns)
+	if alS.ApierSConns != nil {
+		apierSConns := make([]string, len(alS.ApierSConns))
+		for i, item := range alS.ApierSConns {
+			apierSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaApier) {
+				apierSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ApierSConnsCfg] = apierSConns
 	}
-	return mp
+	return
 }
 
-func (attrOpts AttributesOpts) Clone() *AttributesOpts {
-	var attrIDs []*utils.DynamicStringSliceOpt
-	if attrOpts.ProfileIDs != nil {
-		attrIDs = utils.CloneDynamicStringSliceOpt(attrOpts.ProfileIDs)
+func (attrOpts *AttributesOpts) Clone() *AttributesOpts {
+	cln := &AttributesOpts{
+		ProfileIDs:           utils.CloneStringSlice(attrOpts.ProfileIDs),
+		ProfileRuns:          attrOpts.ProfileRuns,
+		ProfileIgnoreFilters: attrOpts.ProfileIgnoreFilters,
+		ProcessRuns:          attrOpts.ProcessRuns,
 	}
-	var processRuns []*utils.DynamicIntOpt
-	if attrOpts.ProcessRuns != nil {
-		processRuns = utils.CloneDynamicIntOpt(attrOpts.ProcessRuns)
+	if attrOpts.Context != nil {
+		cln.Context = utils.StringPointer(*attrOpts.Context)
 	}
-	var profileRuns []*utils.DynamicIntOpt
-	if attrOpts.ProfileRuns != nil {
-		profileRuns = utils.CloneDynamicIntOpt(attrOpts.ProfileRuns)
-	}
-	var profileIgnoreFilters []*utils.DynamicBoolOpt
-	if attrOpts.ProfileIgnoreFilters != nil {
-		profileIgnoreFilters = utils.CloneDynamicBoolOpt(attrOpts.ProfileIgnoreFilters)
-	}
-	return &AttributesOpts{
-		ProfileIDs:           attrIDs,
-		ProcessRuns:          processRuns,
-		ProfileRuns:          profileRuns,
-		ProfileIgnoreFilters: profileIgnoreFilters,
-	}
+	return cln
 }
-
-func (AttributeSCfg) SName() string             { return AttributeSJSON }
-func (alS AttributeSCfg) CloneSection() Section { return alS.Clone() }
 
 // Clone returns a deep copy of AttributeSCfg
 func (alS AttributeSCfg) Clone() (cln *AttributeSCfg) {
@@ -199,115 +229,48 @@ func (alS AttributeSCfg) Clone() (cln *AttributeSCfg) {
 		Enabled:        alS.Enabled,
 		IndexedSelects: alS.IndexedSelects,
 		NestedFields:   alS.NestedFields,
+		AnyContext:     alS.AnyContext,
 		Opts:           alS.Opts.Clone(),
 	}
 	if alS.ResourceSConns != nil {
-		cln.ResourceSConns = utils.CloneStringSlice(alS.ResourceSConns)
+		cln.ResourceSConns = make([]string, len(alS.ResourceSConns))
+		for i, con := range alS.ResourceSConns {
+			cln.ResourceSConns[i] = con
+		}
 	}
 	if alS.StatSConns != nil {
-		cln.StatSConns = utils.CloneStringSlice(alS.StatSConns)
+		cln.StatSConns = make([]string, len(alS.StatSConns))
+		for i, con := range alS.StatSConns {
+			cln.StatSConns[i] = con
+		}
 	}
-	if alS.AccountSConns != nil {
-		cln.AccountSConns = utils.CloneStringSlice(alS.AccountSConns)
+	if alS.ApierSConns != nil {
+		cln.ApierSConns = make([]string, len(alS.ApierSConns))
+		for i, con := range alS.ApierSConns {
+			cln.ApierSConns[i] = con
+		}
 	}
 
 	if alS.StringIndexedFields != nil {
-		cln.StringIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*alS.StringIndexedFields))
+		idx := make([]string, len(*alS.StringIndexedFields))
+		for i, dx := range *alS.StringIndexedFields {
+			idx[i] = dx
+		}
+		cln.StringIndexedFields = &idx
 	}
 	if alS.PrefixIndexedFields != nil {
-		cln.PrefixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*alS.PrefixIndexedFields))
+		idx := make([]string, len(*alS.PrefixIndexedFields))
+		for i, dx := range *alS.PrefixIndexedFields {
+			idx[i] = dx
+		}
+		cln.PrefixIndexedFields = &idx
 	}
 	if alS.SuffixIndexedFields != nil {
-		cln.SuffixIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*alS.SuffixIndexedFields))
-	}
-	if alS.ExistsIndexedFields != nil {
-		cln.ExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*alS.ExistsIndexedFields))
-	}
-	if alS.NotExistsIndexedFields != nil {
-		cln.NotExistsIndexedFields = utils.SliceStringPointer(utils.CloneStringSlice(*alS.NotExistsIndexedFields))
+		idx := make([]string, len(*alS.SuffixIndexedFields))
+		for i, dx := range *alS.SuffixIndexedFields {
+			idx[i] = dx
+		}
+		cln.SuffixIndexedFields = &idx
 	}
 	return
-}
-
-type AttributesOptsJson struct {
-	ProfileIDs           []*utils.DynamicStringSliceOpt `json:"*profileIDs"`
-	ProcessRuns          []*utils.DynamicIntOpt         `json:"*processRuns"`
-	ProfileRuns          []*utils.DynamicIntOpt         `json:"*profileRuns"`
-	ProfileIgnoreFilters []*utils.DynamicBoolOpt        `json:"*profileIgnoreFilters"`
-}
-
-// Attribute service config section
-type AttributeSJsonCfg struct {
-	Enabled                  *bool
-	Stats_conns              *[]string
-	Resources_conns          *[]string
-	Accounts_conns           *[]string
-	Indexed_selects          *bool
-	String_indexed_fields    *[]string
-	Prefix_indexed_fields    *[]string
-	Suffix_indexed_fields    *[]string
-	Exists_indexed_fields    *[]string
-	Notexists_indexed_fields *[]string
-	Nested_fields            *bool // applies when indexed fields is not defined
-	Opts                     *AttributesOptsJson
-}
-
-func diffAttributesOptsJsonCfg(d *AttributesOptsJson, v1, v2 *AttributesOpts) *AttributesOptsJson {
-	if d == nil {
-		d = new(AttributesOptsJson)
-	}
-	if !utils.DynamicStringSliceOptEqual(v1.ProfileIDs, v2.ProfileIDs) {
-		d.ProfileIDs = v2.ProfileIDs
-	}
-	if !utils.DynamicIntOptEqual(v1.ProcessRuns, v2.ProcessRuns) {
-		d.ProcessRuns = v2.ProcessRuns
-	}
-	if !utils.DynamicIntOptEqual(v1.ProfileRuns, v2.ProfileRuns) {
-		d.ProfileRuns = v2.ProfileRuns
-	}
-	if !utils.DynamicBoolOptEqual(v1.ProfileIgnoreFilters, v2.ProfileIgnoreFilters) {
-		d.ProfileIgnoreFilters = v2.ProfileIgnoreFilters
-	}
-	return d
-}
-
-func diffAttributeSJsonCfg(d *AttributeSJsonCfg, v1, v2 *AttributeSCfg) *AttributeSJsonCfg {
-	if d == nil {
-		d = new(AttributeSJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if !utils.SliceStringEqual(v1.ResourceSConns, v2.ResourceSConns) {
-		d.Stats_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ResourceSConns))
-	}
-	if !utils.SliceStringEqual(v1.StatSConns, v2.StatSConns) {
-		d.Resources_conns = utils.SliceStringPointer(getInternalJSONConns(v2.StatSConns))
-	}
-	if !utils.SliceStringEqual(v1.AccountSConns, v2.AccountSConns) {
-		d.Accounts_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AccountSConns))
-	}
-	if v1.IndexedSelects != v2.IndexedSelects {
-		d.Indexed_selects = utils.BoolPointer(v2.IndexedSelects)
-	}
-	d.String_indexed_fields = diffIndexSlice(d.String_indexed_fields, v1.StringIndexedFields, v2.StringIndexedFields)
-	d.Prefix_indexed_fields = diffIndexSlice(d.Prefix_indexed_fields, v1.PrefixIndexedFields, v2.PrefixIndexedFields)
-	d.Suffix_indexed_fields = diffIndexSlice(d.Suffix_indexed_fields, v1.SuffixIndexedFields, v2.SuffixIndexedFields)
-	d.Exists_indexed_fields = diffIndexSlice(d.Exists_indexed_fields, v1.ExistsIndexedFields, v2.ExistsIndexedFields)
-	d.Notexists_indexed_fields = diffIndexSlice(d.Notexists_indexed_fields, v1.NotExistsIndexedFields, v2.NotExistsIndexedFields)
-	if v1.NestedFields != v2.NestedFields {
-		d.Nested_fields = utils.BoolPointer(v2.NestedFields)
-	}
-	d.Opts = diffAttributesOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
-}
-
-func diffIndexSlice(d, v1, v2 *[]string) *[]string {
-	if v2 == nil {
-		return nil
-	}
-	if v1 == nil || !utils.SliceStringEqual(*v1, *v2) {
-		d = utils.SliceStringPointer(utils.CloneStringSlice(*v2))
-	}
-	return d
 }

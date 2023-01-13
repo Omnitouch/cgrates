@@ -1,3 +1,11 @@
-#Tenant,ID,FilterIDs,Weights,MinCost,MaxCost,MaxCostStrategy,RateID,RateFilterIDs,RateActivationStart,RateWeights,RateBlocker,RateIntervalStart,RateFixedFee,RateRecurrentFee,RateUnit,RateIncrement
-cgrates.org,RP_1002_LOW,,;0,0.1,0.6,*free,RT_WEEK,,"* * * * *",;0,false,0s,,0.10,1m,1m
-cgrates.org,RP_1002,,;0,0.1,0.6,*free,RT_WEEK,,"* * * * *",;0,false,0s,,0.12,1m,1m
+#Id,ConnectFee,Rate,RateUnit,RateIncrement,GroupIntervalStart
+RT_10CNT,0.2,0.1,60s,60s,0s
+RT_10CNT,0,0.05,60s,1s,60s
+RT_20CNT,0.4,0.2,60s,60s,0s
+RT_20CNT,0,0.1,60s,1s,60s
+RT_40CNT,0.8,0.4,60s,30s,0s
+RT_40CNT,0,0.2,60s,10s,60s
+RT_1CNT,0,0.01,60s,60s,0s
+RT_1CNT_PER_SEC,0,0.01,1s,1s,0s
+RT_SMS,0,0.01,1,1,0
+RT_MMS,0,0.01,1,1,0

@@ -20,310 +20,147 @@ package loaders
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
-	"github.com/cgrates/ltcache"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
+
+type LoaderData map[string]interface{}
+
+func (ld LoaderData) TenantID() string {
+	return utils.ConcatenatedKey(utils.IfaceAsString(ld[utils.Tenant]),
+		utils.IfaceAsString(ld[utils.ID]))
+}
+
+func (ld LoaderData) GetRateIDs() ([]string, error) {
+	if _, has := ld[utils.RateIDs]; !has {
+		return nil, fmt.Errorf("cannot find RateIDs in <%+v>", ld)
+	}
+	if rateIDs := ld[utils.RateIDs].(string); len(rateIDs) != 0 {
+		return strings.Split(rateIDs, utils.InfieldSep), nil
+	}
+	return []string{}, nil
+}
 
 // UpdateFromCSV will update LoaderData with data received from fileName,
 // contained in record and processed with cfgTpl
-func newRecord(req utils.DataProvider, data profile, tnt string, cfg *config.CGRConfig, cache *ltcache.Cache) *record {
-	return &record{
-		data:   data,
-		tmp:    &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)},
-		req:    req,
-		cfg:    cfg.GetDataProvider(),
-		cache:  cache,
-		tenant: tnt,
-	}
-}
-
-type record struct {
-	tenant string
-	data   profile
-	tmp    *utils.DataNode
-	req    utils.DataProvider
-	cfg    utils.DataProvider
-	cache  *ltcache.Cache
-}
-
-func (r *record) String() string { return r.req.String() }
-
-func (r *record) FieldAsString(path []string) (str string, err error) {
-	var val interface{}
-	if val, err = r.FieldAsInterface(path); err != nil {
-		return
-	}
-	return utils.IfaceAsString(val), nil
-}
-
-func TenantIDFromOrderedNavigableMap(data *utils.OrderedNavigableMap) *utils.TenantID {
-	tnt, _ := data.FieldAsString([]string{utils.Tenant, "0"})
-	id, _ := data.FieldAsString([]string{utils.ID, "0"})
-	return &utils.TenantID{
-		Tenant: tnt,
-		ID:     id,
-	}
-}
-
-func RateIDsFromOrderedNavigableMap(data *utils.OrderedNavigableMap) ([]string, error) {
-	val, err := data.FieldAsInterface([]string{utils.RateIDs, "0"})
-	if err != nil {
-		return nil, fmt.Errorf("cannot find RateIDs in map")
-	}
-	return utils.IfaceAsStringSlice(val)
-}
-
-// FieldAsInterface implements utils.DataProvider
-func (ar *record) FieldAsInterface(fldPath []string) (val interface{}, err error) {
-	switch fldPath[0] {
-	default:
-		val, err = ar.data.FieldAsInterface(fldPath)
-	case utils.MetaReq:
-		if len(fldPath) != 1 {
-			val, err = ar.req.FieldAsInterface(fldPath[1:])
-		} else {
-			val = ar.req
+func (ld LoaderData) UpdateFromCSV(fileName string, record []string,
+	cfgTpl []*config.FCTemplate, tnt string, filterS *engine.FilterS) (err error) {
+	csvProvider := newCsvProvider(record, fileName)
+	tenant := tnt
+	for _, cfgFld := range cfgTpl {
+		// Make sure filters are matching
+		if len(cfgFld.Filters) != 0 {
+			if pass, err := filterS.Pass(tenant,
+				cfgFld.Filters, csvProvider); err != nil {
+				return err
+			} else if !pass {
+				continue // Not passes filters, ignore this CDR
+			}
 		}
-	case utils.MetaTmp:
-		if len(fldPath) != 1 {
-			val, err = ar.tmp.FieldAsInterface(fldPath[1:])
-		} else {
-			val = ar.tmp
-		}
-	case utils.MetaUCH:
-		if cacheVal, ok := ar.cache.Get(strings.Join(fldPath[1:], utils.NestingSep)); !ok {
-			err = utils.ErrNotFound
-		} else {
-			val = cacheVal
-		}
-	case utils.MetaCfg:
-		if len(fldPath) != 1 {
-			val, err = ar.cfg.FieldAsInterface(fldPath[1:])
-		} else {
-			val = ar.cfg
-		}
-	case utils.MetaTenant:
-		return ar.tenant, nil
-	}
-	if err != nil {
-		return
-	}
-	if nmItems, isNMItems := val.([]*utils.DataNode); isNMItems { // special handling of NMItems, take the last value out of it
-		el := nmItems[len(nmItems)-1]
-		if el.Type == utils.NMDataType {
-			val = el.Value.Data
-		}
-	}
-	return
-}
-
-// SetFields will populate fields of record out of templates
-func (ar *record) SetFields(ctx *context.Context, tmpls []*config.FCTemplate, filterS *engine.FilterS, rndDec int, dftTmz, rsrSep string) (err error) {
-	ar.tmp = &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
-	for _, fld := range tmpls {
-		if pass, err := filterS.Pass(context.TODO(), ar.tenant,
-			fld.Filters, ar); err != nil {
+		out, err := cfgFld.Value.ParseDataProvider(csvProvider)
+		if err != nil {
 			return err
-		} else if !pass {
-			continue
 		}
-		switch fld.Type {
-		case utils.MetaNone:
-		case utils.MetaRemove:
-			if err = ar.Remove(&utils.FullPath{
-				PathSlice: fld.GetPathSlice(),
-				Path:      fld.Path,
-			}); err != nil {
-				return
+		switch cfgFld.Type {
+		case utils.MetaComposed:
+			if _, has := ld[cfgFld.Path]; !has {
+				ld[cfgFld.Path] = out
+			} else if valOrig, canCast := ld[cfgFld.Path].(string); canCast {
+				valOrig += out
+				ld[cfgFld.Path] = valOrig
 			}
-		case utils.MetaRemoveAll:
-			ar.RemoveAll(fld.GetPathSlice()[0])
-		default:
-			var out interface{}
-			if out, err = engine.ParseAttribute(ar, fld.Type, fld.Path, fld.Value, rndDec,
-				utils.FirstNonEmpty(fld.Timezone, dftTmz), fld.Layout, rsrSep); err != nil {
-				if err == utils.ErrNotFound {
-					if !fld.Mandatory {
-						err = nil
-						continue
-					}
-					err = utils.ErrPrefixNotFound(fld.Tag)
-				}
-				return
+		case utils.MetaVariable:
+			ld[cfgFld.Path] = out
+		case utils.MetaString:
+			if _, has := ld[cfgFld.Path]; !has {
+				ld[cfgFld.Path] = out
 			}
-			var fullPath *utils.FullPath
-			if fullPath, err = utils.GetFullFieldPath(fld.Path, ar); err != nil {
-				return
-			} else if fullPath == nil { // no dynamic path
-				fullPath = &utils.FullPath{
-					PathSlice: utils.CloneStringSlice(fld.GetPathSlice()), // need to clone so me do not modify the template
-					Path:      fld.Path,
-				}
-			}
-
-			nMItm := &utils.DataLeaf{Data: out, NewBranch: fld.NewBranch, AttributeID: fld.AttributeID}
-			switch fld.Type {
-			case utils.MetaComposed:
-				err = ar.Compose(fullPath, nMItm, rsrSep)
-			default:
-				err = ar.Set(fullPath, nMItm, rsrSep)
-			}
-			if err != nil {
-				return
-			}
-		}
-		if fld.Blocker { // useful in case of processing errors first
-			break
 		}
 	}
 	return
 }
 
-// RemoveAll deletes all fields at given prefix
-func (ar *record) RemoveAll(prefix string) {
-	switch prefix {
-	default:
-		// ar.data = utils.NewOrderedNavigableMap()
-	case utils.MetaTmp:
-		ar.tmp = &utils.DataNode{Type: utils.NMMapType, Map: make(map[string]*utils.DataNode)}
-	case utils.MetaUCH:
-		ar.cache.Clear()
+// newCsvProvider constructs a DataProvider
+func newCsvProvider(record []string, fileName string) (dP utils.DataProvider) {
+	return &csvProvider{
+		req:      record,
+		fileName: fileName,
+		cache:    utils.MapStorage{},
+		cfg:      config.CgrConfig().GetDataProvider(),
 	}
 }
 
-// Remove deletes the fields found at path with the given prefix
-func (ar *record) Remove(fullPath *utils.FullPath) error {
-	switch fullPath.PathSlice[0] {
-	default:
-		/* ar.data.Remove(&utils.FullPath{
-			PathSlice: fullPath.PathSlice,
-			Path:      fullPath.Path,
-		})*/
-	case utils.MetaTmp:
-		return ar.tmp.Remove(utils.CloneStringSlice(fullPath.PathSlice[1:]))
-	case utils.MetaUCH:
-		ar.cache.Remove(fullPath.Path[5:])
-	}
-	return nil
+// csvProvider implements utils.DataProvider so we can pass it to filters
+type csvProvider struct {
+	req      []string
+	fileName string
+	cache    utils.MapStorage
+	cfg      utils.DataProvider
 }
 
-// Set sets the value at the given path
-// this used with full path and the processed path to not calculate them for every set
-func (ar *record) Compose(fullPath *utils.FullPath, val *utils.DataLeaf, sep string) (err error) {
-	switch fullPath.PathSlice[0] {
-	case utils.MetaTmp:
-		return ar.tmp.Compose(fullPath.PathSlice[1:], val)
-	case utils.MetaUCH:
-		path := fullPath.Path[5:]
-		var prv interface{}
-		if prvI, ok := ar.cache.Get(path); !ok {
-			prv = val.Data
-		} else {
-			prv = utils.IfaceAsString(prvI) + utils.IfaceAsString(val.Data)
-		}
-		ar.cache.Set(path, prv, nil)
+// String is part of utils.DataProvider interface
+// when called, it will display the already parsed values out of cache
+func (cP *csvProvider) String() string {
+	return utils.ToJSON(cP)
+}
+
+// FieldAsInterface is part of utils.DataProvider interface
+func (cP *csvProvider) FieldAsInterface(fldPath []string) (data interface{}, err error) {
+	if data, err = cP.cache.FieldAsInterface(fldPath); err == nil ||
+		err != utils.ErrNotFound { // item found in cache
 		return
-	default:
-		var valStr string
-		if valStr, err = ar.FieldAsString(fullPath.PathSlice); err != nil && err != utils.ErrNotFound {
+	}
+	err = nil // cancel previous err
+
+	switch {
+	case strings.HasPrefix(fldPath[0], utils.MetaFile+utils.FilterValStart):
+		fileName := strings.TrimPrefix(fldPath[0], utils.MetaFile+utils.FilterValStart)
+		hasSelEnd := false
+		for _, val := range fldPath[1:] {
+			if hasSelEnd = strings.HasSuffix(val, utils.FilterValEnd); hasSelEnd {
+				fileName = fileName + utils.NestingSep + val[:len(val)-1]
+				break
+			}
+			fileName = fileName + utils.NestingSep + val
+		}
+		if !hasSelEnd {
+			return nil, fmt.Errorf("filter rule <%s> needs to end in )", fldPath)
+		}
+		if cP.fileName != fileName {
+			cP.cache.Set(fldPath, nil)
 			return
 		}
-		return ar.data.Set(fullPath.PathSlice, valStr+utils.IfaceAsString(val.Data), val.NewBranch, utils.InfieldSep)
-	}
-}
-
-// Set implements utils.NMInterface
-func (ar *record) Set(fullPath *utils.FullPath, nm *utils.DataLeaf, sep string) (err error) {
-	switch fullPath.PathSlice[0] {
-	default:
-		return ar.data.Set(fullPath.PathSlice, nm.Data, nm.NewBranch, sep)
-	case utils.MetaTmp:
-		_, err = ar.tmp.Set(fullPath.PathSlice[1:], nm.Data)
+	case fldPath[0] == utils.MetaReq:
+	case fldPath[0] == utils.MetaCfg:
+		data, err = cP.cfg.FieldAsInterface(fldPath[1:])
+		if err != nil {
+			return
+		}
+		cP.cache.Set(fldPath, data)
 		return
-	case utils.MetaUCH:
-		ar.cache.Set(fullPath.Path[5:], nm.Data, nil)
+	default:
+		return nil, fmt.Errorf("invalid prefix for : %s", fldPath)
+	}
+	var cfgFieldIdx int
+	if cfgFieldIdx, err = strconv.Atoi(fldPath[len(fldPath)-1]); err != nil || len(cP.req) <= cfgFieldIdx {
+		return nil, fmt.Errorf("Ignoring record: %q with error : %+v", cP.req, err)
+	}
+	data = cP.req[cfgFieldIdx]
+
+	cP.cache.Set(fldPath, data)
+	return
+}
+
+// FieldAsString is part of utils.DataProvider interface
+func (cP *csvProvider) FieldAsString(fldPath []string) (data string, err error) {
+	var valIface interface{}
+	valIface, err = cP.FieldAsInterface(fldPath)
+	if err != nil {
 		return
 	}
-}
-
-type profile interface {
-	utils.DataProvider
-	Set([]string, interface{}, bool, string) error
-	Merge(interface{})
-	TenantID() string
-}
-
-func newProfileFunc(lType string) func() profile {
-	switch lType {
-	case utils.MetaAttributes:
-		return func() profile {
-			return new(engine.AttributeProfile)
-		}
-	case utils.MetaResources:
-		return func() profile {
-			return new(engine.ResourceProfile)
-		}
-	case utils.MetaFilters:
-		return func() profile {
-			return new(engine.Filter)
-		}
-	case utils.MetaStats:
-		return func() profile {
-			return new(engine.StatQueueProfile)
-		}
-	case utils.MetaThresholds:
-		return func() profile {
-			return new(engine.ThresholdProfile)
-		}
-	case utils.MetaRoutes:
-		return func() profile {
-			return new(engine.RouteProfile)
-		}
-	case utils.MetaChargers:
-		return func() profile {
-			return new(engine.ChargerProfile)
-		}
-	case utils.MetaDispatchers:
-		return func() profile {
-			return &engine.DispatcherProfile{
-				StrategyParams: make(map[string]interface{}),
-			}
-		}
-	case utils.MetaDispatcherHosts:
-		return func() profile {
-			return &engine.DispatcherHost{
-				RemoteHost: &config.RemoteHost{
-					Transport: utils.MetaJSON,
-				},
-			}
-		}
-	case utils.MetaRateProfiles:
-		return func() profile {
-			return &utils.RateProfile{
-				Rates:   make(map[string]*utils.Rate),
-				MinCost: utils.NewDecimal(0, 0),
-				MaxCost: utils.NewDecimal(0, 0),
-			}
-		}
-	case utils.MetaActionProfiles:
-		return func() profile {
-			return &engine.ActionProfile{
-				Targets: make(map[string]utils.StringSet),
-			}
-		}
-	case utils.MetaAccounts:
-		return func() profile {
-			return &utils.Account{
-				Opts:     make(map[string]interface{}),
-				Balances: make(map[string]*utils.Balance),
-			}
-		}
-	default:
-		return func() profile { return nil }
-	}
+	return utils.IfaceAsString(valIface), nil
 }

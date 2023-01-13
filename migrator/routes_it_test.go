@@ -27,10 +27,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -51,12 +50,12 @@ var sTestsSupIT = []func(t *testing.T){
 func TestSuppliersITMove1(t *testing.T) {
 	var err error
 	supPathIn = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	supCfgIn, err = config.NewCGRConfigFromPath(context.Background(), supPathIn)
+	supCfgIn, err = config.NewCGRConfigFromPath(supPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	supPathOut = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	supCfgOut, err = config.NewCGRConfigFromPath(context.Background(), supPathOut)
+	supCfgOut, err = config.NewCGRConfigFromPath(supPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +69,12 @@ func TestSuppliersITMove1(t *testing.T) {
 func TestSuppliersITMove2(t *testing.T) {
 	var err error
 	supPathIn = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	supCfgIn, err = config.NewCGRConfigFromPath(context.Background(), supPathIn)
+	supCfgIn, err = config.NewCGRConfigFromPath(supPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	supPathOut = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	supCfgOut, err = config.NewCGRConfigFromPath(context.Background(), supPathOut)
+	supCfgOut, err = config.NewCGRConfigFromPath(supPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,12 +88,12 @@ func TestSuppliersITMove2(t *testing.T) {
 func TestSuppliersITMoveEncoding(t *testing.T) {
 	var err error
 	supPathIn = path.Join(*dataDir, "conf", "samples", "tutmongo")
-	supCfgIn, err = config.NewCGRConfigFromPath(context.Background(), supPathIn)
+	supCfgIn, err = config.NewCGRConfigFromPath(supPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	supPathOut = path.Join(*dataDir, "conf", "samples", "tutmongojson")
-	supCfgOut, err = config.NewCGRConfigFromPath(context.Background(), supPathOut)
+	supCfgOut, err = config.NewCGRConfigFromPath(supPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,12 +107,12 @@ func TestSuppliersITMoveEncoding(t *testing.T) {
 func TestSuppliersITMoveEncoding2(t *testing.T) {
 	var err error
 	supPathIn = path.Join(*dataDir, "conf", "samples", "tutmysql")
-	supCfgIn, err = config.NewCGRConfigFromPath(context.Background(), supPathIn)
+	supCfgIn, err = config.NewCGRConfigFromPath(supPathIn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	supPathOut = path.Join(*dataDir, "conf", "samples", "tutmysqljson")
-	supCfgOut, err = config.NewCGRConfigFromPath(context.Background(), supPathOut)
+	supCfgOut, err = config.NewCGRConfigFromPath(supPathOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +128,7 @@ func testSupITConnect(t *testing.T) {
 		supCfgIn.DataDbCfg().Host, supCfgIn.DataDbCfg().Port,
 		supCfgIn.DataDbCfg().Name, supCfgIn.DataDbCfg().User,
 		supCfgIn.DataDbCfg().Password, supCfgIn.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), supCfgIn.DataDbCfg().Opts, supCfgIn.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), supCfgIn.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -137,16 +136,16 @@ func testSupITConnect(t *testing.T) {
 		supCfgOut.DataDbCfg().Host, supCfgOut.DataDbCfg().Port,
 		supCfgOut.DataDbCfg().Name, supCfgOut.DataDbCfg().User,
 		supCfgOut.DataDbCfg().Password, supCfgOut.GeneralCfg().DBDataEncoding,
-		config.CgrConfig().CacheCfg(), supCfgOut.DataDbCfg().Opts, supCfgOut.DataDbCfg().Items)
+		config.CgrConfig().CacheCfg(), supCfgOut.DataDbCfg().Opts, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if reflect.DeepEqual(supPathIn, supPathOut) {
-		supMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, true)
+		supMigrator, err = NewMigrator(dataDBIn, dataDBOut, nil, nil,
+			false, true, false, false)
 	} else {
-		supMigrator, err = NewMigrator(dataDBIn, dataDBOut,
-			false, false)
+		supMigrator, err = NewMigrator(dataDBIn, dataDBOut, nil, nil,
+			false, false, false, false)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -180,28 +179,28 @@ func testSupITFlush(t *testing.T) {
 
 func testSupITMigrateAndMove(t *testing.T) {
 	supPrfl := &engine.RouteProfile{
-		Tenant:    "cgrates.org",
-		ID:        "SUP1",
-		FilterIDs: []string{"*string:~*req.Account:1001"},
-		// Weights:           10,
+		Tenant:            "cgrates.org",
+		ID:                "SUP1",
+		FilterIDs:         []string{"*string:~*opts.Account:1001"},
+		Weight:            10,
 		Sorting:           utils.MetaQOS,
 		SortingParameters: []string{},
 		Routes: []*engine.Route{{
-			ID:             "Sup",
-			FilterIDs:      []string{},
-			AccountIDs:     []string{"1001"},
-			RateProfileIDs: []string{"RT_PLAN1"},
-			ResourceIDs:    []string{"RES1"},
-			// Weights:        10,
+			ID:            "Sup",
+			FilterIDs:     []string{},
+			AccountIDs:    []string{"1001"},
+			RatingPlanIDs: []string{"RT_PLAN1"},
+			ResourceIDs:   []string{"RES1"},
+			Weight:        10,
 		}},
 	}
 	switch supAction {
-	case utils.Migrate: // for the moment only one version of rating plans exists
+	case utils.Migrate: // for the momment only one version of rating plans exists
 	case utils.Move:
-		if err := supMigrator.dmIN.DataManager().SetRouteProfile(context.TODO(), supPrfl, true); err != nil {
+		if err := supMigrator.dmIN.DataManager().SetRouteProfile(supPrfl, true); err != nil {
 			t.Error(err)
 		}
-		if _, err := supMigrator.dmIN.DataManager().GetRouteProfile(context.TODO(), "cgrates.org", "SUP1", false, false, utils.NonTransactional); err != nil {
+		if _, err := supMigrator.dmIN.DataManager().GetRouteProfile("cgrates.org", "SUP1", false, false, utils.NonTransactional); err != nil {
 			t.Error(err)
 		}
 		currentVersion := engine.CurrentDataDBVersions()
@@ -210,7 +209,7 @@ func testSupITMigrateAndMove(t *testing.T) {
 			t.Error("Error when setting version for Suppliers ", err.Error())
 		}
 
-		_, err = supMigrator.dmOut.DataManager().GetRouteProfile(context.TODO(), "cgrates.org", "SUP1", false, false, utils.NonTransactional)
+		_, err = supMigrator.dmOut.DataManager().GetRouteProfile("cgrates.org", "SUP1", false, false, utils.NonTransactional)
 		if err != utils.ErrNotFound {
 			t.Error(err)
 		}
@@ -219,14 +218,14 @@ func testSupITMigrateAndMove(t *testing.T) {
 		if err != nil {
 			t.Error("Error when migrating Suppliers ", err.Error())
 		}
-		result, err := supMigrator.dmOut.DataManager().GetRouteProfile(context.TODO(), "cgrates.org", "SUP1", false, false, utils.NonTransactional)
+		result, err := supMigrator.dmOut.DataManager().GetRouteProfile("cgrates.org", "SUP1", false, false, utils.NonTransactional)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(result, supPrfl) {
 			t.Errorf("Expecting: %+v, received: %+v", supPrfl, result)
 		}
-		result, err = supMigrator.dmIN.DataManager().GetRouteProfile(context.TODO(), "cgrates.org", "SUP1", false, false, utils.NonTransactional)
+		result, err = supMigrator.dmIN.DataManager().GetRouteProfile("cgrates.org", "SUP1", false, false, utils.NonTransactional)
 		if err != utils.ErrNotFound {
 			t.Error(err)
 		} else if supMigrator.stats[utils.Routes] != 1 {

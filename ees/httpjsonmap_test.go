@@ -27,9 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestHttpJsonMapGetMetrics(t *testing.T) {
@@ -55,7 +54,7 @@ func TestHttpJsonMapExportEvent1(t *testing.T) {
 		t.Error(err)
 	}
 	errExpect := `Post "/var/spool/cgrates/ees": unsupported protocol scheme ""`
-	if err := httpEE.ExportEvent(context.Background(), &HTTPPosterRequest{Body: []byte{}, Header: make(http.Header)}, ""); err == nil || err.Error() != errExpect {
+	if err := httpEE.ExportEvent(&HTTPPosterRequest{Body: []byte{}, Header: make(http.Header)}, ""); err == nil || err.Error() != errExpect {
 		t.Errorf("Expected %q but received %q", errExpect, err)
 	}
 }
@@ -85,7 +84,7 @@ func TestHttpJsonMapExportEvent2(t *testing.T) {
 		t.Error(err)
 	}
 
-	if err := httpEE.ExportEvent(context.Background(), &HTTPPosterRequest{Body: []byte(`{"2": "*req.field2"}`), Header: make(http.Header)}, ""); err != nil {
+	if err := httpEE.ExportEvent(&HTTPPosterRequest{Body: []byte(`{"2": "*req.field2"}`), Header: make(http.Header)}, ""); err != nil {
 		t.Error(err)
 	}
 }
@@ -120,7 +119,7 @@ func TestHttpJsonMapSync(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		go exp.ExportEvent(context.Background(), &HTTPPosterRequest{Body: []byte(`{"2": "*req.field2"}`), Header: make(http.Header)}, "")
+		go exp.ExportEvent(&HTTPPosterRequest{Body: []byte(`{"2": "*req.field2"}`), Header: make(http.Header)}, "")
 	}
 
 	select {
@@ -161,7 +160,7 @@ func TestHttpJsonMapSyncLimit(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		go exp.ExportEvent(context.Background(), &HTTPPosterRequest{Body: []byte(`{"2": "*req.field2"}`), Header: make(http.Header)}, "")
+		go exp.ExportEvent(&HTTPPosterRequest{Body: []byte(`{"2": "*req.field2"}`), Header: make(http.Header)}, "")
 	}
 
 	select {
@@ -169,5 +168,54 @@ func TestHttpJsonMapSyncLimit(t *testing.T) {
 		t.Error("Should not have been possible to asynchronously export events")
 	case <-time.After(50 * time.Millisecond):
 		return
+	}
+}
+
+func TestHTTPJsonMapPrepareOrderMap(t *testing.T) {
+	httpEE := new(HTTPjsonMapEE)
+	onm := utils.NewOrderedNavigableMap()
+	fullPath := &utils.FullPath{
+		PathSlice: []string{utils.MetaReq, utils.MetaTenant},
+		Path:      utils.MetaTenant,
+	}
+	val := &utils.DataLeaf{
+		Data: "value1",
+	}
+	onm.Append(fullPath, val)
+	rcv, err := httpEE.PrepareOrderMap(onm)
+	if err != nil {
+		t.Error(err)
+	}
+	valMp := map[string]interface{}{
+		"*req.*tenant": "value1",
+	}
+	body, err := json.Marshal(valMp)
+	exp := &HTTPPosterRequest{
+		Header: httpEE.hdr,
+		Body:   body,
+	}
+	if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("Expected %v \n but received \n %v", utils.IfaceAsString(exp), utils.IfaceAsString(rcv))
+	}
+}
+
+func TestHTTPJsonMapPrepareMap(t *testing.T) {
+	httpEE := new(HTTPjsonMapEE)
+	valMp := map[string]interface{}{
+		"*req.*tenant": "value1",
+	}
+	rcv, err := httpEE.PrepareMap(&utils.CGREvent{
+		Event: valMp,
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	body, err := json.Marshal(valMp)
+	exp := &HTTPPosterRequest{
+		Header: httpEE.hdr,
+		Body:   body,
+	}
+	if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("Expected %v \n but received \n %v", utils.IfaceAsString(exp), utils.IfaceAsString(rcv))
 	}
 }

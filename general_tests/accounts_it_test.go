@@ -21,28 +21,28 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
+	"net/rpc"
 	"path"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/loaders"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
 	accCfgPath string
 	accCfg     *config.CGRConfig
-	accRpc     *birpc.Client
+	accRpc     *rpc.Client
 	accConfDIR string //run tests for specific configuration
+	account    *engine.Account
 	accDelay   int
 
 	sTestsAcc = []func(t *testing.T){
 		testV1AccLoadConfig,
 		testV1AccInitDataDb,
+		testAccResetStorDb,
 		testV1AccStartEngine,
 		testV1AccRpcConn,
 		testV1AccGetAccountBeforeSet,
@@ -54,8 +54,9 @@ var (
 		testV1AccGetAccountAfterSet,
 		testV1AccRemAccountSet,
 		testV1AccGetAccountSetAfterDelete,
-		//testV1AccMonthly,
-		//testV1AccSendToThreshold,
+		//testV1AccRemAccountAfterDelete,
+		testV1AccMonthly,
+		testV1AccSendToThreshold,
 		testV1AccStopEngine,
 	}
 )
@@ -64,11 +65,11 @@ var (
 func TestAccIT(t *testing.T) {
 	switch *dbType {
 	case utils.MetaInternal:
-		accConfDIR = "acc_generaltest_internal"
+		accConfDIR = "tutinternal"
 	case utils.MetaMySQL:
-		accConfDIR = "acc_generaltest_mysql"
+		accConfDIR = "tutmysql"
 	case utils.MetaMongo:
-		accConfDIR = "acc_generaltest_mongo"
+		accConfDIR = "tutmongo"
 	case utils.MetaPostgres:
 		t.SkipNow()
 	default:
@@ -83,14 +84,20 @@ func TestAccIT(t *testing.T) {
 func testV1AccLoadConfig(t *testing.T) {
 	var err error
 	accCfgPath = path.Join(*dataDir, "conf", "samples", accConfDIR)
-	if accCfg, err = config.NewCGRConfigFromPath(context.Background(), accCfgPath); err != nil {
+	if accCfg, err = config.NewCGRConfigFromPath(accCfgPath); err != nil {
 		t.Error(err)
 	}
 	accDelay = 1000
 }
 
 func testV1AccInitDataDb(t *testing.T) {
-	if err := engine.InitDataDB(accCfg); err != nil {
+	if err := engine.InitDataDb(accCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testAccResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(accCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,50 +117,29 @@ func testV1AccRpcConn(t *testing.T) {
 }
 
 func testV1AccGetAccountBeforeSet(t *testing.T) {
-	var reply *utils.Account
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "1001",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount,
-		args, &reply); err == nil ||
+	var reply *engine.Account
+	if err := accRpc.Call(utils.APIerSv2GetAccount,
+		&utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}, &reply); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 }
 
 func testV1AccLoadTarrifPlans(t *testing.T) {
-	caching := utils.MetaReload
-	if accCfg.DataDbCfg().Type == utils.Internal {
-		caching = utils.MetaNone
-	}
 	var reply string
-	if err := accRpc.Call(context.Background(), utils.LoaderSv1Run,
-		&loaders.ArgsProcessFolder{
-			APIOpts: map[string]interface{}{
-				utils.MetaStopOnError: true,
-				utils.MetaCache:       caching,
-			},
-		}, &reply); err != nil {
+	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "testit")}
+	if err := accRpc.Call(utils.APIerSv1LoadTariffPlanFromFolder, attrs, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
-		t.Error("Unexpected reply returned:", reply)
+		t.Error("Unexpected reply returned", reply)
 	}
 	time.Sleep(200 * time.Millisecond)
 }
 
 func testV1AccGetAccountAfterLoad(t *testing.T) {
-	var reply *utils.Account
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "1001",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount,
-		args,
+	var reply *engine.Account
+	if err := accRpc.Call(utils.APIerSv2GetAccount,
+		&utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"},
 		&reply); err != nil {
 		t.Error(err)
 	}
@@ -161,14 +147,8 @@ func testV1AccGetAccountAfterLoad(t *testing.T) {
 
 func testV1AccRemAccount(t *testing.T) {
 	var reply string
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "1001",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1RemoveAccount,
-		args,
+	if err := accRpc.Call(utils.APIerSv1RemoveAccount,
+		&utils.AttrRemoveAccount{Tenant: "cgrates.org", Account: "1001"},
 		&reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -177,15 +157,9 @@ func testV1AccRemAccount(t *testing.T) {
 }
 
 func testV1AccGetAccountAfterDelete(t *testing.T) {
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "1001",
-		},
-	}
-	var reply *utils.Account
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount,
-		args, &reply); err == nil ||
+	var reply *engine.Account
+	if err := accRpc.Call(utils.APIerSv2GetAccount,
+		&utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}, &reply); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
@@ -193,14 +167,8 @@ func testV1AccGetAccountAfterDelete(t *testing.T) {
 
 func testV1AccSetAccount(t *testing.T) {
 	var reply string
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "testacc",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1SetAccount,
-		args, &reply); err != nil {
+	if err := accRpc.Call(utils.APIerSv2SetAccount,
+		&utils.AttrSetAccount{Tenant: "cgrates.org", Account: "testacc"}, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Error("Unexpected reply returned", reply)
@@ -208,29 +176,17 @@ func testV1AccSetAccount(t *testing.T) {
 }
 
 func testV1AccGetAccountAfterSet(t *testing.T) {
-	var reply *utils.Account
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "testacc",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount,
-		args, &reply); err != nil {
+	var reply *engine.Account
+	if err := accRpc.Call(utils.APIerSv2GetAccount,
+		&utils.AttrGetAccount{Tenant: "cgrates.org", Account: "testacc"}, &reply); err != nil {
 		t.Error(err)
 	}
 }
 
 func testV1AccRemAccountSet(t *testing.T) {
 	var reply string
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "testacc",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1RemoveAccount,
-		args,
+	if err := accRpc.Call(utils.APIerSv1RemoveAccount,
+		&utils.AttrRemoveAccount{Tenant: "cgrates.org", Account: "testacc"},
 		&reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
@@ -239,35 +195,42 @@ func testV1AccRemAccountSet(t *testing.T) {
 }
 
 func testV1AccGetAccountSetAfterDelete(t *testing.T) {
-	var reply *utils.Account
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "testacc",
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount,
-		args,
+	var reply *engine.Account
+	if err := accRpc.Call(utils.APIerSv2GetAccount,
+		&utils.AttrGetAccount{Tenant: "cgrates.org", Account: "testacc"},
 		&reply); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 }
 
+/*
+Need to investigate for redis why didn't return not found
+func testV1AccRemAccountAfterDelete(t *testing.T) {
+	var reply string
+	if err := accRpc.Call(utils.APIerSv1RemoveAccount,
+		&utils.AttrRemoveAccount{Tenant: "cgrates.org", Account: "testacc"},
+		&reply); err == nil || err.Error() != utils.NewErrServerError(utils.ErrNotFound).Error() {
+		t.Error(err)
+	}
+}
+*/
+
 func testV1AccMonthly(t *testing.T) {
 	// add 10 seconds delay before and after
-	args := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "1002",
-		},
-	}
-	var reply *utils.Account
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount,
-		args,
+	timeAfter := time.Now().Add(10*time.Second).AddDate(0, 1, 0)
+	timeBefore := time.Now().Add(-10*time.Second).AddDate(0, 1, 0)
+	var reply *engine.Account
+	if err := accRpc.Call(utils.APIerSv2GetAccount,
+		&utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1002"},
 		&reply); err != nil {
 		t.Error(err)
-	} else if _, has := reply.Balances[utils.MetaData]; !has {
-		t.Error("Unexpected balance returned: ", utils.ToJSON(reply.Balances[utils.MetaData]))
+	} else if _, has := reply.BalanceMap[utils.MetaData]; !has {
+		t.Error("Unexpected balance returned: ", utils.ToJSON(reply.BalanceMap[utils.MetaData]))
+	} else if len(reply.BalanceMap[utils.MetaData]) != 1 {
+		t.Error("Unexpected number of balances returned: ", len(reply.BalanceMap[utils.MetaData]))
+	} else if reply.BalanceMap[utils.MetaData][0].ExpirationDate.After(timeAfter) &&
+		reply.BalanceMap[utils.MetaData][0].ExpirationDate.Before(timeBefore) {
+		t.Error("Unexpected expiration date returned: ", reply.BalanceMap[utils.MetaData][0].ExpirationDate)
 	}
 
 }
@@ -277,16 +240,11 @@ func testV1AccSendToThreshold(t *testing.T) {
 	var reply string
 
 	// Add a disable and log action
-	args := &engine.ActionProfileWithAPIOpts{
-		ActionProfile: &engine.ActionProfile{
-			ID: "DISABLE_LOG",
-			Actions: []*engine.APAction{
-				{ID: utils.MetaDisableAccount},
-				{ID: utils.MetaLog},
-			},
-		},
-	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1SetActionProfile, args, &reply); err != nil && err.Error() != utils.ErrExists.Error() {
+	attrsAA := &utils.AttrSetActions{ActionsId: "DISABLE_LOG", Actions: []*utils.TPAction{
+		{Identifier: utils.MetaDisableAccount},
+		{Identifier: utils.MetaLog},
+	}}
+	if err := accRpc.Call(utils.APIerSv2SetActions, attrsAA, &reply); err != nil && err.Error() != utils.ErrExists.Error() {
 		t.Error("Got error on APIerSv2.SetActions: ", err.Error())
 	} else if reply != utils.OK {
 		t.Errorf("Calling APIerSv2.SetActions received: %s", reply)
@@ -298,49 +256,47 @@ func testV1AccSendToThreshold(t *testing.T) {
 			ID:     "THD_AccDisableAndLog",
 			FilterIDs: []string{"*string:~*opts.*eventType:AccountUpdate",
 				"*string:~*asm.ID:testAccThreshold"},
-			MaxHits:  -1,
-			MinSleep: time.Second,
-			Weights: utils.DynamicWeights{
-				{
-					Weight: 20.0,
-				},
-			},
-			Async:            true,
-			ActionProfileIDs: []string{"DISABLE_LOG"},
+			MaxHits:   -1,
+			MinSleep:  time.Second,
+			Weight:    20.0,
+			Async:     true,
+			ActionIDs: []string{"DISABLE_LOG"},
 		},
 	}
 
-	if err := accRpc.Call(context.Background(), utils.AdminSv1SetThresholdProfile, tPrfl, &reply); err != nil {
+	if err := accRpc.Call(utils.APIerSv1SetThresholdProfile, tPrfl, &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Error("Unexpected reply returned", reply)
 	}
 	// Add an account
-	attrs := &utils.ArgsActSetBalance{
-		Tenant:    "cgrates.org",
-		AccountID: "testAccThreshold",
-		Diktats: []*utils.BalDiktat{
-			{
-				Path:  "*balance.testAccSetBalance.*monetary",
-				Value: "1.5",
-			},
+	attrs := &utils.AttrSetBalance{
+		Tenant:      "cgrates.org",
+		Account:     "testAccThreshold",
+		BalanceType: "*monetary",
+		Value:       1.5,
+		Balance: map[string]interface{}{
+			utils.ID: "testAccSetBalance",
 		},
 	}
-	if err := accRpc.Call(context.Background(), utils.AccountSv1ActionSetBalance, attrs, &reply); err != nil {
+	if err := accRpc.Call(utils.APIerSv1SetBalance, attrs, &reply); err != nil {
 		t.Error("Got error on APIerSv1.SetBalance: ", err.Error())
 	} else if reply != utils.OK {
 		t.Errorf("Calling APIerSv1.SetBalance received: %s", reply)
 	}
+
+	// give time to threshold to made the change
 	time.Sleep(10 * time.Millisecond)
-	var acnt utils.Account
-	attrAcc := &utils.TenantIDWithAPIOpts{
-		TenantID: &utils.TenantID{
-			Tenant: "cgrates.org",
-			ID:     "testAccThreshold",
-		},
+	//verify the account
+	var acnt *engine.Account
+	attrAcc := &utils.AttrGetAccount{
+		Tenant:  "cgrates.org",
+		Account: "testAccThreshold",
 	}
-	if err := accRpc.Call(context.Background(), utils.AdminSv1GetAccount, attrAcc, &acnt); err != nil {
+	if err := accRpc.Call(utils.APIerSv2GetAccount, attrAcc, &acnt); err != nil {
 		t.Error(err)
+	} else if acnt.Disabled != true {
+		t.Errorf("Expecting: true, received: %v", acnt.Disabled)
 	}
 }
 

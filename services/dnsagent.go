@@ -22,21 +22,21 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewDNSAgent returns the DNS Agent
 func NewDNSAgent(cfg *config.CGRConfig, filterSChan chan *engine.FilterS,
-	connMgr *engine.ConnManager,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &DNSAgent{
 		cfg:         cfg,
 		filterSChan: filterSChan,
+		shdChan:     shdChan,
 		connMgr:     connMgr,
 		srvDep:      srvDep,
 	}
@@ -47,6 +47,7 @@ type DNSAgent struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	filterSChan chan *engine.FilterS
+	shdChan     *utils.SyncedChan
 
 	dns     *agents.DNSAgent
 	connMgr *engine.ConnManager
@@ -56,14 +57,12 @@ type DNSAgent struct {
 }
 
 // Start should handle the sercive start
-func (dns *DNSAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (dns *DNSAgent) Start() (err error) {
 	if dns.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, dns.filterSChan); err != nil {
-		return
-	}
+	filterS := <-dns.filterSChan
+	dns.filterSChan <- filterS
 
 	dns.Lock()
 	defer dns.Unlock()
@@ -74,12 +73,12 @@ func (dns *DNSAgent) Start(ctx *context.Context, shtDwn context.CancelFunc) (err
 		dns.dns = nil
 		return
 	}
-	go dns.listenAndServe(shtDwn)
+	go dns.listenAndServe()
 	return
 }
 
 // Reload handles the change of config
-func (dns *DNSAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (dns *DNSAgent) Reload() (err error) {
 	if dns.oldListen == dns.cfg.DNSAgentCfg().Listen {
 		return
 	}
@@ -92,14 +91,14 @@ func (dns *DNSAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc) (er
 	if err = dns.dns.Reload(); err != nil {
 		return
 	}
-	go dns.listenAndServe(shtDwn)
+	go dns.listenAndServe()
 	return
 }
 
-func (dns *DNSAgent) listenAndServe(shtDwn context.CancelFunc) (err error) {
+func (dns *DNSAgent) listenAndServe() (err error) {
 	if err = dns.dns.ListenAndServe(); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<%s> error: <%s>", utils.DNSAgent, err.Error()))
-		shtDwn() // stop the engine here
+		dns.shdChan.CloseOnce() // stop the engine here
 	}
 	return
 }

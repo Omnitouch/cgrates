@@ -20,7 +20,9 @@
 	"db_name": "10", 						
 },
 
-
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
 
 
 "rpc_conns": {
@@ -37,19 +39,8 @@
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 },
-
-"loaders": [
-	{
-		"id": "*default",
-		"enabled": true,
-		"tenant": "cgrates.org",
-		"lockfile_path": ".cgr.lck",
-		"tp_in_dir": "/usr/share/cgrates/tariffplans/testit",
-		"tp_out_dir": "",
-	},
-],
 
 }

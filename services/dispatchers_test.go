@@ -21,29 +21,29 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/dispatchers"
+	"github.com/cgrates/cgrates/dispatchers"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // TestDispatcherSCoverage for cover testing
 func TestDispatcherSCoverage(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	cfg.AttributeSCfg().Enabled = true
+	shdChan := utils.NewSyncedChan()
+	chS := engine.NewCacheS(cfg, nil, nil)
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
 	server := cores.NewServer(nil)
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	db := NewDataDBService(cfg, nil, srvDep)
-	anz := NewAnalyzerService(cfg, server, filterSChan, make(chan birpc.ClientConnector, 1), srvDep)
-	chS := NewCacheService(cfg, db, nil, server, make(chan context.ClientConnector, 1), anz, nil, srvDep)
+	anz := NewAnalyzerService(cfg, server, filterSChan, shdChan, make(chan rpcclient.ClientConnector, 1), srvDep)
 	srv := NewDispatcherService(cfg, db, chS, filterSChan, server,
-		make(chan birpc.ClientConnector, 1), engine.NewConnManager(cfg), anz, srvDep)
+		make(chan rpcclient.ClientConnector, 1), nil, anz, srvDep)
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
 	}
@@ -54,8 +54,8 @@ func TestDispatcherSCoverage(t *testing.T) {
 		cacheS:      chS,
 		filterSChan: filterSChan,
 		server:      server,
-		connMgr:     srv.connMgr,
-		connChan:    make(chan birpc.ClientConnector, 1),
+		connMgr:     nil,
+		connChan:    make(chan rpcclient.ClientConnector, 1),
 		anz:         anz,
 		srvDep:      srvDep,
 	}
@@ -73,7 +73,7 @@ func TestDispatcherSCoverage(t *testing.T) {
 		t.Errorf("\nExpecting <%+v>,\n Received <%+v>", false, shouldRun)
 	}
 
-	srv2.connChan <- &testMockClients{}
+	srv2.connChan <- chS
 	shutErr := srv2.Shutdown()
 	if shutErr != nil {
 		t.Errorf("\nExpecting <nil>,\n Received <%+v>", shutErr)

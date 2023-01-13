@@ -20,12 +20,9 @@ package engine
 import (
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestDispatcherHostProfileClone(t *testing.T) {
@@ -33,13 +30,11 @@ func TestDispatcherHostProfileClone(t *testing.T) {
 		ID:        "DSP_1",
 		Weight:    30,
 		FilterIDs: []string{"*string:Usage:10"},
-		Params:    map[string]interface{}{"param1": 1},
 	}
 	eConn := &DispatcherHostProfile{
 		ID:        "DSP_1",
 		Weight:    30,
 		FilterIDs: []string{"*string:Usage:10"},
-		Params:    map[string]interface{}{"param1": 1},
 	}
 	d2Conn := dConn.Clone()
 	d2Conn.ID = "DSP_4"
@@ -229,6 +224,37 @@ func TestDispatcherProfilesSort(t *testing.T) {
 	}
 }
 
+type testRPCHost struct {
+	serviceMethod string
+	args          interface{}
+	reply         interface{}
+}
+
+func (v *testRPCHost) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	v.serviceMethod = serviceMethod
+	v.args = args
+	v.reply = reply
+	return nil
+}
+
+func TestDispatcherHostCall(t *testing.T) {
+	tRPC := &testRPCHost{}
+	dspHost := &DispatcherHost{}
+	etRPC := &testRPCHost{
+		serviceMethod: utils.AttributeSv1Ping,
+		args:          &utils.CGREvent{},
+		reply:         utils.StringPointer(""),
+	}
+	var reply string
+	dspHost.rpcConn = tRPC
+	if err := dspHost.Call(utils.AttributeSv1Ping, &utils.CGREvent{}, &reply); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(*etRPC, *tRPC) {
+		t.Errorf("Expected: %s , received: %s", utils.ToJSON(etRPC), utils.ToJSON(tRPC))
+	}
+
+}
+
 func TestDispatcherHostIDsProfilesReorderFromIndex(t *testing.T) {
 	dConns := DispatcherHostIDs{"DSP_1", "DSP_2", "DSP_3"}
 	eConns := DispatcherHostIDs{"DSP_1", "DSP_2", "DSP_3"}
@@ -270,749 +296,45 @@ func TestDispatcherHostIDsProfilesClone(t *testing.T) {
 	}
 }
 
-func TestDispatcherProfileSet(t *testing.T) {
-	dp := DispatcherProfile{}
-	exp := DispatcherProfile{
-		Tenant:    "cgrates.org",
-		ID:        "ID",
-		FilterIDs: []string{"fltr1", "*string:~*req.Account:1001"},
-		Weight:    10,
-		Strategy:  utils.MetaRandom,
-		StrategyParams: map[string]interface{}{
-			"opt1": "val1",
-			"opt2": "val1",
-			"opt3": "val1",
-		},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "host1",
-				FilterIDs: []string{"fltr1"},
-				Weight:    10,
-				Blocker:   true,
-				Params: map[string]interface{}{
-					"param1": "val1",
-					"param2": "val1",
-				},
-			},
-			{
-				Params: map[string]interface{}{
-					"param3": "val1",
-				},
-			},
-		},
-	}
-	if err := dp.Set([]string{}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{"NotAField"}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{"NotAField", "1"}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-
-	if err := dp.Set([]string{utils.Tenant}, "cgrates.org", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ID}, "ID", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.FilterIDs}, "fltr1;*string:~*req.Account:1001", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Weight}, 10, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Strategy}, utils.MetaRandom, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.StrategyParams}, "opt1:val1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.StrategyParams + "[opt2]"}, "val1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.StrategyParams, "opt3"}, "val1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.ID}, "host1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.FilterIDs}, "fltr1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.Weight}, "10", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.Blocker}, "true", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.Params}, "param1:val1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.Params + "[param2]"}, "val1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, utils.Params, "param3"}, "val1", true, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-
-	if err := dp.Set([]string{utils.Hosts, "Wrong"}, "val1", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Hosts, "Wrong", "path"}, "", true, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-
-	if !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-
-func TestDispatcherHostSet(t *testing.T) {
-	dp := DispatcherHost{RemoteHost: &config.RemoteHost{}}
-	exp := DispatcherHost{
-		Tenant: "cgrates.org",
-		RemoteHost: &config.RemoteHost{
-			ID:                   "ID",
-			Address:              "127.0.0.1",
-			Transport:            utils.MetaJSON,
-			ConnectAttempts:      1,
-			Reconnects:           1,
-			MaxReconnectInterval: 1,
-			ConnectTimeout:       time.Nanosecond,
-			ReplyTimeout:         time.Nanosecond,
-			TLS:                  true,
-			ClientKey:            "key",
-			ClientCertificate:    "ce",
-			CaCertificate:        "ca",
-		},
-	}
-	if err := dp.Set([]string{}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{"NotAField"}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{"NotAField", "1"}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-
-	if err := dp.Set([]string{utils.Tenant}, "cgrates.org", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ID}, "ID", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Address}, "127.0.0.1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Transport}, utils.MetaJSON, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ConnectAttempts}, 1, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Reconnects}, 1, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.MaxReconnectInterval}, 1, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ConnectTimeout}, 1, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ReplyTimeout}, 1, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.TLS}, true, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-
-	if err := dp.Set([]string{utils.ClientKey}, "key", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ClientCertificate}, "ce", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.CaCertificate}, "ca", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-
-	if !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-
-func TestDispatcherProfileAsInterface(t *testing.T) {
-	dp := DispatcherProfile{
-		Tenant:    "cgrates.org",
-		ID:        "ID",
-		FilterIDs: []string{"fltr1", "*string:~*req.Account:1001"},
-		Weight:    10,
-		Strategy:  utils.MetaRandom,
-		StrategyParams: map[string]interface{}{
-			"opt1": "val1",
-			"opt2": "val1",
-			"opt3": "val1",
-		},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "host1",
-				FilterIDs: []string{"fltr1"},
-				Weight:    10,
-				Blocker:   true,
-				Params: map[string]interface{}{
-					"param1": "val1",
-					"param2": "val1",
-				},
-			},
-			{
-				Params: map[string]interface{}{
-					"param3": "val1",
-				},
-			},
-		},
-	}
-	if _, err := dp.FieldAsInterface(nil); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{"field"}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{"field", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Tenant}); err != nil {
-		t.Fatal(err)
-	} else if exp := "cgrates.org"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := utils.ID; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.FilterIDs}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.FilterIDs; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.FilterIDs + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.FilterIDs[0]; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Weight}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Weight; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Strategy}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Strategy; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts[0]; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	expErrMsg := `strconv.Atoi: parsing "a": invalid syntax`
-	if _, err := dp.FieldAsInterface([]string{utils.FilterIDs + "[a]"}); err == nil || err.Error() != expErrMsg {
-		t.Errorf("Expeceted: %v, received: %v", expErrMsg, err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[a]"}); err == nil || err.Error() != expErrMsg {
-		t.Errorf("Expeceted: %v, received: %v", expErrMsg, err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[a]", ""}); err == nil || err.Error() != expErrMsg {
-		t.Errorf("Expeceted: %v, received: %v", expErrMsg, err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[4]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[a]", ""}); err == nil || err.Error() != expErrMsg {
-		t.Errorf("Expeceted: %v, received: %v", expErrMsg, err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts, ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.StrategyParams + "[a]"}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.StrategyParams + "[a]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts[0].ID; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.FilterIDs}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts[0].FilterIDs; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.Weight}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts[0].Weight; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.Blocker}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts[0].Blocker; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.FilterIDs + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := dp.Hosts[0].FilterIDs[0]; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.FilterIDs + "[a]"}); err == nil || err.Error() != expErrMsg {
-		t.Errorf("Expeceted: %v, received: %v", expErrMsg, err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.Params + "[a]"}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.Params + "[a]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dp.FieldAsInterface([]string{utils.Hosts + "[0]", utils.Params + "a]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-
-	if _, err := dp.FieldAsString([]string{""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := dp.FieldAsString([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := "ID"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, exp := dp.String(), utils.ToJSON(dp); exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-
-	if _, err := dp.Hosts[0].FieldAsString([]string{}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := dp.Hosts[0].FieldAsString([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := "host1"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, exp := dp.Hosts[0].String(), utils.ToJSON(dp.Hosts[0]); exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-}
-
-func TestDispatcherProfileMerge(t *testing.T) {
-	dp := &DispatcherProfile{
-		StrategyParams: make(map[string]interface{}),
-	}
-	exp := &DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "ID",
-		FilterIDs:      []string{"fltr1"},
-		Weight:         65,
-		Strategy:       utils.MetaLoad,
-		StrategyParams: map[string]interface{}{"k": "v"},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"fltr2"},
-				Weight:    20,
-				Params:    map[string]interface{}{},
-				Blocker:   true,
-			},
-			{
-				ID:        "C2",
-				FilterIDs: []string{"fltr3"},
-				Weight:    10,
-				Params: map[string]interface{}{
-					"param3": "value3",
-				},
-				Blocker: false,
-			},
-		},
-	}
-	if dp.Merge(&DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "ID",
-		FilterIDs:      []string{"fltr1"},
-		Weight:         65,
-		Strategy:       utils.MetaLoad,
-		StrategyParams: map[string]interface{}{"k": "v"},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"fltr2"},
-				Weight:    20,
-				Params:    map[string]interface{}{},
-				Blocker:   true,
-			},
-			{
-				ID:        "C2",
-				FilterIDs: []string{"fltr3"},
-				Weight:    10,
-				Params: map[string]interface{}{
-					"param3": "value3",
-				},
-				Blocker: false,
-			},
-		},
-	}); !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-
-func TestDispatcherProfileMergeEmptyHostId(t *testing.T) {
-	dp := &DispatcherProfile{
-		StrategyParams: make(map[string]interface{}),
-		Hosts: DispatcherHostProfiles{
-			{
-				ID: utils.EmptyString,
-			},
-		},
-	}
-	exp := &DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "ID",
-		FilterIDs:      []string{"fltr1"},
-		Weight:         65,
-		Strategy:       utils.MetaLoad,
-		StrategyParams: map[string]interface{}{"k": "v"},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"fltr2"},
-				Weight:    20,
-				Params: map[string]interface{}{
-					"param4": "value4",
-				},
-				Blocker: false,
-			},
-		},
-	}
-	if dp.Merge(&DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "ID",
-		FilterIDs:      []string{"fltr1"},
-		Weight:         65,
-		Strategy:       utils.MetaLoad,
-		StrategyParams: map[string]interface{}{"k": "v"},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"fltr2"},
-				Weight:    20,
-				Params: map[string]interface{}{
-					"param4": "value4",
-				},
-				Blocker: false,
-			},
-		},
-	}); !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %+v \n but received \n %+v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-func TestDispatcherProfileMergeEqualHosts(t *testing.T) {
-	dp := &DispatcherProfile{
-		StrategyParams: make(map[string]interface{}),
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"dpFltr1"},
-				Weight:    20,
-				Params: map[string]interface{}{
-					"param4": "value4",
-				},
-				Blocker: false,
-			},
-		},
-	}
-	exp := &DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "ID",
-		FilterIDs:      []string{"fltr1"},
-		Weight:         65,
-		Strategy:       utils.MetaLoad,
-		StrategyParams: map[string]interface{}{"k": "v"},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"dpFltr1", "newFltr2"},
-				Weight:    20,
-				Params: map[string]interface{}{
-					"param4": "value4",
-				},
-				Blocker: false,
-			},
-		},
-	}
-	if dp.Merge(&DispatcherProfile{
-		Tenant:         "cgrates.org",
-		ID:             "ID",
-		FilterIDs:      []string{"fltr1"},
-		Weight:         65,
-		Strategy:       utils.MetaLoad,
-		StrategyParams: map[string]interface{}{"k": "v"},
-		Hosts: DispatcherHostProfiles{
-			{
-				ID:        "C3",
-				FilterIDs: []string{"newFltr2"},
-				Weight:    20,
-				Params: map[string]interface{}{
-					"param4": "value4",
-				},
-				Blocker: false,
-			},
-		},
-	}); !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %+v \n but received \n %+v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-func TestDispatcherHostAsInterface(t *testing.T) {
-	dh := DispatcherHost{
-		Tenant: "cgrates.org",
-		RemoteHost: &config.RemoteHost{
-			ID:                   "ID",
-			Address:              "127.0.0.1",
-			Transport:            utils.MetaJSON,
-			ConnectAttempts:      1,
-			Reconnects:           1,
-			MaxReconnectInterval: 1,
-			ConnectTimeout:       time.Nanosecond,
-			ReplyTimeout:         time.Nanosecond,
-			TLS:                  true,
-			ClientKey:            "key",
-			ClientCertificate:    "ce",
-			CaCertificate:        "ca",
-		},
-	}
-	if _, err := dh.FieldAsInterface(nil); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dh.FieldAsInterface([]string{"field"}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := dh.FieldAsInterface([]string{"field", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.Tenant}); err != nil {
-		t.Fatal(err)
-	} else if exp := "cgrates.org"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := utils.ID; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-
-	if val, err := dh.FieldAsInterface([]string{utils.Address}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.Address; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.Transport}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.Transport; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.ConnectAttempts}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.ConnectAttempts; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.Reconnects}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.Reconnects; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.MaxReconnectInterval}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.MaxReconnectInterval; exp != val {
-		t.Errorf("Expected %+v \n but received \n %+v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.ConnectTimeout}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.ConnectTimeout; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.ReplyTimeout}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.ReplyTimeout; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.TLS}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.TLS; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.ClientKey}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.ClientKey; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.ClientCertificate}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.ClientCertificate; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := dh.FieldAsInterface([]string{utils.CaCertificate}); err != nil {
-		t.Fatal(err)
-	} else if exp := dh.CaCertificate; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if _, err := dh.FieldAsString([]string{""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := dh.FieldAsString([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := "ID"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, exp := dh.String(), utils.ToJSON(dh); exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-}
-
-func TestDispatcherHostMerge(t *testing.T) {
-	dp := &DispatcherHost{
-		RemoteHost: &config.RemoteHost{},
-	}
-	exp := &DispatcherHost{
-		Tenant: "cgrates.org",
-		RemoteHost: &config.RemoteHost{
-			ID:                   "ID",
-			Address:              "127.0.0.1",
-			Transport:            utils.MetaJSON,
-			ConnectAttempts:      1,
-			Reconnects:           1,
-			MaxReconnectInterval: 1,
-			ConnectTimeout:       time.Nanosecond,
-			ReplyTimeout:         time.Nanosecond,
-			TLS:                  true,
-			ClientKey:            "key",
-			ClientCertificate:    "ce",
-			CaCertificate:        "ca",
-		},
-	}
-	if dp.Merge(&DispatcherHost{
-		Tenant: "cgrates.org",
-		RemoteHost: &config.RemoteHost{
-			ID:                   "ID",
-			Address:              "127.0.0.1",
-			Transport:            utils.MetaJSON,
-			ConnectAttempts:      1,
-			Reconnects:           1,
-			MaxReconnectInterval: 1,
-			ConnectTimeout:       time.Nanosecond,
-			ReplyTimeout:         time.Nanosecond,
-			TLS:                  true,
-			ClientKey:            "key",
-			ClientCertificate:    "ce",
-			CaCertificate:        "ca",
-		},
-	}); !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-
-func TestDispatcherHostGetConnErr(t *testing.T) {
-	dH := &DispatcherHost{
-		RemoteHost: &config.RemoteHost{},
-	}
-	cfg := config.NewDefaultCGRConfig()
-	_, err := dH.GetConn(context.Background(), cfg, make(chan birpc.ClientConnector, 1))
-	if err == nil || err.Error() != "dial tcp: missing address" {
-		t.Errorf("Expected %v \n but received \n %v", "dial tcp: missing address", err)
-	}
-
-}
-func TestDispatcherHostProfileMerge(t *testing.T) {
-
-	dspHost := &DispatcherHostProfile{
+func TestDispatcherHostProfileCloneWithParams(t *testing.T) {
+	dC := &DispatcherHostProfile{
+		ID:      "testID",
+		Weight:  10,
+		Blocker: false,
 		Params: map[string]interface{}{
-			"opt1": "val1",
+			"param1": "value of param1",
+			"param2": "value of param2",
 		},
 	}
 
-	dspHostV2 := &DispatcherHostProfile{
-		ID: "DispatcherId",
+	exp := &DispatcherHostProfile{
+		ID:      "testID",
+		Weight:  10,
+		Blocker: false,
 		Params: map[string]interface{}{
-
-			"opt1": "val1",
-			"opt2": "val1",
-			"opt3": "val1",
+			"param1": "value of param1",
+			"param2": "value of param2",
 		},
-		Weight:    10,
-		Blocker:   true,
-		FilterIDs: []string{"FltrId"},
 	}
-	exp := dspHostV2
+	rcv := dC.Clone()
 
-	dspHost.Merge(dspHostV2)
-	if !reflect.DeepEqual(dspHost, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dspHost))
+	if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v", exp, rcv)
 	}
 }
 
-type cMock struct {
-	rcvM string
-}
-
-func (*cMock) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) error {
-	return nil
-}
-func TestDispatcherHostGetConnExistingConn(t *testing.T) {
-	Cache.Clear(nil)
-
-	cfg := config.NewDefaultCGRConfig()
-	chanRPC := make(chan birpc.ClientConnector, 1)
-	chanRPC <- &cMock{
-		rcvM: "testM",
-	}
-	connMgr := NewConnManager(cfg)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes), utils.AttributeSv1, chanRPC)
+func TestDispatcherHostCallErr(t *testing.T) {
 	dH := &DispatcherHost{
-		Tenant: "cgrates.org",
+		Tenant: "testTenant",
 		RemoteHost: &config.RemoteHost{
-			ID:                "ID",
-			Address:           "127.0.0.1",
-			Transport:         utils.MetaJSON,
-			ConnectAttempts:   1,
-			Reconnects:        1,
-			ConnectTimeout:    time.Nanosecond,
-			ReplyTimeout:      time.Nanosecond,
-			TLS:               true,
-			ClientKey:         "key",
-			ClientCertificate: "ce",
-			CaCertificate:     "ca",
+			ID:        "testID",
+			Address:   "",
+			Transport: "",
+			TLS:       false,
 		},
-		rpcConn: <-chanRPC,
 	}
-
-	exp := &cMock{rcvM: "testM"}
-
-	if rcv, err := dH.GetConn(context.Background(), cfg, make(chan birpc.ClientConnector, 1)); err != nil {
+	var reply string
+	if err := dH.Call(utils.AttributeSv1Ping, &utils.CGREvent{}, &reply); err == nil || err.Error() != "dial tcp: missing address" {
 		t.Error(err)
-	} else if !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected %+v %T \n but received \n %+v %T", rcv, rcv, exp, exp)
 	}
-
 }

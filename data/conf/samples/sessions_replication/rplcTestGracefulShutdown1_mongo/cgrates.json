@@ -20,7 +20,11 @@
 },
 
 
-
+"stor_db": {
+	"db_type": "mongo",
+	"db_name": "cgrates",
+	"db_port": 27017,
+},
 
 
 "chargers": {
@@ -33,7 +37,7 @@
 	"listen_bijson": "127.0.0.1:22014",		// address where to listen for bidirectional JSON-RPC requests
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
 },
 

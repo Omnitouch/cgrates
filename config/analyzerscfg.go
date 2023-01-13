@@ -21,8 +21,7 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // AnalyzerSCfg is the configuration of analyzer service
@@ -31,31 +30,7 @@ type AnalyzerSCfg struct {
 	DBPath          string
 	IndexType       string
 	TTL             time.Duration
-	EEsConns        []string
 	CleanupInterval time.Duration
-	Opts            *AnalyzerSOpts
-}
-
-type AnalyzerSOpts struct {
-	ExporterIDs []*utils.DynamicStringSliceOpt
-}
-
-// loadAnalyzerCgrCfg loads the Analyzer section of the configuration
-func (alS *AnalyzerSCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnAnalyzerCgrCfg := new(AnalyzerSJsonCfg)
-	if err = jsnCfg.GetSection(ctx, AnalyzerSJSON, jsnAnalyzerCgrCfg); err != nil {
-		return
-	}
-	return alS.loadFromJSONCfg(jsnAnalyzerCgrCfg)
-}
-
-func (anzOpts *AnalyzerSOpts) loadFromJSONCfg(jsonAnzOpts *AnalyzerSOptsJson) {
-	if jsonAnzOpts == nil {
-		return
-	}
-	if jsonAnzOpts.ExporterIDs != nil {
-		anzOpts.ExporterIDs = append(anzOpts.ExporterIDs, jsonAnzOpts.ExporterIDs...)
-	}
 }
 
 func (alS *AnalyzerSCfg) loadFromJSONCfg(jsnCfg *AnalyzerSJsonCfg) (err error) {
@@ -76,114 +51,32 @@ func (alS *AnalyzerSCfg) loadFromJSONCfg(jsnCfg *AnalyzerSJsonCfg) (err error) {
 			return
 		}
 	}
-	if jsnCfg.Ees_conns != nil {
-		alS.EEsConns = updateInternalConns(*jsnCfg.Ees_conns, utils.MetaEEs)
-	}
 	if jsnCfg.Cleanup_interval != nil {
 		if alS.CleanupInterval, err = time.ParseDuration(*jsnCfg.Cleanup_interval); err != nil {
 			return
 		}
 	}
-	if jsnCfg.Opts != nil {
-		alS.Opts.loadFromJSONCfg(jsnCfg.Opts)
-	}
 	return nil
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (alS AnalyzerSCfg) AsMapInterface(string) interface{} {
-	opts := map[string]interface{}{
-		utils.MetaExporterIDs: alS.Opts.ExporterIDs,
-	}
-	mp := map[string]interface{}{
+func (alS *AnalyzerSCfg) AsMapInterface() map[string]interface{} {
+	return map[string]interface{}{
 		utils.EnabledCfg:         alS.Enabled,
 		utils.DBPathCfg:          alS.DBPath,
 		utils.IndexTypeCfg:       alS.IndexType,
 		utils.TTLCfg:             alS.TTL.String(),
 		utils.CleanupIntervalCfg: alS.CleanupInterval.String(),
-		utils.OptsCfg:            opts,
 	}
-	if alS.EEsConns != nil {
-		mp[utils.EEsConnsCfg] = getInternalJSONConns(alS.EEsConns)
-	}
-	return mp
 }
 
-func (AnalyzerSCfg) SName() string             { return AnalyzerSJSON }
-func (alS AnalyzerSCfg) CloneSection() Section { return alS.Clone() }
-
 // Clone returns a deep copy of AnalyzerSCfg
-func (alS AnalyzerSCfg) Clone() (cln *AnalyzerSCfg) {
-	cln = &AnalyzerSCfg{
+func (alS AnalyzerSCfg) Clone() *AnalyzerSCfg {
+	return &AnalyzerSCfg{
 		Enabled:         alS.Enabled,
 		DBPath:          alS.DBPath,
 		IndexType:       alS.IndexType,
 		TTL:             alS.TTL,
 		CleanupInterval: alS.CleanupInterval,
-		Opts:            alS.Opts.Clone(),
 	}
-	if alS.EEsConns != nil {
-		cln.EEsConns = utils.CloneStringSlice(alS.EEsConns)
-	}
-	return
-}
-
-func (anzOpts *AnalyzerSOpts) Clone() *AnalyzerSOpts {
-	if anzOpts == nil {
-		return nil
-	}
-	return &AnalyzerSOpts{
-		ExporterIDs: utils.CloneDynamicStringSliceOpt(anzOpts.ExporterIDs),
-	}
-}
-
-type AnalyzerSOptsJson struct {
-	ExporterIDs []*utils.DynamicStringSliceOpt `json:"*exporterIDs"`
-}
-
-// Analyzer service json config section
-type AnalyzerSJsonCfg struct {
-	Enabled          *bool
-	Db_path          *string
-	Index_type       *string
-	Ttl              *string
-	Ees_conns        *[]string
-	Cleanup_interval *string
-	Opts             *AnalyzerSOptsJson
-}
-
-func diffAnalyzerSOptsJsonCfg(d *AnalyzerSOptsJson, v1, v2 *AnalyzerSOpts) *AnalyzerSOptsJson {
-	if d == nil {
-		d = new(AnalyzerSOptsJson)
-	}
-	if !utils.DynamicStringSliceOptEqual(v1.ExporterIDs, v2.ExporterIDs) {
-		d.ExporterIDs = v2.ExporterIDs
-	}
-	return d
-}
-
-func diffAnalyzerSJsonCfg(d *AnalyzerSJsonCfg, v1, v2 *AnalyzerSCfg) *AnalyzerSJsonCfg {
-	if d == nil {
-		d = new(AnalyzerSJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	if v1.DBPath != v2.DBPath {
-		d.Db_path = utils.StringPointer(v2.DBPath)
-	}
-	if v1.IndexType != v2.IndexType {
-		d.Index_type = utils.StringPointer(v2.IndexType)
-	}
-	if v1.TTL != v2.TTL {
-		d.Ttl = utils.StringPointer(v2.TTL.String())
-	}
-	if !utils.SliceStringEqual(v1.EEsConns, v2.EEsConns) {
-		d.Ees_conns = utils.SliceStringPointer(getBiRPCInternalJSONConns(v2.EEsConns))
-	}
-	if v1.CleanupInterval != v2.CleanupInterval {
-		d.Cleanup_interval = utils.StringPointer(v2.CleanupInterval.String())
-	}
-	d.Opts = diffAnalyzerSOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

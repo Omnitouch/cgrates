@@ -20,17 +20,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 package general_tests
 
-/*
 import (
 	"net/rpc"
 	"path"
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -78,7 +77,9 @@ func testSeSRplPrepaidResetDB(t *testing.T) {
 	if err := engine.InitDataDb(sesRplPrePaidCfg); err != nil {
 		t.Fatal(err)
 	}
-
+	if err := engine.InitStorDb(sesRplPrePaidCfg); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Start CGR Engine
@@ -220,7 +221,7 @@ func testSeSRplPrepaidActivateSessions(t *testing.T) {
 				RatingFilters: engine.RatingFilters{"d24bb65": {
 					"DestinationID":     utils.MetaAny,
 					"DestinationPrefix": "1004",
-					utils.RateProfileID:      utils.MetaNone,
+					"RatingPlanID":      utils.MetaNone,
 					"Subject":           "dc88acfb-18c7-4658-9d36-056b74b84b57",
 				}},
 				Rates: engine.ChargedRates{"5dad4b7": {{
@@ -270,4 +271,3 @@ func testSeSRplPrepaidStopCgrEngine(t *testing.T) {
 		t.Error(err)
 	}
 }
-*/

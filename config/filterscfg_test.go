@@ -21,29 +21,25 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestFilterSCfgloadFromJsonCfg(t *testing.T) {
 	cfgJSONS := &FilterSJsonCfg{
 		Stats_conns:     &[]string{utils.MetaInternal, "*conn1"},
 		Resources_conns: &[]string{utils.MetaInternal, "*conn1"},
-		Accounts_conns:  &[]string{utils.MetaInternal, "*conn1"},
+		Apiers_conns:    &[]string{utils.MetaInternal, "*conn1"},
 	}
 	expected := &FilterSCfg{
 		StatSConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats), "*conn1"},
 		ResourceSConns: []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources), "*conn1"},
-		AccountSConns:  []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAccounts), "*conn1"},
+		ApierSConns:    []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaApier), "*conn1"},
 	}
 	jsnCfg := NewDefaultCGRConfig()
 	if err = jsnCfg.filterSCfg.loadFromJSONCfg(cfgJSONS); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, jsnCfg.filterSCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsnCfg.filterSCfg))
-	}
-	cfgJSONS = nil
-	if err = jsnCfg.filterSCfg.loadFromJSONCfg(cfgJSONS); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -52,17 +48,17 @@ func TestFilterSCfgAsMapInterface(t *testing.T) {
 		"filters": {								
 			"stats_conns": ["*internal:*stats", "*conn1"],						
 			"resources_conns": ["*internal:*resources", "*conn1"],
-            "accounts_conns": ["*internal:*apier", "*conn1"],
+            "apiers_conns": ["*internal:*apier", "*conn1"],
 	},
 }`
 	eMap := map[string]interface{}{
 		utils.StatSConnsCfg:     []string{utils.MetaInternal, "*conn1"},
 		utils.ResourceSConnsCfg: []string{utils.MetaInternal, "*conn1"},
-		utils.AccountSConnsCfg:  []string{utils.MetaInternal, "*conn1"},
+		utils.ApierSConnsCfg:    []string{utils.MetaInternal, "*conn1"},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.filterSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.filterSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v, received %+v", eMap, rcv)
 	}
 }
@@ -74,11 +70,11 @@ func TestFilterSCfgAsMapInterface2(t *testing.T) {
 	eMap := map[string]interface{}{
 		utils.StatSConnsCfg:     []string{},
 		utils.ResourceSConnsCfg: []string{},
-		utils.AccountSConnsCfg:  []string{},
+		utils.ApierSConnsCfg:    []string{},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.filterSCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.filterSCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v, received %+v", eMap, rcv)
 	}
 }
@@ -87,7 +83,7 @@ func TestFilterSCfgClone(t *testing.T) {
 	ban := &FilterSCfg{
 		StatSConns:     []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats), "*conn1"},
 		ResourceSConns: []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResources), "*conn1"},
-		AccountSConns:  []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAdminS), "*conn1"},
+		ApierSConns:    []string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaApier), "*conn1"},
 	}
 	rcv := ban.Clone()
 	if !reflect.DeepEqual(ban, rcv) {
@@ -99,61 +95,7 @@ func TestFilterSCfgClone(t *testing.T) {
 	if rcv.ResourceSConns[1] = ""; ban.ResourceSConns[1] != "*conn1" {
 		t.Errorf("Expected clone to not modify the cloned")
 	}
-	if rcv.AccountSConns[1] = ""; ban.AccountSConns[1] != "*conn1" {
+	if rcv.ApierSConns[1] = ""; ban.ApierSConns[1] != "*conn1" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffFilterSJsonCfg(t *testing.T) {
-	var d *FilterSJsonCfg
-
-	v1 := &FilterSCfg{
-		StatSConns:     []string{},
-		ResourceSConns: []string{},
-		AccountSConns:  []string{},
-	}
-
-	v2 := &FilterSCfg{
-		StatSConns:     []string{"*localhost"},
-		ResourceSConns: []string{"*localhost"},
-		AccountSConns:  []string{"*localhost"},
-	}
-
-	expected := &FilterSJsonCfg{
-		Stats_conns:     &[]string{"*localhost"},
-		Resources_conns: &[]string{"*localhost"},
-		Accounts_conns:  &[]string{"*localhost"},
-	}
-
-	rcv := diffFilterSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected2 := &FilterSJsonCfg{}
-
-	rcv = diffFilterSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected2) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
-	}
-}
-
-func TestFilterSCloneSection(t *testing.T) {
-	fltrSCfg := &FilterSCfg{
-		StatSConns:     []string{"*localhost"},
-		ResourceSConns: []string{"*localhost"},
-		AccountSConns:  []string{"*localhost"},
-	}
-
-	exp := &FilterSCfg{
-		StatSConns:     []string{"*localhost"},
-		ResourceSConns: []string{"*localhost"},
-		AccountSConns:  []string{"*localhost"},
-	}
-
-	rcv := fltrSCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

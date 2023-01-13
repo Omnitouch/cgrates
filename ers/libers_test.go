@@ -22,92 +22,19 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestGetProcessOptions(t *testing.T) {
 	opts := &config.EventReaderOpts{
-		AWSKeyProcessed: utils.StringPointer("testKey"),
+		AMQPQueueIDProcessed: utils.StringPointer("processed"),
 	}
 	result := getProcessOptions(opts)
 	expected := &config.EventExporterOpts{
-		AWSKey: utils.StringPointer("testKey"),
+		AMQPQueueID: utils.StringPointer("processed"),
 	}
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, result)
-	}
-}
-
-func TestLibErsMergePartialEvents(t *testing.T) {
-	confg := config.NewDefaultCGRConfig()
-	fltrS := engine.NewFilterS(confg, nil, nil)
-	cgrEvs := []*utils.CGREvent{
-		{
-			Tenant: "cgrates.org",
-			ID:     "ev1",
-			Event: map[string]interface{}{
-				"EvField1":       "Value1",
-				"EvField2":       "Value4",
-				utils.AnswerTime: 6.,
-			},
-			APIOpts: map[string]interface{}{
-				"Field1": "Value1",
-				"Field2": "Value2",
-			},
-		},
-		{
-			Tenant: "cgrates.org",
-			ID:     "ev2",
-			Event: map[string]interface{}{
-				"EvField3":       "Value1",
-				"EvField2":       "Value2",
-				utils.AnswerTime: 4.,
-			},
-			APIOpts: map[string]interface{}{
-				"Field4": "Value2",
-				"Field2": "Value3",
-			},
-		},
-		{
-			Tenant: "cgrates.org",
-			ID:     "ev3",
-			Event: map[string]interface{}{
-				"EvField2":       "Value2",
-				"EvField4":       "Value4",
-				"EvField3":       "Value3",
-				utils.AnswerTime: 8.,
-			},
-			APIOpts: map[string]interface{}{
-				"Field3": "Value3",
-				"Field4": "Value4",
-			},
-		},
-	}
-	exp := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		Event: map[string]interface{}{
-			utils.AnswerTime: 8.,
-			"EvField1":       "Value1",
-			"EvField2":       "Value2",
-			"EvField3":       "Value3",
-			"EvField4":       "Value4",
-		},
-		APIOpts: map[string]interface{}{
-			"Field1": "Value1",
-			"Field2": "Value2",
-			"Field3": "Value3",
-			"Field4": "Value4",
-		},
-	}
-	if rcv, err := mergePartialEvents(cgrEvs, confg.ERsCfg().Readers[0], fltrS, confg.GeneralCfg().DefaultTenant,
-		confg.GeneralCfg().DefaultTimezone, confg.GeneralCfg().RSRSep); err != nil {
-		t.Error(err)
-	} else {
-		rcv.ID = utils.EmptyString
-		if !reflect.DeepEqual(rcv, exp) {
-			t.Errorf("expected: <%+v>, \nreceived: <%+v>", utils.ToJSON(exp), utils.ToJSON(rcv))
-		}
 	}
 }

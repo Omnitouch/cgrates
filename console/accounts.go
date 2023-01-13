@@ -19,14 +19,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
 	c := &CmdGetAccounts{
 		name:      "accounts",
-		rpcMethod: utils.AdminSv1GetAccounts,
-		rpcParams: &utils.ArgsItemIDs{},
+		rpcMethod: utils.APIerSv2GetAccounts,
+		rpcParams: &utils.AttrGetAccounts{},
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
@@ -36,7 +37,7 @@ func init() {
 type CmdGetAccounts struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.ArgsItemIDs
+	rpcParams *utils.AttrGetAccounts
 	*CommandExecuter
 }
 
@@ -50,7 +51,7 @@ func (self *CmdGetAccounts) RpcMethod() string {
 
 func (self *CmdGetAccounts) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = &utils.ArgsItemIDs{}
+		self.rpcParams = &utils.AttrGetAccounts{}
 	}
 	return self.rpcParams
 }
@@ -60,6 +61,12 @@ func (self *CmdGetAccounts) PostprocessRpcParams() error {
 }
 
 func (self *CmdGetAccounts) RpcResult() interface{} {
-	var accs []*utils.Account
-	return &accs
+	a := make([]*engine.Account, 0)
+	return &a
+}
+
+func (self *CmdGetAccounts) GetFormatedResult(result interface{}) string {
+	return GetFormatedSliceResult(result, utils.StringSet{
+		utils.MinSleep: {},
+	})
 }

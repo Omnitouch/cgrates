@@ -19,20 +19,32 @@
 	"db_port": 6379,
 	"db_name": "11",
 },
+
+
+"stor_db": {
+	"db_type": "*internal",
+},
 	
 "caches":{
 	"partitions": {
 		"*dispatcher_routes": {"limit": -1, "ttl": "1h"}
 	},
 },
+
+
+"schedulers": {
+	"enabled": true,
+},
+	
 	
 "dispatchers":{
 	 "enabled": true,
 },
 	
 	
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 	

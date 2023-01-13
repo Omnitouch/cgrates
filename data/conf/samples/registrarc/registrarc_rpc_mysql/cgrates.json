@@ -21,13 +21,29 @@
 	"db_name": "10", 						
 },
 
-
+"stor_db": {
+	"db_password": "CGRateS.org",
+},
 
 "rpc_conns": {
 	"regConn": {
 		"strategy": "*first",
 		"conns": [{"address": "http://127.0.0.1:2080/registrar", "transport":"*http_jsonrpc"}]
 	}
+},
+
+
+"rals": {
+	"enabled": true,
+	"thresholds_conns": ["*internal"],
+	"max_increments":3000000,
+},
+
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["*localhost"],
+	"stats_conns": ["*localhost"],
 },
 
 
@@ -66,7 +82,7 @@
 	"enabled": true,
 	"stats_conns": ["*localhost"],
 	"resources_conns": ["*localhost"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
@@ -74,13 +90,13 @@
 	"enabled": true,
 	"stats_conns": ["*localhost"],
 	"resources_conns": ["*localhost"],
-	"accounts_conns": ["*localhost"]
+	"apiers_conns": ["*localhost"]
 },
 
 
 "sessions": {
 	"enabled": true,
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"chargers_conns": ["*internal"],
 },
@@ -90,34 +106,20 @@
 	"out_datadb_type": "mongo",
 	"out_datadb_port": "27017",
 	"out_datadb_name": "10",
-
+	"out_stordb_type": "mongo",
+	"out_stordb_port": "27017",
+	"out_stordb_name": "cgrates",
 	"users_filters":["Account"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
-
-
-"rates": {
-	"enabled": true
-},
-
-
-"actions": {
-	"enabled": true,
-	"accounts_conns": ["*localhost"]
-},
-
-
-"accounts": {
-	"enabled": true,
-},
-
 
 "filters": {								
-	"accounts_conns": ["*internal"],
+	"apiers_conns": ["*internal"],
 },
 
 "registrarc":{

@@ -19,14 +19,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
 	c := &CmdSetStatQueue{
 		name:      "stats_profile_set",
-		rpcMethod: utils.AdminSv1SetStatQueueProfile,
+		rpcMethod: utils.APIerSv1SetStatQueueProfile,
 		rpcParams: &engine.StatQueueProfileWithAPIOpts{},
 	}
 	commands[c.Name()] = c

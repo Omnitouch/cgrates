@@ -28,9 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/console"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/console"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 	"github.com/peterh/liner"
 )
@@ -96,18 +95,18 @@ func executeCommand(command string) {
 	if cmd.RpcMethod() != utils.EmptyString {
 		res := cmd.RpcResult()
 		param := cmd.RpcParams(false)
-		switch v := param.(type) {
+		switch param.(type) {
 		case *console.EmptyWrapper:
 			param = utils.EmptyString
 		case *console.StringWrapper:
-			param = v.Item
+			param = param.(*console.StringWrapper).Item
 		case *console.StringSliceWrapper:
-			param = v.Items
+			param = param.(*console.StringSliceWrapper).Items
 		case *console.StringMapWrapper:
-			param = v.Items
+			param = param.(*console.StringMapWrapper).Items
 		}
 
-		if rpcErr := client.Call(context.TODO(), cmd.RpcMethod(), param, res); rpcErr != nil {
+		if rpcErr := client.Call(cmd.RpcMethod(), param, res); rpcErr != nil {
 			fmt.Println("Error executing command: " + rpcErr.Error())
 		} else {
 			fmt.Println(cmd.GetFormatedResult(res))
@@ -131,8 +130,8 @@ func main() {
 	}
 	var err error
 
-	client, err = rpcclient.NewRPCClient(context.Background(), utils.TCP, *server, *tls, *keyPath, *certificatePath, *caPath, 3, 3,
-		0, utils.FibDuration, time.Second, time.Duration(*replyTimeOut)*time.Second, *rpcEncoding, nil, false, nil)
+	client, err = rpcclient.NewRPCClient(utils.TCP, *server, *tls, *keyPath, *certificatePath, *caPath, 3, 3,
+		time.Second, time.Duration(*replyTimeOut)*time.Second, *rpcEncoding, nil, false, nil)
 	if err != nil {
 		cgrConsoleFlags.PrintDefaults()
 		log.Fatal("Could not connect to server " + *server)

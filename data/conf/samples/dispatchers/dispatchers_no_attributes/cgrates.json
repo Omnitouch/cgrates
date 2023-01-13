@@ -19,6 +19,9 @@
 	"http": ":2080",
 },
 
+"stor_db": {
+	"db_type":"*internal",
+},
 
 "caches":{
 	"partitions": {
@@ -26,6 +29,13 @@
 	},
 },
 
+"schedulers": {
+	"enabled": true,				
+},
+
+"rals": {
+	"enabled": true,
+},
 
 "sessions": {
 	"enabled": true,
@@ -36,7 +46,8 @@
  	"enabled": true,
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 }

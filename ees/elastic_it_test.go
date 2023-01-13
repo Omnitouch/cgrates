@@ -23,6 +23,7 @@ package ees
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"net/rpc"
@@ -32,12 +33,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	elasticsearch "github.com/elastic/go-elasticsearch"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 )
 
 var (
@@ -51,7 +51,7 @@ var (
 		testCreateDirectory,
 		testElasticLoadConfig,
 		testElasticResetDataDB,
-
+		testElasticResetStorDb,
 		testElasticStartEngine,
 		testElasticRPCConn,
 		testElasticStartElasticsearch,
@@ -79,13 +79,19 @@ func TestElasticExport(t *testing.T) {
 func testElasticLoadConfig(t *testing.T) {
 	var err error
 	elasticCfgPath = path.Join(*dataDir, "conf", "samples", elasticConfigDir)
-	if elasticCfg, err = config.NewCGRConfigFromPath(context.Background(), elasticCfgPath); err != nil {
+	if elasticCfg, err = config.NewCGRConfigFromPath(elasticCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testElasticResetDataDB(t *testing.T) {
-	if err := engine.InitDataDB(elasticCfg); err != nil {
+	if err := engine.InitDataDb(elasticCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testElasticResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(elasticCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -113,13 +119,14 @@ func testElasticStartElasticsearch(t *testing.T) {
 }
 
 func testElasticExportEvents(t *testing.T) {
-	eventVoice := &utils.CGREventWithEeIDs{
+	eventVoice := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"ElasticsearchExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "voiceEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaVoice,
 				utils.OriginID:     "dsafdsaf",
 				utils.OriginHost:   "192.168.1.1",
@@ -132,25 +139,22 @@ func testElasticExportEvents(t *testing.T) {
 				utils.SetupTime:    time.Unix(1383813745, 0).UTC(),
 				utils.AnswerTime:   time.Unix(1383813746, 0).UTC(),
 				utils.Usage:        10 * time.Second,
-
-				utils.Cost: 1.01,
+				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         1.01,
 				"ExtraFields": map[string]string{"extra1": "val_extra1",
 					"extra2": "val_extra2", "extra3": "val_extra3"},
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
-				utils.MetaRunID:    utils.MetaDefault,
 			},
 		},
 	}
 
-	eventData := &utils.CGREventWithEeIDs{
+	eventData := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"ElasticsearchExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "dataEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("abcdef", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaData,
 				utils.OriginID:     "abcdef",
 				utils.OriginHost:   "192.168.1.1",
@@ -163,25 +167,22 @@ func testElasticExportEvents(t *testing.T) {
 				utils.SetupTime:    time.Unix(1383813745, 0).UTC(),
 				utils.AnswerTime:   time.Unix(1383813746, 0).UTC(),
 				utils.Usage:        10 * time.Nanosecond,
-
-				utils.Cost: 0.012,
+				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         0.012,
 				"ExtraFields": map[string]string{"extra1": "val_extra1",
 					"extra2": "val_extra2", "extra3": "val_extra3"},
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("abcdef", time.Unix(1383813745, 0).UTC().String()),
-				utils.MetaRunID:    utils.MetaDefault,
 			},
 		},
 	}
 
-	eventSMS := &utils.CGREventWithEeIDs{
+	eventSMS := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"ElasticsearchExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "SMSEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("sdfwer", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaSMS,
 				utils.OriginID:     "sdfwer",
 				utils.OriginHost:   "192.168.1.1",
@@ -194,36 +195,32 @@ func testElasticExportEvents(t *testing.T) {
 				utils.SetupTime:    time.Unix(1383813745, 0).UTC(),
 				utils.AnswerTime:   time.Unix(1383813746, 0).UTC(),
 				utils.Usage:        time.Duration(1),
-
-				utils.Cost: 0.15,
+				utils.RunID:        utils.MetaDefault,
+				utils.Cost:         0.15,
 				"ExtraFields": map[string]string{"extra1": "val_extra1",
 					"extra2": "val_extra2", "extra3": "val_extra3"},
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("sdfwer", time.Unix(1383813745, 0).UTC().String()),
-				utils.MetaRunID:    utils.MetaDefault,
 			},
 		},
 	}
 
-	eventSMSNoFields := &utils.CGREventWithEeIDs{
+	eventSMSNoFields := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"ElasticExporterWithNoFields"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "SMSEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaSMS,
 				utils.Tenant:       "cgrates.org",
 				utils.Category:     "call",
 				utils.AccountField: "1001",
 				utils.Subject:      "1001",
 				utils.Destination:  "1002",
+				utils.RunID:        utils.MetaDefault,
 			},
 			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()),
-				"ExporterUsed":     "ElasticExporterWithNoFields",
-				utils.MetaRunID:    utils.MetaDefault,
+				"ExporterUsed": "ElasticExporterWithNoFields",
 			},
 		},
 	}
@@ -290,13 +287,13 @@ func testElasticVerifyExports(t *testing.T) {
 			eMp := map[string]interface{}{
 				utils.AccountField: "1001",
 				utils.AnswerTime:   "2013-11-07T08:42:26Z",
-				utils.MetaOriginID: "2478e9f18ebcd3c684f3c14596b8bfeab2b0d6d4",
+				utils.CGRID:        "2478e9f18ebcd3c684f3c14596b8bfeab2b0d6d4",
 				utils.Category:     "call",
 				utils.Cost:         "0.15",
 				utils.Destination:  "1002",
 				utils.OriginID:     "sdfwer",
 				utils.RequestType:  "*rated",
-				utils.MetaRunID:    "*default",
+				utils.RunID:        "*default",
 				utils.SetupTime:    "2013-11-07T08:42:25Z",
 				utils.Subject:      "1001",
 				utils.Tenant:       "cgrates.org",
@@ -310,13 +307,13 @@ func testElasticVerifyExports(t *testing.T) {
 			eMp := map[string]interface{}{
 				utils.AccountField: "1001",
 				utils.AnswerTime:   "2013-11-07T08:42:26Z",
-				utils.MetaOriginID: "dbafe9c8614c785a65aabd116dd3959c3c56f7f6",
+				utils.CGRID:        "dbafe9c8614c785a65aabd116dd3959c3c56f7f6",
 				utils.Category:     "call",
 				utils.Cost:         "1.01",
 				utils.Destination:  "1002",
 				utils.OriginID:     "dsafdsaf",
 				utils.RequestType:  "*rated",
-				utils.MetaRunID:    "*default",
+				utils.RunID:        "*default",
 				utils.SetupTime:    "2013-11-07T08:42:25Z",
 				utils.Subject:      "1001",
 				utils.Tenant:       "cgrates.org",
@@ -328,16 +325,15 @@ func testElasticVerifyExports(t *testing.T) {
 			}
 		case utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()) + ":*default":
 			eMp := map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()),
+				utils.CGRID:        utils.Sha1("sms2", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaSMS,
 				utils.Tenant:       "cgrates.org",
 				utils.Category:     "call",
 				utils.AccountField: "1001",
 				utils.Subject:      "1001",
 				utils.Destination:  "1002",
-				utils.MetaRunID:    utils.MetaDefault,
+				utils.RunID:        utils.MetaDefault,
 			}
-
 			if !reflect.DeepEqual(eMp, hit.(map[string]interface{})["_source"]) {
 				t.Errorf("Expected %+v, received: %+v", eMp, hit.(map[string]interface{})["_source"])
 			}

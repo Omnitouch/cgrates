@@ -30,11 +30,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
 )
 
 var (
@@ -47,6 +46,7 @@ var (
 		testCreateDirectory,
 		testVirtLoadConfig,
 		testVirtResetDataDB,
+		testVirtResetStorDb,
 		testVirtStartEngine,
 		testVirtRPCConn,
 		testVirtExportSupplierEvent,
@@ -67,13 +67,19 @@ func TestVirtualExport(t *testing.T) {
 func testVirtLoadConfig(t *testing.T) {
 	var err error
 	virtCfgPath = path.Join(*dataDir, "conf", "samples", virtConfigDir)
-	if virtCfg, err = config.NewCGRConfigFromPath(context.Background(), virtCfgPath); err != nil {
+	if virtCfg, err = config.NewCGRConfigFromPath(virtCfgPath); err != nil {
 		t.Error(err)
 	}
 }
 
 func testVirtResetDataDB(t *testing.T) {
-	if err := engine.InitDataDB(virtCfg); err != nil {
+	if err := engine.InitDataDb(virtCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testVirtResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(virtCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -93,13 +99,14 @@ func testVirtRPCConn(t *testing.T) {
 }
 
 func testVirtExportSupplierEvent(t *testing.T) {
-	supplierEvent := &utils.CGREventWithEeIDs{
+	supplierEvent := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"RouteExporter"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "supplierEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-
+				utils.CGRID:        utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaVoice,
 				utils.OriginID:     "dsafdsaf",
 				utils.OriginHost:   "192.168.1.1",
@@ -115,9 +122,6 @@ func testVirtExportSupplierEvent(t *testing.T) {
 				utils.RunID:        "SupplierRun",
 				utils.Cost:         1.23,
 			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
-			},
 		},
 	}
 
@@ -129,13 +133,14 @@ func testVirtExportSupplierEvent(t *testing.T) {
 }
 
 func testVirtExportEvents(t *testing.T) {
-	eventVoice := &utils.CGREventWithEeIDs{
+	eventVoice := &engine.CGREventWithEeIDs{
 		EeIDs: []string{"CSVExporterFromVirt"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "voiceEvent",
+			Time:   utils.TimePointer(time.Now()),
 			Event: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
+				utils.CGRID:        utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
 				utils.ToR:          utils.MetaVoice,
 				utils.OriginID:     "dsafdsaf",
 				utils.OriginHost:   "192.168.1.1",
@@ -150,9 +155,6 @@ func testVirtExportEvents(t *testing.T) {
 				utils.Usage:        10 * time.Second,
 				utils.RunID:        "SupplierRun",
 				utils.Cost:         1.01,
-			},
-			APIOpts: map[string]interface{}{
-				utils.MetaOriginID: utils.Sha1("dsafdsaf", time.Unix(1383813745, 0).UTC().String()),
 			},
 		},
 	}

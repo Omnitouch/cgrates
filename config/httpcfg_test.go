@@ -25,14 +25,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestHTTPCfgloadFromJsonCfg(t *testing.T) {
 	cfgJSONStr := &HTTPJsonCfg{
 		Json_rpc_url:        utils.StringPointer("/jsonrpc"),
 		Ws_url:              utils.StringPointer("/ws"),
-		Prometheus_url:      utils.StringPointer("/metrics"),
 		Registrars_url:      utils.StringPointer("/randomUrl"),
 		Freeswitch_cdrs_url: utils.StringPointer("/freeswitch_json"),
 		Http_Cdrs:           utils.StringPointer("/cdr_http"),
@@ -40,14 +39,13 @@ func TestHTTPCfgloadFromJsonCfg(t *testing.T) {
 		Auth_users:          utils.MapStringStringPointer(map[string]string{}),
 	}
 	expected := &HTTPCfg{
-		JsonRPCURL:        "/jsonrpc",
-		WSURL:             "/ws",
-		PrometheusURL:     "/metrics",
-		RegistrarSURL:     "/randomUrl",
-		FreeswitchCDRsURL: "/freeswitch_json",
-		CDRsURL:           "/cdr_http",
-		UseBasicAuth:      false,
-		AuthUsers:         map[string]string{},
+		HTTPJsonRPCURL:        "/jsonrpc",
+		HTTPWSURL:             "/ws",
+		RegistrarSURL:         "/randomUrl",
+		HTTPFreeswitchCDRsURL: "/freeswitch_json",
+		HTTPCDRsURL:           "/cdr_http",
+		HTTPUseBasicAuth:      false,
+		HTTPAuthUsers:         map[string]string{},
 		ClientOpts: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{
@@ -71,21 +69,13 @@ func TestHTTPCfgloadFromJsonCfg(t *testing.T) {
 			DualStack:     true,
 		},
 	}
-	expected.ClientOpts.DialContext = expected.dialer.DialContext
 	cfgJsn := NewDefaultCGRConfig()
 	if err = cfgJsn.httpCfg.loadFromJSONCfg(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if !reflect.DeepEqual(expected.AsMapInterface(utils.InfieldSep),
-		cfgJsn.httpCfg.AsMapInterface(utils.InfieldSep)) {
-		t.Errorf("Expected %+v \n, received %+v",
-			expected.AsMapInterface(utils.InfieldSep),
-			cfgJsn.httpCfg.AsMapInterface(utils.InfieldSep))
+	} else if !reflect.DeepEqual(expected.AsMapInterface(), cfgJsn.httpCfg.AsMapInterface()) {
+		t.Errorf("Expected %+v \n, received %+v", expected.AsMapInterface(), cfgJsn.httpCfg.AsMapInterface())
 	}
 
-	cfgJSONStr = nil
-	if err = cfgJsn.httpCfg.loadFromJSONCfg(cfgJSONStr); err != nil {
-		t.Error(err)
-	}
 }
 
 func TestHTTPCfgAsMapInterface(t *testing.T) {
@@ -95,14 +85,13 @@ func TestHTTPCfgAsMapInterface(t *testing.T) {
 	eMap := map[string]interface{}{
 		utils.HTTPJsonRPCURLCfg:        "/jsonrpc",
 		utils.RegistrarSURLCfg:         "/registrar",
-		utils.PrometheusURLCfg:         "/prometheus",
 		utils.HTTPWSURLCfg:             "/ws",
 		utils.HTTPFreeswitchCDRsURLCfg: "/freeswitch_json",
 		utils.HTTPCDRsURLCfg:           "/cdr_http",
 		utils.HTTPUseBasicAuthCfg:      false,
 		utils.HTTPAuthUsersCfg:         map[string]string{},
 		utils.HTTPClientOptsCfg: map[string]interface{}{
-			utils.HTTPClientSkipTLSVerificationCfg:   false,
+			utils.HTTPClientTLSClientConfigCfg:       false,
 			utils.HTTPClientTLSHandshakeTimeoutCfg:   "10s",
 			utils.HTTPClientDisableKeepAlivesCfg:     false,
 			utils.HTTPClientDisableCompressionCfg:    false,
@@ -120,7 +109,7 @@ func TestHTTPCfgAsMapInterface(t *testing.T) {
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.httpCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.httpCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -137,7 +126,6 @@ func TestHTTPCfgAsMapInterface1(t *testing.T) {
 	eMap := map[string]interface{}{
 		utils.HTTPJsonRPCURLCfg:        "/rpc",
 		utils.RegistrarSURLCfg:         "/registrar",
-		utils.PrometheusURLCfg:         "/prometheus",
 		utils.HTTPWSURLCfg:             "",
 		utils.HTTPFreeswitchCDRsURLCfg: "/freeswitch_json",
 		utils.HTTPCDRsURLCfg:           "/cdr_http",
@@ -147,7 +135,7 @@ func TestHTTPCfgAsMapInterface1(t *testing.T) {
 			"user2": "authenticated",
 		},
 		utils.HTTPClientOptsCfg: map[string]interface{}{
-			utils.HTTPClientSkipTLSVerificationCfg:   false,
+			utils.HTTPClientTLSClientConfigCfg:       false,
 			utils.HTTPClientTLSHandshakeTimeoutCfg:   "10s",
 			utils.HTTPClientDisableKeepAlivesCfg:     false,
 			utils.HTTPClientDisableCompressionCfg:    false,
@@ -165,20 +153,20 @@ func TestHTTPCfgAsMapInterface1(t *testing.T) {
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
 		t.Error(err)
-	} else if rcv := cgrCfg.httpCfg.AsMapInterface(""); !reflect.DeepEqual(rcv, eMap) {
+	} else if rcv := cgrCfg.httpCfg.AsMapInterface(); !reflect.DeepEqual(rcv, eMap) {
 		t.Errorf("Expected %+v, received %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
 
 func TestHTTPCfgClone(t *testing.T) {
 	ban := &HTTPCfg{
-		JsonRPCURL:        "/jsonrpc",
-		WSURL:             "/ws",
-		RegistrarSURL:     "/randomUrl",
-		FreeswitchCDRsURL: "/freeswitch_json",
-		CDRsURL:           "/cdr_http",
-		UseBasicAuth:      false,
-		AuthUsers: map[string]string{
+		HTTPJsonRPCURL:        "/jsonrpc",
+		HTTPWSURL:             "/ws",
+		RegistrarSURL:         "/randomUrl",
+		HTTPFreeswitchCDRsURL: "/freeswitch_json",
+		HTTPCDRsURL:           "/cdr_http",
+		HTTPUseBasicAuth:      false,
+		HTTPAuthUsers: map[string]string{
 			"user": "pass",
 		},
 		ClientOpts: &http.Transport{
@@ -205,387 +193,98 @@ func TestHTTPCfgClone(t *testing.T) {
 		},
 	}
 	rcv := ban.Clone()
-	if !reflect.DeepEqual(rcv.AsMapInterface(utils.InfieldSep), ban.AsMapInterface(utils.InfieldSep)) {
-		t.Errorf("Expected: %+v\nReceived: %+v", ban.AsMapInterface(utils.InfieldSep),
-			rcv.AsMapInterface(utils.InfieldSep))
+	if !reflect.DeepEqual(rcv.AsMapInterface(), ban.AsMapInterface()) {
+		t.Errorf("Expected: %+v\nReceived: %+v", ban.AsMapInterface(),
+			rcv.AsMapInterface())
 	}
 	if rcv.ClientOpts.MaxIdleConns = 50; ban.ClientOpts.MaxIdleConns != 100 {
 		t.Errorf("Expected clone to not modify the cloned")
 	}
-	if rcv.AuthUsers["user"] = ""; ban.AuthUsers["user"] != "pass" {
+	if rcv.HTTPAuthUsers["user"] = ""; ban.HTTPAuthUsers["user"] != "pass" {
 		t.Errorf("Expected clone to not modify the cloned")
 	}
 }
 
-func TestDiffHTTPJsonCfg(t *testing.T) {
-	var d *HTTPJsonCfg
-
-	v1 := &HTTPCfg{
-		JsonRPCURL:        "JsonRpcUrl",
-		RegistrarSURL:     "RegistrarSUrl",
-		WSURL:             "WSUrl",
-		FreeswitchCDRsURL: "FsCdrsUrl",
-		CDRsURL:           "CdrsUrl",
-		UseBasicAuth:      true,
-		AuthUsers: map[string]string{
-			"User1": "passUser1",
-		},
-		ClientOpts:    &http.Transport{},
-		dialer:        &net.Dialer{},
-		PrometheusURL: "PrometheusURL",
+func TestHTTPNewDialer(t *testing.T) {
+	dialer := &net.Dialer{
+		DualStack: true,
 	}
-
-	v2 := &HTTPCfg{
-		JsonRPCURL:        "JsonRpcUrl2",
-		RegistrarSURL:     "RegistrarSUrl2",
-		WSURL:             "WsUrl2",
-		FreeswitchCDRsURL: "FsCdrsUrl2",
-		CDRsURL:           "CdrsUrl2",
-		UseBasicAuth:      false,
-		AuthUsers: map[string]string{
-			"User2": "passUser2",
-		},
-		ClientOpts: &http.Transport{
-			MaxIdleConns: 100,
-		},
-		dialer:        &net.Dialer{},
-		PrometheusURL: "PrometheusURL2",
-	}
-
-	expected := &HTTPJsonCfg{
-		Json_rpc_url:        utils.StringPointer("JsonRpcUrl2"),
-		Registrars_url:      utils.StringPointer("RegistrarSUrl2"),
-		Ws_url:              utils.StringPointer("WsUrl2"),
-		Freeswitch_cdrs_url: utils.StringPointer("FsCdrsUrl2"),
-		Http_Cdrs:           utils.StringPointer("CdrsUrl2"),
-		Use_basic_auth:      utils.BoolPointer(false),
-		Auth_users: &map[string]string{
-			"User2": "passUser2",
-		},
-		Client_opts: &HTTPClientOptsJson{
-			MaxIdleConns: utils.IntPointer(100),
-		},
-		Prometheus_url: utils.StringPointer("PrometheusURL2"),
-	}
-
-	rcv := diffHTTPJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &HTTPJsonCfg{
-		Client_opts: &HTTPClientOptsJson{},
-	}
-	rcv = diffHTTPJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-}
-
-func TestHttpCfgCloneSection(t *testing.T) {
-	httpCfg := &HTTPCfg{
-		JsonRPCURL:        "JsonRpcUrl",
-		RegistrarSURL:     "RegistrarSUrl",
-		WSURL:             "WSUrl",
-		FreeswitchCDRsURL: "FsCdrsUrl",
-		CDRsURL:           "CdrsUrl",
-		UseBasicAuth:      true,
-		AuthUsers: map[string]string{
-			"User1": "passUser1",
-		},
-		ClientOpts: &http.Transport{},
-		dialer:     &net.Dialer{},
-	}
-
-	exp := &HTTPCfg{
-		JsonRPCURL:        "JsonRpcUrl",
-		RegistrarSURL:     "RegistrarSUrl",
-		WSURL:             "WSUrl",
-		FreeswitchCDRsURL: "FsCdrsUrl",
-		CDRsURL:           "CdrsUrl",
-		UseBasicAuth:      true,
-		AuthUsers: map[string]string{
-			"User1": "passUser1",
-		},
-		ClientOpts: &http.Transport{},
-		dialer:     &net.Dialer{},
-	}
-
-	rcv := httpCfg.CloneSection()
-	if !reflect.DeepEqual(rcv.AsMapInterface(utils.InfieldSep),
-		exp.AsMapInterface(utils.InfieldSep)) {
-		t.Errorf("Expected %v \n but received \n %v",
-			utils.ToJSON(exp.AsMapInterface(utils.InfieldSep)),
-			utils.ToJSON(rcv.AsMapInterface(utils.InfieldSep)))
-	}
-}
-
-func TestNewDialerJsonCfgNil(t *testing.T) {
 	var jsnCfg *HTTPClientOptsJson
-
-	nDialer := NewDefaultCGRConfig().httpCfg.dialer
-	nDialer.DualStack = false
-	if err := newDialer(nDialer, jsnCfg); err != nil {
-		t.Errorf("Expected error <nil> \n but received error <%v>", err)
-	} else if nDialer.DualStack {
-		t.Errorf("Dialer DualStack shouldnt have changed, was <false>, now is <%v>",
-			nDialer.DualStack)
+	if err := newDialer(dialer, jsnCfg); err != nil {
+		t.Error(err)
 	}
-
-}
-func TestNewDialerJsonCfgDialTimeout(t *testing.T) {
-	jsnCfg := &HTTPClientOptsJson{
-		DialTimeout: utils.StringPointer("invalid time"),
+	jsnCfg = &HTTPClientOptsJson{
+		DialTimeout:       utils.StringPointer("test"),
+		DialFallbackDelay: utils.StringPointer("test2"),
 	}
-
-	nDialer := NewDefaultCGRConfig().httpCfg.dialer
-	expErr := `time: invalid duration "invalid time"`
-	if err := newDialer(nDialer, jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err)
+	if err := newDialer(dialer, jsnCfg); err == nil {
+		t.Error(err)
 	}
-
-}
-func TestNewDialerJsonCfgDialFallbackDelay(t *testing.T) {
-	jsnCfg := &HTTPClientOptsJson{
-		DialFallbackDelay: utils.StringPointer("invalid time"),
+	jsnCfg = &HTTPClientOptsJson{
+		DialFallbackDelay: utils.StringPointer("test2"),
 	}
-
-	nDialer := NewDefaultCGRConfig().httpCfg.dialer
-	expErr := `time: invalid duration "invalid time"`
-	if err := newDialer(nDialer, jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err)
+	if err := newDialer(dialer, jsnCfg); err == nil {
+		t.Error(err)
 	}
-
-}
-func TestNewDialerJsonCfgDialKeepAlive(t *testing.T) {
-	jsnCfg := &HTTPClientOptsJson{
-		DialKeepAlive: utils.StringPointer("invalid time"),
+	jsnCfg = &HTTPClientOptsJson{
+		DialKeepAlive: utils.StringPointer("test3"),
 	}
-
-	nDialer := NewDefaultCGRConfig().httpCfg.dialer
-	expErr := `time: invalid duration "invalid time"`
-	if err := newDialer(nDialer, jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err)
+	if err := newDialer(dialer, jsnCfg); err == nil {
+		t.Error(err)
 	}
-
 }
 
-func TestLoadTransportFromJSONCfgNilJson(t *testing.T) {
-
-	EqualHttpOpts := func(httpOpts1, httpOpts2 *http.Transport) bool {
-		if httpOpts1.TLSHandshakeTimeout != httpOpts2.TLSHandshakeTimeout {
-			return false
-		}
-		if httpOpts1.DisableKeepAlives != httpOpts2.DisableKeepAlives {
-			return false
-		}
-		if httpOpts1.DisableCompression != httpOpts2.DisableCompression {
-			return false
-		}
-		if httpOpts1.MaxIdleConns != httpOpts2.MaxIdleConns {
-			return false
-		}
-		if httpOpts1.MaxIdleConnsPerHost != httpOpts2.MaxIdleConnsPerHost {
-			return false
-		}
-		if httpOpts1.IdleConnTimeout != httpOpts2.IdleConnTimeout {
-			return false
-		}
-		if httpOpts1.MaxConnsPerHost != httpOpts2.MaxConnsPerHost {
-			return false
-		}
-		return true
-	}
-
-	httpOpts := &http.Transport{
-		TLSHandshakeTimeout: time.Duration(2),
-		DisableKeepAlives:   false,
-		DisableCompression:  false,
-		MaxIdleConns:        2,
-		MaxIdleConnsPerHost: 2,
-		MaxConnsPerHost:     2,
-		IdleConnTimeout:     time.Duration(2),
-	}
-
-	httpOptsCopy := httpOpts
+func TestHTTPLoadTransportFromJSONCfg(t *testing.T) {
 
 	var jsnCfg *HTTPClientOptsJson
-
-	if err := loadTransportFromJSONCfg(httpOpts,
-		NewDefaultCGRConfig().httpCfg.dialer,
-		jsnCfg); err != nil {
-		t.Errorf("Expected error <nil> \n but received error <%v>", err)
-	} else if !EqualHttpOpts(httpOpts, httpOptsCopy) {
-		t.Errorf("Expected HttpOpts not to change, was <%+v>,\n Now is <%+v>",
-			httpOpts, httpOptsCopy)
+	httpOpts := &http.Transport{}
+	httpDialer := &net.Dialer{}
+	if err := loadTransportFromJSONCfg(httpOpts, httpDialer, jsnCfg); err != nil {
+		t.Error(err)
+	}
+	jsnCfg = &HTTPClientOptsJson{
+		TLSHandshakeTimeout: utils.StringPointer("test"),
+	}
+	if err := loadTransportFromJSONCfg(httpOpts, httpDialer, jsnCfg); err == nil {
+		t.Error(err)
+	}
+	jsnCfg = &HTTPClientOptsJson{
+		IdleConnTimeout: utils.StringPointer("test2"),
+	}
+	if err := loadTransportFromJSONCfg(httpOpts, httpDialer, jsnCfg); err == nil {
+		t.Error(err)
+	}
+	jsnCfg = &HTTPClientOptsJson{
+		ResponseHeaderTimeout: utils.StringPointer("test3"),
+	}
+	if err := loadTransportFromJSONCfg(httpOpts, httpDialer, jsnCfg); err == nil {
+		t.Error(err)
+	}
+	jsnCfg = &HTTPClientOptsJson{
+		ExpectContinueTimeout: utils.StringPointer("test4"),
+	}
+	if err := loadTransportFromJSONCfg(httpOpts, httpDialer, jsnCfg); err == nil {
+		t.Error(err)
 	}
 
 }
 
-func TestLoadTransportFromJSONCfgTLSHandshakeTimeout(t *testing.T) {
-	httpOpts := NewDefaultCGRConfig().httpCfg.ClientOpts
-
-	jsnCfg := &HTTPClientOptsJson{
-		TLSHandshakeTimeout: utils.StringPointer("invalid time"),
-	}
-	expErr := `time: invalid duration "invalid time"`
-	if err := loadTransportFromJSONCfg(httpOpts,
-		NewDefaultCGRConfig().httpCfg.dialer,
-		jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err.Error())
+func TestHTTPLoadFromJSONCfg(t *testing.T) {
+	var jsonHTTPCfg *HTTPJsonCfg
+	httpcfg := &HTTPCfg{}
+	if err := httpcfg.loadFromJSONCfg(jsonHTTPCfg); err != nil {
+		t.Error(err)
 	}
 
-}
-func TestLoadTransportFromJSONCfgIdleConnTimeout(t *testing.T) {
-	httpOpts := NewDefaultCGRConfig().httpCfg.ClientOpts
-
-	jsnCfg := &HTTPClientOptsJson{
-		IdleConnTimeout: utils.StringPointer("invalid time"),
-	}
-	expErr := `time: invalid duration "invalid time"`
-	if err := loadTransportFromJSONCfg(httpOpts,
-		NewDefaultCGRConfig().httpCfg.dialer,
-		jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err.Error())
-	}
-
-}
-func TestLoadTransportFromJSONCfgResponseHeaderTimeout(t *testing.T) {
-	httpOpts := NewDefaultCGRConfig().httpCfg.ClientOpts
-
-	jsnCfg := &HTTPClientOptsJson{
-		ResponseHeaderTimeout: utils.StringPointer("invalid time"),
-	}
-	expErr := `time: invalid duration "invalid time"`
-	if err := loadTransportFromJSONCfg(httpOpts,
-		NewDefaultCGRConfig().httpCfg.dialer,
-		jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err.Error())
-	}
-}
-func TestLoadTransportFromJSONCfgExpectContinueTimeout(t *testing.T) {
-	httpOpts := NewDefaultCGRConfig().httpCfg.ClientOpts
-
-	jsnCfg := &HTTPClientOptsJson{
-		ExpectContinueTimeout: utils.StringPointer("invalid time"),
-	}
-	expErr := `time: invalid duration "invalid time"`
-	if err := loadTransportFromJSONCfg(httpOpts,
-		NewDefaultCGRConfig().httpCfg.dialer,
-		jsnCfg); err.Error() != expErr {
-		t.Errorf("Expected error <%v> \n but received error <%v>", expErr, err.Error())
-	}
-}
-
-func TestHTTPCfgloadFromJsonCfgClientOptsErr(t *testing.T) {
-	cfgJSONStr := &HTTPJsonCfg{
+	jsnHTTPCfg := &HTTPJsonCfg{
 		Client_opts: &HTTPClientOptsJson{
-			DialTimeout: utils.StringPointer("invalid value"),
-		},
+			DialTimeout: utils.StringPointer("test")},
 	}
-	expErr := `time: invalid duration "invalid value"`
-	cfgJsn := NewDefaultCGRConfig()
-	if err = cfgJsn.httpCfg.loadFromJSONCfg(cfgJSONStr); err.Error() != expErr {
-		t.Errorf("Expected error <%v>, Received error <%v>", expErr, err.Error())
+	httpcg := &HTTPCfg{
+		dialer:     &net.Dialer{},
+		ClientOpts: &http.Transport{},
 	}
-}
-
-func TestDiffHTTPClientOptsJsonCfgDialer(t *testing.T) {
-	var d *HTTPClientOptsJson
-
-	v1 := &net.Dialer{
-		Timeout:       time.Duration(2),
-		FallbackDelay: time.Duration(2),
-		KeepAlive:     time.Duration(2),
-	}
-
-	v2 := &net.Dialer{
-		Timeout:       time.Duration(3),
-		FallbackDelay: time.Duration(3),
-		KeepAlive:     time.Duration(3),
-	}
-
-	expected := &HTTPClientOptsJson{
-		DialTimeout:       utils.StringPointer("3ns"),
-		DialFallbackDelay: utils.StringPointer("3ns"),
-		DialKeepAlive:     utils.StringPointer("3ns"),
-	}
-
-	rcv := diffHTTPClientOptsJsonCfgDialer(d, v1, v2)
-	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v2_2 := v1
-	expected2 := &HTTPClientOptsJson{}
-
-	rcv = diffHTTPClientOptsJsonCfgDialer(d, v1, v2_2)
-	if !reflect.DeepEqual(expected2, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffHTTPClientOptsJsonCfg(t *testing.T) {
-	var d *HTTPClientOptsJson
-
-	v1 := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: false,
-		},
-		TLSHandshakeTimeout:   time.Duration(2),
-		DisableKeepAlives:     false,
-		DisableCompression:    false,
-		MaxIdleConns:          2,
-		MaxIdleConnsPerHost:   2,
-		MaxConnsPerHost:       2,
-		IdleConnTimeout:       time.Duration(2),
-		ResponseHeaderTimeout: time.Duration(2),
-		ExpectContinueTimeout: time.Duration(2),
-		ForceAttemptHTTP2:     false,
-	}
-
-	v2 := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-		TLSHandshakeTimeout:   time.Duration(3),
-		DisableKeepAlives:     true,
-		DisableCompression:    true,
-		MaxIdleConns:          3,
-		MaxIdleConnsPerHost:   3,
-		MaxConnsPerHost:       3,
-		IdleConnTimeout:       time.Duration(3),
-		ResponseHeaderTimeout: time.Duration(3),
-		ExpectContinueTimeout: time.Duration(3),
-		ForceAttemptHTTP2:     true,
-	}
-
-	expected := &HTTPClientOptsJson{
-		SkipTLSVerification:   utils.BoolPointer(true),
-		TLSHandshakeTimeout:   utils.StringPointer("3ns"),
-		DisableKeepAlives:     utils.BoolPointer(true),
-		DisableCompression:    utils.BoolPointer(true),
-		MaxIdleConns:          utils.IntPointer(3),
-		MaxIdleConnsPerHost:   utils.IntPointer(3),
-		MaxConnsPerHost:       utils.IntPointer(3),
-		IdleConnTimeout:       utils.StringPointer("3ns"),
-		ResponseHeaderTimeout: utils.StringPointer("3ns"),
-		ExpectContinueTimeout: utils.StringPointer("3ns"),
-		ForceAttemptHTTP2:     utils.BoolPointer(true),
-	}
-
-	rcv := diffHTTPClientOptsJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(expected, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v2_2 := v1
-	expected2 := &HTTPClientOptsJson{}
-
-	rcv = diffHTTPClientOptsJsonCfg(d, v1, v2_2)
-	if !reflect.DeepEqual(expected2, rcv) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
+	if err := httpcg.loadFromJSONCfg(jsnHTTPCfg); err == nil {
+		t.Error(err)
 	}
 }

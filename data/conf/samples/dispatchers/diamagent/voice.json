@@ -217,7 +217,7 @@
 					"value": "~*req.Service-Information.IN-Information.Real-Called-Number", "mandatory": true},
 				{"tag": "AnswerTime", "path": "*cgreq.AnswerTime", "type": "*variable",
 					"value": "~*req.Event-Timestamp", "mandatory": true},
-				{"tag": "Usage", "path": "*cgreq.Usage", "type": "*ccUsage", "mandatory": true,
+				{"tag": "Usage", "path": "*cgreq.Usage", "type": "*cc_usage", "mandatory": true,
 					"value":  "~*req.CC-Request-Number;~*req.Used-Service-Unit.CC-Time:s/(.*)/${1}s/;5m"},
 				{"tag": "LastUsed", "path": "*cgreq.LastUsed", "type": "*variable",
 					"value": "~*req.Used-Service-Unit.CC-Time:s/(.*)/${1}s/", "mandatory": true},

@@ -22,44 +22,49 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestConvertExternalToProfile(t *testing.T) {
 	external := &APIAttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ATTR_ID",
-		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE", "*string:~*opts.*context:*sessions|*cdrs"},
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE"},
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+			ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+		},
 		Attributes: []*ExternalAttribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + "Account",
 				Value: "1001",
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20,
 	}
 
 	expAttr := &AttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ATTR_ID",
-		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE", "*string:~*opts.*context:*sessions|*cdrs"},
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE"},
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+			ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+		},
 		Attributes: []*Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + "Account",
 				Value: config.NewRSRParsersMustCompile("1001", utils.InfieldSep),
 			},
 		},
-		Weights: make(utils.DynamicWeights, 1),
-	}
-	expAttr.Weights[0] = &utils.DynamicWeight{
 		Weight: 20,
 	}
+
 	rcv, err := external.AsAttributeProfile()
 	if err != nil {
 		t.Error(err)
@@ -73,15 +78,16 @@ func TestConvertExternalToProfile(t *testing.T) {
 
 func TestConvertExternalToProfileMissing(t *testing.T) {
 	external := &APIAttributeProfile{
-		Tenant:     "cgrates.org",
-		ID:         "ATTR_ID",
-		FilterIDs:  []string{"FLTR_ACNT_dan", "FLTR_DST_DE", "*ai:~*req.AnswerTime:2014-07-14T14:35:00Z|2014-07-14T14:36:00Z", "*string:~*opts.*context:*sessions|*cdrs"},
-		Attributes: []*ExternalAttribute{},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
+		Tenant:    "cgrates.org",
+		ID:        "ATTR_ID",
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE"},
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+			ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
 		},
+		Attributes: []*ExternalAttribute{},
+		Weight:     20,
 	}
 
 	_, err := external.AsAttributeProfile()
@@ -95,17 +101,18 @@ func TestConvertExternalToProfileMissing2(t *testing.T) {
 	external := &APIAttributeProfile{
 		Tenant:    "cgrates.org",
 		ID:        "ATTR_ID",
-		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE", "*ai:~*req.AnswerTime:2014-07-14T14:35:00Z|2014-07-14T14:36:00Z", "*string:~*opts.*context:*sessions|*cdrs"},
+		Contexts:  []string{utils.MetaSessionS, utils.MetaCDRs},
+		FilterIDs: []string{"FLTR_ACNT_dan", "FLTR_DST_DE"},
+		ActivationInterval: &utils.ActivationInterval{
+			ActivationTime: time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+			ExpiryTime:     time.Date(2014, 7, 14, 14, 35, 0, 0, time.UTC),
+		},
 		Attributes: []*ExternalAttribute{
 			{
 				Path: utils.MetaReq + utils.NestingSep + "Account",
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20,
 	}
 
 	_, err := external.AsAttributeProfile()
@@ -118,8 +125,9 @@ func TestConvertExternalToProfileMissing2(t *testing.T) {
 func TestNewAttributeFromInline(t *testing.T) {
 	attrID := "*sum:*req.Field2:10&~*req.NumField&20;*sum:*req.Field3:10&~*req.NumField4&20"
 	expAttrPrf1 := &AttributeProfile{
-		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
-		ID:     attrID,
+		Tenant:   config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:       attrID,
+		Contexts: []string{utils.MetaAny},
 		Attributes: []*Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + "Field2",
@@ -144,8 +152,9 @@ func TestNewAttributeFromInline(t *testing.T) {
 func TestNewAttributeFromInlineWithMultipleRuns(t *testing.T) {
 	attrID := "*constant:*req.RequestType:*rated;*constant:*req.Category:call"
 	expAttrPrf1 := &AttributeProfile{
-		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
-		ID:     attrID,
+		Tenant:   config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:       attrID,
+		Contexts: []string{utils.MetaAny},
 		Attributes: []*Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + "RequestType",
@@ -184,8 +193,9 @@ func TestNewAttributeFromInlineWithMultipleRuns2(t *testing.T) {
 func TestNewAttributeFromInlineWithMultipleVaslues(t *testing.T) {
 	attrID := "*variable:*req.Category:call_&*req.OriginID;*constant:*req.RequestType:*rated"
 	expAttrPrf1 := &AttributeProfile{
-		Tenant: config.CgrConfig().GeneralCfg().DefaultTenant,
-		ID:     attrID,
+		Tenant:   config.CgrConfig().GeneralCfg().DefaultTenant,
+		ID:       attrID,
+		Contexts: []string{utils.MetaAny},
 		Attributes: []*Attribute{
 			{
 				Path:  utils.MetaReq + utils.NestingSep + "Category",
@@ -209,13 +219,12 @@ func TestNewAttributeFromInlineWithMultipleVaslues(t *testing.T) {
 
 func TestLibAttributesTenantIDInLine(t *testing.T) {
 	ap := &AttributeProfile{
-		Tenant:  "cgrates.org",
-		ID:      "AttrPrf",
-		Weights: make(utils.DynamicWeights, 1),
+		Tenant:   "cgrates.org",
+		ID:       "AttrPrf",
+		Contexts: []string{utils.MetaAny},
+		Weight:   10,
 	}
-	ap.Weights[0] = &utils.DynamicWeight{
-		Weight: 0,
-	}
+
 	exp := "cgrates.org:AttrPrf"
 	if rcv := ap.TenantIDInline(); rcv != exp {
 		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
@@ -224,268 +233,14 @@ func TestLibAttributesTenantIDInLine(t *testing.T) {
 
 func TestLibAttributesTenantIDMetaPrefix(t *testing.T) {
 	ap := &AttributeProfile{
-		Tenant:  "cgrates.org",
-		ID:      "*default",
-		Weights: make(utils.DynamicWeights, 1),
-	}
-	ap.Weights[0] = &utils.DynamicWeight{
-		FilterIDs: []string{""},
-		Weight:    0,
+		Tenant:   "cgrates.org",
+		ID:       "*default",
+		Contexts: []string{utils.MetaAny},
+		Weight:   10,
 	}
 
 	exp := "*default"
 	if rcv := ap.TenantIDInline(); rcv != exp {
 		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
-	}
-}
-
-func TestAttributeProfileSet(t *testing.T) {
-	dp := AttributeProfile{}
-	exp := AttributeProfile{
-		Tenant:    "cgrates.org",
-		ID:        "ID",
-		FilterIDs: []string{"fltr1", "*string:~*req.Account:1001"},
-		Blockers: utils.DynamicBlockers{
-			{
-				Blocker: true,
-			},
-		},
-		Attributes: []*Attribute{{
-			Path:      "*req.Account",
-			Type:      utils.MetaConstant,
-			Value:     config.NewRSRParsersMustCompile("10", utils.InfieldSep),
-			FilterIDs: []string{"fltr1"},
-		}},
-		Weights: make(utils.DynamicWeights, 1),
-	}
-	exp.Weights[0] = &utils.DynamicWeight{
-		Weight: 10,
-	}
-	if err := dp.Set([]string{}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{"NotAField"}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{"NotAField", "1"}, "", false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-
-	if err := dp.Set([]string{utils.Tenant}, "cgrates.org", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.ID}, "ID", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.FilterIDs}, "fltr1;*string:~*req.Account:1001", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Weights}, ";10", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Blockers}, ";true", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Attributes, utils.Path}, "*req.Account", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Attributes, utils.Type}, utils.MetaConstant, false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Attributes, utils.Value}, "10", false, utils.InfieldSep); err != nil {
-		t.Error(err)
-	}
-	if err := dp.Set([]string{utils.Attributes, utils.FilterIDs}, "fltr1", false, utils.EmptyString); err != nil {
-		t.Error(err)
-	}
-
-	if err := dp.Set([]string{utils.Attributes, "Wrong"}, true, false, utils.EmptyString); err != utils.ErrWrongPath {
-		t.Error(err)
-	}
-
-	if !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dp))
-	}
-}
-
-func TestAttributeProfileAsInterface(t *testing.T) {
-	ap := AttributeProfile{
-		Tenant:    "cgrates.org",
-		ID:        "ID",
-		FilterIDs: []string{"fltr1", "*string:~*req.Account:1001"},
-		Weights:   make(utils.DynamicWeights, 1),
-		Blockers: utils.DynamicBlockers{
-			{
-				Blocker: true,
-			},
-		},
-		Attributes: []*Attribute{{
-			Path:      "*req.Account",
-			Type:      utils.MetaConstant,
-			Value:     config.NewRSRParsersMustCompile("10", utils.InfieldSep),
-			FilterIDs: []string{"fltr1"},
-		}},
-	}
-	ap.Weights[0] = &utils.DynamicWeight{
-		Weight: 10,
-	}
-	if _, err := ap.FieldAsInterface(nil); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := ap.FieldAsInterface([]string{"field"}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := ap.FieldAsInterface([]string{"field", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Tenant}); err != nil {
-		t.Fatal(err)
-	} else if exp := "cgrates.org"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := utils.ID; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.FilterIDs}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.FilterIDs; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.FilterIDs + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.FilterIDs[0]; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Weights}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Weights; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Blockers}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Blockers; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes[0]; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes[0]; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if _, err := ap.FieldAsInterface([]string{utils.Attributes + "[4]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]", ""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if _, err := ap.FieldAsInterface([]string{utils.Attributes + "0]"}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]", utils.FilterIDs}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes[0].FilterIDs; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]", utils.FilterIDs + "[0]"}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes[0].FilterIDs[0]; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]", utils.Path}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes[0].Path; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]", utils.Type}); err != nil {
-		t.Fatal(err)
-	} else if exp := ap.Attributes[0].Type; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, err := ap.FieldAsInterface([]string{utils.Attributes + "[0]", utils.Value}); err != nil {
-		t.Fatal(err)
-	} else if exp := "10"; !reflect.DeepEqual(exp, val) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-
-	if _, err := ap.FieldAsString([]string{""}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := ap.FieldAsString([]string{utils.ID}); err != nil {
-		t.Fatal(err)
-	} else if exp := "ID"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, exp := ap.String(), utils.ToJSON(ap); exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-
-	if _, err := ap.Attributes[0].FieldAsString([]string{}); err != utils.ErrNotFound {
-		t.Fatal(err)
-	}
-	if val, err := ap.Attributes[0].FieldAsString([]string{utils.Value}); err != nil {
-		t.Fatal(err)
-	} else if exp := "10"; exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-	if val, exp := ap.Attributes[0].String(), utils.ToJSON(ap.Attributes[0]); exp != val {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(val))
-	}
-}
-
-func TestAttributeProfileMerge(t *testing.T) {
-	dp := &AttributeProfile{}
-	exp := &AttributeProfile{
-		Tenant:    "cgrates.org",
-		ID:        "ID",
-		FilterIDs: []string{"fltr1", "*string:~*req.Account:1001"},
-		Weights:   make(utils.DynamicWeights, 1),
-		Blockers: utils.DynamicBlockers{
-			{
-				Blocker: true,
-			},
-		},
-		Attributes: []*Attribute{{
-			Path:      "*req.Account",
-			Type:      utils.MetaConstant,
-			Value:     config.NewRSRParsersMustCompile("10", utils.InfieldSep),
-			FilterIDs: []string{"fltr1"},
-		}},
-	}
-	exp.Weights[0] = &utils.DynamicWeight{
-		Weight: 10,
-	}
-	dp.Merge(&AttributeProfile{
-		Tenant:    "cgrates.org",
-		ID:        "ID",
-		FilterIDs: []string{"fltr1", "*string:~*req.Account:1001"},
-		Weights:   make(utils.DynamicWeights, 1),
-		Blockers: utils.DynamicBlockers{
-			{
-				Blocker: true,
-			},
-		},
-		Attributes: []*Attribute{{
-			Path:      "*req.Account",
-			Type:      utils.MetaConstant,
-			Value:     config.NewRSRParsersMustCompile("10", utils.InfieldSep),
-			FilterIDs: []string{"fltr1"},
-		}},
-	})
-	dp.Weights[0] = &utils.DynamicWeight{
-		Weight: 10,
-	}
-	if !reflect.DeepEqual(exp, dp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(dp))
 	}
 }

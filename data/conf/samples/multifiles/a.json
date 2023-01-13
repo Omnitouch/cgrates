@@ -20,7 +20,7 @@
 				"id": "OutboundAUTHDryRun",
 				"filters": [],
 				"tenant": "cgrates.org",
-				"flags": ["*dryRun"],
+				"flags": ["*dryrun"],
 				"request_fields":[
 				],
 				"reply_fields":[

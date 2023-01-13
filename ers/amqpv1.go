@@ -19,25 +19,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	amqpv1 "github.com/Azure/go-amqp"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewAMQPv1ER return a new amqpv1 event reader
 func NewAMQPv1ER(cfg *config.CGRConfig, cfgIdx int,
 	rdrEvents, partialEvents chan *erEvent, rdrErr chan error,
-	fltrS *engine.FilterS, rdrExit chan struct{}, connMgr *engine.ConnManager) (er EventReader, err error) {
+	fltrS *engine.FilterS, rdrExit chan struct{}) (er EventReader, err error) {
 	rdr := &AMQPv1ER{
-		connMgr:       connMgr,
 		cgrCfg:        cfg,
 		cfgIdx:        cfgIdx,
 		fltrS:         fltrS,
@@ -62,10 +61,9 @@ func NewAMQPv1ER(cfg *config.CGRConfig, cfgIdx int,
 // AMQPv1ER implements EventReader interface for amqpv1 message
 type AMQPv1ER struct {
 	// sync.RWMutex
-	cgrCfg  *config.CGRConfig
-	cfgIdx  int // index of config instance within ERsCfg.Readers
-	fltrS   *engine.FilterS
-	connMgr *engine.ConnManager
+	cgrCfg *config.CGRConfig
+	cfgIdx int // index of config instance within ERsCfg.Readers
+	fltrS  *engine.FilterS
 
 	queueID string
 
@@ -106,11 +104,9 @@ func (rdr *AMQPv1ER) Serve() (err error) {
 		return
 	}
 	go func() {
-		select {
-		case <-rdr.rdrExit:
-			receiver.Close(context.Background())
-			rdr.close()
-		}
+		<-rdr.rdrExit
+		receiver.Close(context.Background())
+		rdr.close()
 	}()
 
 	go rdr.readLoop(receiver) // read until the connection is closed
@@ -132,7 +128,7 @@ func (rdr *AMQPv1ER) readLoop(recv *amqpv1.Receiver) (err error) {
 			rdr.rdrErr <- err
 			return
 		}
-		if err = recv.AcceptMessage(ctx, msg); err != nil {
+		if err = msg.Accept(ctx); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> unable to accept message error: %s",
 					utils.ERs, err.Error()))
@@ -147,8 +143,7 @@ func (rdr *AMQPv1ER) readLoop(recv *amqpv1.Receiver) (err error) {
 						utils.ERs, err.Error()))
 			}
 			if rdr.poster != nil { // post it
-				if err := ees.ExportWithAttempts(context.Background(), rdr.poster, body, utils.EmptyString, rdr.connMgr,
-					rdr.cgrCfg.GeneralCfg().DefaultTenant); err != nil {
+				if err := ees.ExportWithAttempts(rdr.poster, body, utils.EmptyString); err != nil {
 					utils.Logger.Warning(
 						fmt.Sprintf("<%s> writing message error: %s",
 							utils.ERs, err.Error()))
@@ -174,7 +169,7 @@ func (rdr *AMQPv1ER) processMessage(msg []byte) (err error) {
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
 	var pass bool
-	if pass, err = rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err = rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
 		return
 	}
@@ -214,9 +209,10 @@ func (rdr *AMQPv1ER) createPoster() {
 		processedOpt = new(config.EventExporterOpts)
 	}
 	rdr.poster = ees.NewAMQPv1EE(&config.EventExporterCfg{
-		ID:         rdr.Config().ID,
-		ExportPath: utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
-		Attempts:   rdr.cgrCfg.EEsCfg().GetDefaultExporter().Attempts,
-		Opts:       processedOpt,
+		ID:             rdr.Config().ID,
+		ExportPath:     utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
+		Attempts:       rdr.cgrCfg.GeneralCfg().PosterAttempts,
+		Opts:           processedOpt,
+		FailedPostsDir: rdr.cgrCfg.GeneralCfg().FailedPostsDir,
 	}, nil)
 }

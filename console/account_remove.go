@@ -18,22 +18,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import "github.com/Omnitouch/cgrates/utils"
+import "github.com/cgrates/cgrates/utils"
 
 func init() {
 	c := &CmdRemoveAccount{
 		name:      "account_remove",
-		rpcMethod: utils.AdminSv1RemoveAccount,
-		rpcParams: &utils.TenantIDWithAPIOpts{},
+		rpcMethod: utils.APIerSv1RemoveAccount,
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
 }
 
+// Commander implementation
 type CmdRemoveAccount struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.TenantIDWithAPIOpts
+	rpcParams *utils.AttrRemoveAccount
 	*CommandExecuter
 }
 
@@ -47,7 +47,7 @@ func (self *CmdRemoveAccount) RpcMethod() string {
 
 func (self *CmdRemoveAccount) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = &utils.TenantIDWithAPIOpts{APIOpts: make(map[string]interface{})}
+		self.rpcParams = &utils.AttrRemoveAccount{}
 	}
 	return self.rpcParams
 }

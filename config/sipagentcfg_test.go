@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestSIPAgentCfgloadFromJsonCfgCase1(t *testing.T) {
@@ -85,10 +85,6 @@ func TestSIPAgentCfgloadFromJsonCfgCase1(t *testing.T) {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, jsonCfg.sipAgentCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(jsonCfg.sipAgentCfg))
-	}
-	cfgJSONS = nil
-	if err = jsonCfg.sipAgentCfg.loadFromJSONCfg(cfgJSONS, jsonCfg.generalCfg.RSRSep); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -166,7 +162,7 @@ func TestSIPAgentCfgAsMapInterface(t *testing.T) {
 		utils.ListenNetCfg:           "udp",
 		utils.SessionSConnsCfg:       []string{"*internal"},
 		utils.TimezoneCfg:            "",
-		utils.RetransmissionTimerCfg: "2s",
+		utils.RetransmissionTimerCfg: 2 * time.Second,
 		utils.RequestProcessorsCfg:   []map[string]interface{}{},
 	}
 	if cgrCfg, err := NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
@@ -190,7 +186,7 @@ func TestSIPAgentCfgAsMapInterface1(t *testing.T) {
 				"id": "OutboundAUTHDryRun",
 				"filters": ["*string:~*req.request_type:OutboundAUTH","*string:~*req.Msisdn:497700056231"],
 				"tenant": "cgrates.org",
-				"flags": ["*dryRun"],
+				"flags": ["*dryrun"],
                 "timezone":       "",
 				"request_fields":[
 				],
@@ -216,13 +212,13 @@ func TestSIPAgentCfgAsMapInterface1(t *testing.T) {
 		utils.ListenNetCfg:           "udp",
 		utils.SessionSConnsCfg:       []string{"*internal"},
 		utils.TimezoneCfg:            "UTC",
-		utils.RetransmissionTimerCfg: "5s",
+		utils.RetransmissionTimerCfg: 5 * time.Second,
 		utils.RequestProcessorsCfg: []map[string]interface{}{
 			{
 				utils.IDCfg:            "OutboundAUTHDryRun",
 				utils.FiltersCfg:       []string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 				utils.TenantCfg:        "cgrates.org",
-				utils.FlagsCfg:         []string{"*dryRun"},
+				utils.FlagsCfg:         []string{"*dryrun"},
 				utils.TimezoneCfg:      "",
 				utils.RequestFieldsCfg: []map[string]interface{}{},
 				utils.ReplyFieldsCfg: []map[string]interface{}{
@@ -270,7 +266,7 @@ func TestSIPAgentCfgAsMapInterface2(t *testing.T) {
 		utils.ListenNetCfg:           "udp",
 		utils.SessionSConnsCfg:       []string{"*conn1", "*conn2"},
 		utils.TimezoneCfg:            "",
-		utils.RetransmissionTimerCfg: "1s",
+		utils.RetransmissionTimerCfg: time.Second,
 		utils.RequestProcessorsCfg: []map[string]interface{}{
 			{
 				utils.IDCfg:            "Register",
@@ -328,92 +324,5 @@ func TestSIPAgentCfgClone(t *testing.T) {
 	}
 	if rcv.SessionSConns[0] = ""; sa.SessionSConns[0] != utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS) {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffSIPAgentJsonCfg(t *testing.T) {
-	var d *SIPAgentJsonCfg
-
-	v1 := &SIPAgentCfg{
-		Enabled:             false,
-		Listen:              "localhost:8080",
-		ListenNet:           "tcp",
-		SessionSConns:       []string{"*localhost"},
-		Timezone:            "UTC",
-		RetransmissionTimer: 1 * time.Second,
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID: "reqID",
-			},
-		},
-	}
-
-	v2 := &SIPAgentCfg{
-		Enabled:             true,
-		Listen:              "localhost:8037",
-		ListenNet:           "udp",
-		SessionSConns:       []string{"*birpc"},
-		Timezone:            "EEST",
-		RetransmissionTimer: 2 * time.Second,
-		RequestProcessors:   []*RequestProcessor{},
-	}
-
-	expected := &SIPAgentJsonCfg{
-		Enabled:              utils.BoolPointer(true),
-		Listen:               utils.StringPointer("localhost:8037"),
-		Listen_net:           utils.StringPointer("udp"),
-		Sessions_conns:       &[]string{"*birpc"},
-		Timezone:             utils.StringPointer("EEST"),
-		Retransmission_timer: utils.StringPointer("2s"),
-		Request_processors:   &[]*ReqProcessorJsnCfg{},
-	}
-
-	rcv := diffSIPAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &SIPAgentJsonCfg{
-		Request_processors: &[]*ReqProcessorJsnCfg{},
-	}
-	rcv = diffSIPAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestSipAgentCloneSection(t *testing.T) {
-	sipCfg := &SIPAgentCfg{
-		Enabled:             false,
-		Listen:              "localhost:8080",
-		ListenNet:           "tcp",
-		SessionSConns:       []string{"*localhost"},
-		Timezone:            "UTC",
-		RetransmissionTimer: 1 * time.Second,
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID: "reqID",
-			},
-		},
-	}
-
-	exp := &SIPAgentCfg{
-		Enabled:             false,
-		Listen:              "localhost:8080",
-		ListenNet:           "tcp",
-		SessionSConns:       []string{"*localhost"},
-		Timezone:            "UTC",
-		RetransmissionTimer: 1 * time.Second,
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID: "reqID",
-			},
-		},
-	}
-
-	rcv := sipCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

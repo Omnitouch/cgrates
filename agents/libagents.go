@@ -21,17 +21,17 @@ package agents
 import (
 	"fmt"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
-func processRequest(ctx *context.Context, reqProcessor *config.RequestProcessor, agReq *AgentRequest,
+func processRequest(reqProcessor *config.RequestProcessor, agReq *AgentRequest,
 	agentName string, connMgr *engine.ConnManager, sessionsConns []string,
-	filterS *engine.FilterS) (_ bool, err error) {
-	if pass, err := filterS.Pass(ctx, agReq.Tenant,
+	aConn rpcclient.BiRPCConector, filterS *engine.FilterS) (_ bool, err error) {
+	if pass, err := filterS.Pass(agReq.Tenant,
 		reqProcessor.Filters, agReq); err != nil || !pass {
 		return pass, err
 	}
@@ -50,6 +50,15 @@ func processRequest(ctx *context.Context, reqProcessor *config.RequestProcessor,
 			break
 		}
 	}
+	var cgrArgs utils.Paginator
+	if reqType == utils.MetaAuthorize || reqType == utils.MetaMessage || reqType == utils.MetaEvent {
+		if cgrArgs, err = utils.GetRoutePaginatorFromOpts(cgrEv.APIOpts); err != nil {
+			utils.Logger.Warning(fmt.Sprintf("<%s> args extraction failed because <%s>",
+				agentName, err.Error()))
+			err = nil // reset the error and continue the processing
+		}
+	}
+
 	if reqProcessor.Flags.Has(utils.MetaLog) {
 		utils.Logger.Info(
 			fmt.Sprintf("<%s> LOG, processorID: %s, diameter message: %s",
@@ -64,49 +73,108 @@ func processRequest(ctx *context.Context, reqProcessor *config.RequestProcessor,
 			fmt.Sprintf("<%s> DRY_RUN, processorID: %s, DiameterMessage: %s",
 				agentName, reqProcessor.ID, agReq.Request.String()))
 	case utils.MetaAuthorize:
+		authArgs := sessions.NewV1AuthorizeArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaRoutes),
+			reqProcessor.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			reqProcessor.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs,
+			reqProcessor.Flags.Has(utils.MetaFD),
+			reqProcessor.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1AuthorizeReply)
-		err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1AuthorizeEvent,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.MetaAccounts))
+		err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1AuthorizeEvent,
+			authArgs, rply)
+		rply.SetMaxUsageNeeded(authArgs.GetMaxUsage)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaInitiate:
+		initArgs := sessions.NewV1InitSessionArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			cgrEv, reqProcessor.Flags.Has(utils.MetaFD))
 		rply := new(sessions.V1InitSessionReply)
-		err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1InitiateSession,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesInitiate))
+		err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1InitiateSession,
+			initArgs, rply)
+		rply.SetMaxUsageNeeded(initArgs.InitSession)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaUpdate:
+		updateArgs := sessions.NewV1UpdateSessionArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			cgrEv, reqProcessor.Flags.Has(utils.MetaFD))
 		rply := new(sessions.V1UpdateSessionReply)
-		err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1UpdateSession,
-			cgrEv, rply)
-		rply.SetMaxUsageNeeded(utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesUpdate))
+		rply.SetMaxUsageNeeded(updateArgs.UpdateSession)
+		err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1UpdateSession,
+			updateArgs, rply)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaTerminate:
+		terminateArgs := sessions.NewV1TerminateSessionArgs(
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			cgrEv, reqProcessor.Flags.Has(utils.MetaFD))
 		var rply string
-		err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1TerminateSession,
-			cgrEv, &rply)
+		err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1TerminateSession,
+			terminateArgs, &rply)
 		agReq.setCGRReply(nil, err)
 	case utils.MetaMessage:
+		msgArgs := sessions.NewV1ProcessMessageArgs(
+			reqProcessor.Flags.GetBool(utils.MetaAttributes),
+			reqProcessor.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaThresholds),
+			reqProcessor.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaStats),
+			reqProcessor.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			reqProcessor.Flags.GetBool(utils.MetaResources),
+			reqProcessor.Flags.Has(utils.MetaAccounts),
+			reqProcessor.Flags.GetBool(utils.MetaRoutes),
+			reqProcessor.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			reqProcessor.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs,
+			reqProcessor.Flags.Has(utils.MetaFD),
+			reqProcessor.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1ProcessMessageReply)
-		err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1ProcessMessage,
-			cgrEv, rply)
-		// if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
-		// 	cgrEv.Event[utils.Usage] = 0 // avoid further debits
-		messageS := utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesMessage)
-		if messageS {
+		err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1ProcessMessage,
+			msgArgs, rply)
+		if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
+			cgrEv.Event[utils.Usage] = 0 // avoid further debits
+		} else if msgArgs.Debit {
 			cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
 		}
-		rply.SetMaxUsageNeeded(messageS)
+		rply.SetMaxUsageNeeded(msgArgs.Debit)
 		agReq.setCGRReply(rply, err)
 	case utils.MetaEvent:
+		evArgs := &sessions.V1ProcessEventArgs{
+			Flags:     reqProcessor.Flags.SliceFlags(),
+			Paginator: cgrArgs,
+			CGREvent:  cgrEv,
+		}
 		rply := new(sessions.V1ProcessEventReply)
-		err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1ProcessEvent,
-			cgrEv, rply)
-		// if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
-		// cgrEv.Event[utils.Usage] = 0 // avoid further debits
-		// } else if needsMaxUsage(reqProcessor.Flags[utils.MetaRALs]) {
-		// cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
-		// }
+		err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1ProcessEvent,
+			evArgs, rply)
+		if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
+			cgrEv.Event[utils.Usage] = 0 // avoid further debits
+		} else if needsMaxUsage(reqProcessor.Flags[utils.MetaRALs]) {
+			cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
+		}
 		agReq.setCGRReply(rply, err)
 	case utils.MetaCDRs: // allow CDR processing
 	}
@@ -114,7 +182,7 @@ func processRequest(ctx *context.Context, reqProcessor *config.RequestProcessor,
 	if reqProcessor.Flags.GetBool(utils.MetaCDRs) &&
 		!reqProcessor.Flags.Has(utils.MetaDryRun) {
 		var rplyCDRs string
-		if err = connMgr.Call(ctx, sessionsConns, utils.SessionSv1ProcessCDR,
+		if err = connMgr.Call(sessionsConns, aConn, utils.SessionSv1ProcessCDR,
 			cgrEv, &rplyCDRs); err != nil {
 			agReq.CGRReply.Map[utils.Error] = utils.NewLeafNode(err.Error())
 		}

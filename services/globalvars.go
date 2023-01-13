@@ -21,12 +21,12 @@ package services
 import (
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewGlobalVarS .
@@ -45,28 +45,22 @@ type GlobalVarS struct {
 }
 
 // Start should handle the sercive start
-func (gv *GlobalVarS) Start(*context.Context, context.CancelFunc) error {
+func (gv *GlobalVarS) Start() (err error) {
+	engine.SetRoundingDecimals(gv.cfg.GeneralCfg().RoundingDecimals)
+	ees.SetFailedPostCacheTTL(gv.cfg.GeneralCfg().FailedPostsTTL)
 	engine.SetHTTPPstrTransport(gv.cfg.HTTPCfg().ClientOpts)
-	utils.DecimalContext.MaxScale = gv.cfg.GeneralCfg().DecimalMaxScale
-	utils.DecimalContext.MinScale = gv.cfg.GeneralCfg().DecimalMinScale
-	utils.DecimalContext.Precision = gv.cfg.GeneralCfg().DecimalPrecision
-	utils.DecimalContext.RoundingMode = gv.cfg.GeneralCfg().DecimalRoundingMode
 	return nil
 }
 
 // Reload handles the change of config
-func (gv *GlobalVarS) Reload(*context.Context, context.CancelFunc) error {
+func (gv *GlobalVarS) Reload() (err error) {
 	engine.SetHTTPPstrTransport(gv.cfg.HTTPCfg().ClientOpts)
-	utils.DecimalContext.MaxScale = gv.cfg.GeneralCfg().DecimalMaxScale
-	utils.DecimalContext.MinScale = gv.cfg.GeneralCfg().DecimalMinScale
-	utils.DecimalContext.Precision = gv.cfg.GeneralCfg().DecimalPrecision
-	utils.DecimalContext.RoundingMode = gv.cfg.GeneralCfg().DecimalRoundingMode
 	return nil
 }
 
 // Shutdown stops the service
-func (gv *GlobalVarS) Shutdown() error {
-	return nil
+func (gv *GlobalVarS) Shutdown() (err error) {
+	return
 }
 
 // IsRunning returns if the service is running

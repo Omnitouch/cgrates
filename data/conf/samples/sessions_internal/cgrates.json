@@ -20,7 +20,17 @@
 	"db_type": "*internal",	
 },
 
-"rates": {
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+"rals": {
+	"enabled": true,
+},
+
+
+"schedulers": {
 	"enabled": true,
 },
 
@@ -29,7 +39,7 @@
 	"enabled": true,
 	"session_cost_retries": 1,
 	"chargers_conns":["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 },
 
 
@@ -72,19 +82,21 @@
 	"enabled": true,
 	"session_ttl": "50ms",
 	"chargers_conns": ["*internal"],
-	"rates_conns": ["*internal"],
+	"rals_conns": ["*internal"],
 	"cdrs_conns": ["*internal"],
 	"resources_conns": ["*internal"],
 	"thresholds_conns": ["*internal"],
 	"stats_conns": ["*internal"],
 	"routes_conns": ["*internal"],
 	"attributes_conns": ["*internal"],
-	"alterable_fields": ["Extra1"]
+	"alterable_fields": ["Extra1"],
+	"terminate_attempts": 10,
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 
 

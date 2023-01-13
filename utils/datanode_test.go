@@ -29,7 +29,7 @@ import (
 /*
 goos: linux
 goarch: amd64
-pkg: github.com/Omnitouch/cgrates/utils
+pkg: github.com/cgrates/cgrates/utils
 cpu: Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz
 BenchmarkCompilePathRegex
 BenchmarkCompilePathRegex      	 3744520	      3252 ns/op	     416 B/op	       9 allocs/op
@@ -40,7 +40,7 @@ BenchmarkCompilePathSliceRegex 	 2804264	      4358 ns/op	    1088 B/op	      14
 BenchmarkCompilePathSlice
 BenchmarkCompilePathSlice      	24116252	       501.2 ns/op	     224 B/op	       3 allocs/op
 PASS
-ok  	github.com/Omnitouch/cgrates/utils	57.174s
+ok  	github.com/cgrates/cgrates/utils	57.174s
 
 */
 const pathBnch = "Field1[*raw][0].Field2[0].Field3[*new].Field5"
@@ -365,7 +365,7 @@ func TestAppend2(t *testing.T) {
 	dn.Type = NMDataType
 	testPath := []string{"0", "testPath"}
 	val1 := &DataLeaf{
-		Data: "data",
+		AttributeID: "ID1",
 	}
 	if rcv, err := dn.Append(testPath, val1); err != ErrWrongPath {
 		t.Errorf("Expected %v but received %v", ErrWrongPath, err)
@@ -377,9 +377,24 @@ func TestAppend2(t *testing.T) {
 	dn.Type = NMMapType
 	dn.Slice = nil
 	dn.Map = map[string]*DataNode{}
-
+	dnMapExpect := map[string]*DataNode{
+		"0": {
+			Type: NMMapType,
+			Map: map[string]*DataNode{
+				testPath[1]: {
+					Type: NMSliceType,
+					Slice: []*DataNode{{
+						Type:  NMDataType,
+						Value: val1,
+					}},
+				},
+			},
+		},
+	}
 	if _, err := dn.Append(testPath, val1); err != nil {
 		t.Error(err)
+	} else if !reflect.DeepEqual(dnMapExpect, dn.Map) {
+		t.Errorf("Expected %v but recived %v", ToJSON(dnMapExpect), ToJSON(dn.Map))
 	}
 
 	///
@@ -407,12 +422,25 @@ func TestAppend2(t *testing.T) {
 		t.Errorf("Expected %v but received %v", -1, rcv)
 	}
 
-	///
+	dn.Map = nil
+	dn.Slice = nil
 	testPath = []string{"0", "testPath"}
-	if rcv, err := dn.Append(testPath, val1); err != nil {
+	dnSliceExpect := []*DataNode{{
+		Type: NMMapType,
+		Map: map[string]*DataNode{
+			testPath[1]: {
+				Type: NMSliceType,
+				Slice: []*DataNode{{
+					Type:  NMDataType,
+					Value: val1,
+				}},
+			},
+		},
+	}}
+	if _, err := dn.Append(testPath, val1); err != nil {
 		t.Error(err)
-	} else if rcv == -1 {
-		t.Errorf("Expected %v but received %v", -1, rcv)
+	} else if !reflect.DeepEqual(dn.Slice, dnSliceExpect) {
+		t.Errorf("Expected %v but recived %v", ToJSON(dn.Slice), ToJSON(dnSliceExpect))
 	}
 
 	///
@@ -502,11 +530,22 @@ func TestCompose2(t *testing.T) {
 	///
 	dn.Slice = nil
 	testPath = []string{"0", "testPath"}
+	dnSliceExpect := []*DataNode{{
+		Type: NMMapType,
+		Map: map[string]*DataNode{
+			testPath[1]: {
+				Type: NMSliceType,
+				Slice: []*DataNode{{
+					Type:  NMDataType,
+					Value: val,
+				}},
+			},
+		},
+	}}
 	if err := dn.Compose(testPath, val); err != nil {
 		t.Error(err)
-	}
-	if err := dn.Compose(testPath, val); err != nil {
-		t.Error(err)
+	} else if !reflect.DeepEqual(dn.Slice, dnSliceExpect) {
+		t.Errorf("Expected %v but recived %v", ToJSON(dn.Slice), ToJSON(dnSliceExpect))
 	}
 
 	///

@@ -22,12 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -36,14 +34,18 @@ func TestDAsSessionSClientIface(t *testing.T) {
 }
 
 type testMockSessionConn struct {
-	calls map[string]func(_ *context.Context, _, _ interface{}) error
+	calls map[string]func(arg interface{}, rply interface{}) error
 }
 
-func (s *testMockSessionConn) Call(ctx *context.Context, method string, arg, rply interface{}) error {
+func (s *testMockSessionConn) Call(method string, arg interface{}, rply interface{}) error {
 	if call, has := s.calls[method]; has {
-		return call(ctx, arg, rply)
+		return call(arg, rply)
 	}
 	return rpcclient.ErrUnsupporteServiceMethod
+}
+
+func (s *testMockSessionConn) CallBiRPC(_ rpcclient.ClientConnector, method string, arg interface{}, rply interface{}) error {
+	return s.Call(method, arg, rply)
 }
 
 func (s *testMockSessionConn) Handlers() (b map[string]interface{}) {
@@ -55,7 +57,7 @@ func (s *testMockSessionConn) Handlers() (b map[string]interface{}) {
 }
 
 func TestProcessRequest(t *testing.T) {
-	data := engine.NewInternalDB(nil, nil, config.CgrConfig().DataDbCfg().Items)
+	data := engine.NewInternalDB(nil, nil, true, config.CgrConfig().DataDbCfg().Items)
 	dm := engine.NewDataManager(data, config.CgrConfig().CacheCfg(), nil)
 	filters := engine.NewFilterS(config.CgrConfig(), nil, dm) // no need for filterS but still try to configure the dm :D
 
@@ -120,32 +122,38 @@ func TestProcessRequest(t *testing.T) {
 		utils.RemoteHost:  utils.NewLeafNode(utils.LocalAddr().String()),
 	}}
 
-	sS := &testMockSessionConn{calls: map[string]func(_ *context.Context, _, _ interface{}) error{
-		utils.SessionSv1RegisterInternalBiJSONConn: func(_ *context.Context, _, _ interface{}) error {
+	sS := &testMockSessionConn{calls: map[string]func(arg interface{}, rply interface{}) error{
+		utils.SessionSv1RegisterInternalBiJSONConn: func(arg interface{}, rply interface{}) error {
 			return nil
 		},
-		utils.SessionSv1AuthorizeEvent: func(_ *context.Context, arg, rply interface{}) error {
+		utils.SessionSv1AuthorizeEvent: func(arg interface{}, rply interface{}) error {
+			var tm *time.Time
 			var id string
 			if arg == nil {
 				t.Errorf("args is nil")
-			} else if rargs, can := arg.(*utils.CGREvent); !can {
-				t.Errorf("args is not of utils.CGREvent type")
+			} else if rargs, can := arg.(*sessions.V1AuthorizeArgs); !can {
+				t.Errorf("args is not of sessions.V1AuthorizeArgs type")
 			} else {
+				tm = rargs.Time // need time
 				id = rargs.ID
 			}
-			expargs := &utils.CGREvent{
-				Tenant: "cgrates.org",
-				ID:     id,
-				Event: map[string]interface{}{
-					"Account":     "1001",
-					"Category":    "call",
-					"Destination": "1003",
-					"OriginHost":  "local",
-					"OriginID":    "123456",
-					"ToR":         "*voice",
-					"Usage":       "10s",
+			expargs := &sessions.V1AuthorizeArgs{
+				GetMaxUsage: true,
+				CGREvent: &utils.CGREvent{
+					Tenant: "cgrates.org",
+					ID:     id,
+					Time:   tm,
+					Event: map[string]interface{}{
+						"Account":     "1001",
+						"Category":    "call",
+						"Destination": "1003",
+						"OriginHost":  "local",
+						"OriginID":    "123456",
+						"ToR":         "*voice",
+						"Usage":       "10s",
+					},
+					APIOpts: map[string]interface{}{},
 				},
-				APIOpts: map[string]interface{}{},
 			}
 			if !reflect.DeepEqual(expargs, arg) {
 				t.Errorf("Expected:%s ,received: %s", utils.ToJSON(expargs), utils.ToJSON(arg))
@@ -156,34 +164,38 @@ func TestProcessRequest(t *testing.T) {
 				return nil
 			}
 			*prply = sessions.V1AuthorizeReply{
-				MaxUsage: utils.NewDecimalFromFloat64(-1),
+				MaxUsage: utils.DurationPointer(-1),
 			}
 			return nil
 		},
-		utils.SessionSv1InitiateSession: func(_ *context.Context, arg, rply interface{}) error {
+		utils.SessionSv1InitiateSession: func(arg interface{}, rply interface{}) error {
+			var tm *time.Time
 			var id string
 			if arg == nil {
 				t.Errorf("args is nil")
-			} else if rargs, can := arg.(*utils.CGREvent); !can {
+			} else if rargs, can := arg.(*sessions.V1InitSessionArgs); !can {
 				t.Errorf("args is not of sessions.V1InitSessionArgs type")
 			} else {
+				tm = rargs.Time // need time
 				id = rargs.ID
 			}
-			expargs := &utils.CGREvent{
-				Tenant: "cgrates.org",
-				ID:     id,
-				Event: map[string]interface{}{
-					"Account":     "1001",
-					"Category":    "call",
-					"Destination": "1003",
-					"OriginHost":  "local",
-					"OriginID":    "123456",
-					"ToR":         "*voice",
-					"Usage":       "10s",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaAttributes:  "true",
-					utils.OptsSesInitiate: "true",
+			expargs := &sessions.V1InitSessionArgs{
+				GetAttributes: true,
+				InitSession:   true,
+				CGREvent: &utils.CGREvent{
+					Tenant: "cgrates.org",
+					ID:     id,
+					Time:   tm,
+					Event: map[string]interface{}{
+						"Account":     "1001",
+						"Category":    "call",
+						"Destination": "1003",
+						"OriginHost":  "local",
+						"OriginID":    "123456",
+						"ToR":         "*voice",
+						"Usage":       "10s",
+					},
+					APIOpts: map[string]interface{}{},
 				},
 			}
 			if !reflect.DeepEqual(expargs, arg) {
@@ -196,17 +208,14 @@ func TestProcessRequest(t *testing.T) {
 			}
 			*prply = sessions.V1InitSessionReply{
 				Attributes: &engine.AttrSProcessEventReply{
-					AlteredFields: []*engine.FieldsAltered{
-						{
-							MatchedProfileID: "ATTR_1001_SESSIONAUTH",
-							Fields:           []string{"*req.Password", "*req.PaypalAccount", "*req.RequestType", "*req.LCRProfile"},
-						},
-					},
+					MatchedProfiles: []string{"ATTR_1001_SESSIONAUTH"},
+					AlteredFields:   []string{"*req.Password", "*req.PaypalAccount", "*req.RequestType", "*req.LCRProfile"},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "e7d35bf",
 						Event: map[string]interface{}{
 							"Account":       "1001",
+							"CGRID":         "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 							"Category":      "call",
 							"Destination":   "1003",
 							"LCRProfile":    "premium_cli",
@@ -218,39 +227,40 @@ func TestProcessRequest(t *testing.T) {
 							"ToR":           "*voice",
 							"Usage":         "10s",
 						},
-						APIOpts: map[string]interface{}{
-							"*originID": "1133dc80896edf5049b46aa911cb9085eeb27f4c",
-						},
 					},
 				},
 				MaxUsage: utils.DurationPointer(10 * time.Second),
 			}
 			return nil
 		},
-		utils.SessionSv1UpdateSession: func(_ *context.Context, arg, rply interface{}) error {
+		utils.SessionSv1UpdateSession: func(arg interface{}, rply interface{}) error {
+			var tm *time.Time
 			var id string
 			if arg == nil {
 				t.Errorf("args is nil")
-			} else if rargs, can := arg.(*utils.CGREvent); !can {
+			} else if rargs, can := arg.(*sessions.V1UpdateSessionArgs); !can {
 				t.Errorf("args is not of sessions.V1UpdateSessionArgs type")
 			} else {
+				tm = rargs.Time // need time
 				id = rargs.ID
 			}
-			expargs := &utils.CGREvent{
-				Tenant: "cgrates.org",
-				ID:     id,
-				Event: map[string]interface{}{
-					"Account":     "1001",
-					"Category":    "call",
-					"Destination": "1003",
-					"OriginHost":  "local",
-					"OriginID":    "123456",
-					"ToR":         "*voice",
-					"Usage":       "10s",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaAttributes: "true",
-					utils.OptsSesUpdate:  "true",
+			expargs := &sessions.V1UpdateSessionArgs{
+				GetAttributes: true,
+				UpdateSession: true,
+				CGREvent: &utils.CGREvent{
+					Tenant: "cgrates.org",
+					ID:     id,
+					Time:   tm,
+					Event: map[string]interface{}{
+						"Account":     "1001",
+						"Category":    "call",
+						"Destination": "1003",
+						"OriginHost":  "local",
+						"OriginID":    "123456",
+						"ToR":         "*voice",
+						"Usage":       "10s",
+					},
+					APIOpts: map[string]interface{}{},
 				},
 			}
 			if !reflect.DeepEqual(expargs, arg) {
@@ -263,18 +273,14 @@ func TestProcessRequest(t *testing.T) {
 			}
 			*prply = sessions.V1UpdateSessionReply{
 				Attributes: &engine.AttrSProcessEventReply{
-					AlteredFields: []*engine.FieldsAltered{
-						{
-							MatchedProfileID: "ATTR_1001_SESSIONAUTH",
-							Fields:           []string{"*req.Password", "*req.PaypalAccount", "*req.RequestType", "*req.LCRProfile"},
-						},
-					},
+					MatchedProfiles: []string{"ATTR_1001_SESSIONAUTH"},
+					AlteredFields:   []string{"*req.Password", "*req.PaypalAccount", "*req.RequestType", "*req.LCRProfile"},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "e7d35bf",
 						Event: map[string]interface{}{
-							"Account": "1001",
-
+							"Account":       "1001",
+							"CGRID":         "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 							"Category":      "call",
 							"Destination":   "1003",
 							"LCRProfile":    "premium_cli",
@@ -286,27 +292,27 @@ func TestProcessRequest(t *testing.T) {
 							"ToR":           "*voice",
 							"Usage":         "10s",
 						},
-						APIOpts: map[string]interface{}{
-							"*originID": "1133dc80896edf5049b46aa911cb9085eeb27f4c",
-						},
 					},
 				},
 				MaxUsage: utils.DurationPointer(10 * time.Second),
 			}
 			return nil
 		},
-		utils.SessionSv1ProcessCDR: func(_ *context.Context, arg, rply interface{}) error {
+		utils.SessionSv1ProcessCDR: func(arg interface{}, rply interface{}) error {
+			var tm *time.Time
 			var id string
 			if arg == nil {
 				t.Errorf("args is nil")
 			} else if rargs, can := arg.(*utils.CGREvent); !can {
 				t.Errorf("args is not of utils.CGREventWithOpts type")
 			} else {
+				tm = rargs.Time // need time
 				id = rargs.ID
 			}
 			expargs := &utils.CGREvent{
 				Tenant: "cgrates.org",
 				ID:     id,
+				Time:   tm,
 				Event: map[string]interface{}{
 					"Account":     "1001",
 					"Category":    "call",
@@ -316,9 +322,7 @@ func TestProcessRequest(t *testing.T) {
 					"ToR":         "*voice",
 					"Usage":       "10s",
 				},
-				APIOpts: map[string]interface{}{
-					utils.OptsSesTerminate: "true",
-				},
+				APIOpts: make(map[string]interface{}),
 			}
 			if !reflect.DeepEqual(expargs, arg) {
 				t.Errorf("Expected:%s ,received: %s", utils.ToJSON(expargs), utils.ToJSON(arg))
@@ -331,29 +335,34 @@ func TestProcessRequest(t *testing.T) {
 			*prply = utils.OK
 			return nil
 		},
-		utils.SessionSv1TerminateSession: func(_ *context.Context, arg, rply interface{}) error {
+		utils.SessionSv1TerminateSession: func(arg interface{}, rply interface{}) error {
+			var tm *time.Time
 			var id string
 			if arg == nil {
 				t.Errorf("args is nil")
-			} else if rargs, can := arg.(*utils.CGREvent); !can {
+			} else if rargs, can := arg.(*sessions.V1TerminateSessionArgs); !can {
 				t.Errorf("args is not of sessions.V1TerminateSessionArgs type")
 			} else {
+				tm = rargs.Time // need time
 				id = rargs.ID
 			}
-			expargs := &utils.CGREvent{
-				Tenant: "cgrates.org",
-				ID:     id,
-				Event: map[string]interface{}{
-					"Account":     "1001",
-					"Category":    "call",
-					"Destination": "1003",
-					"OriginHost":  "local",
-					"OriginID":    "123456",
-					"ToR":         "*voice",
-					"Usage":       "10s",
-				},
-				APIOpts: map[string]interface{}{
-					utils.OptsSesTerminate: "true",
+			expargs := &sessions.V1TerminateSessionArgs{
+				TerminateSession: true,
+
+				CGREvent: &utils.CGREvent{
+					Tenant: "cgrates.org",
+					ID:     id,
+					Time:   tm,
+					Event: map[string]interface{}{
+						"Account":     "1001",
+						"Category":    "call",
+						"Destination": "1003",
+						"OriginHost":  "local",
+						"OriginID":    "123456",
+						"ToR":         "*voice",
+						"Usage":       "10s",
+					},
+					APIOpts: map[string]interface{}{},
 				},
 			}
 			if !reflect.DeepEqual(expargs, arg) {
@@ -367,30 +376,34 @@ func TestProcessRequest(t *testing.T) {
 			*prply = utils.OK
 			return nil
 		},
-		utils.SessionSv1ProcessMessage: func(_ *context.Context, arg, rply interface{}) error {
+		utils.SessionSv1ProcessMessage: func(arg interface{}, rply interface{}) error {
+			var tm *time.Time
 			var id string
 			if arg == nil {
 				t.Errorf("args is nil")
-			} else if rargs, can := arg.(*utils.CGREvent); !can {
+			} else if rargs, can := arg.(*sessions.V1ProcessMessageArgs); !can {
 				t.Errorf("args is not of sessions.V1ProcessMessageArgs type")
 			} else {
+				tm = rargs.Time // need time
 				id = rargs.ID
 			}
-			expargs := &utils.CGREvent{
-				Tenant: "cgrates.org",
-				ID:     id,
-				Event: map[string]interface{}{
-					"Account":     "1001",
-					"Category":    "call",
-					"Destination": "1003",
-					"OriginHost":  "local",
-					"OriginID":    "123456",
-					"ToR":         "*voice",
-					"Usage":       "10s",
-				},
-				APIOpts: map[string]interface{}{
-					utils.MetaAttributes: "true",
-					utils.OptsSesMessage: "true",
+			expargs := &sessions.V1ProcessMessageArgs{
+				GetAttributes: true,
+				Debit:         true,
+				CGREvent: &utils.CGREvent{
+					Tenant: "cgrates.org",
+					ID:     id,
+					Time:   tm,
+					Event: map[string]interface{}{
+						"Account":     "1001",
+						"Category":    "call",
+						"Destination": "1003",
+						"OriginHost":  "local",
+						"OriginID":    "123456",
+						"ToR":         "*voice",
+						"Usage":       "10s",
+					},
+					APIOpts: map[string]interface{}{},
 				},
 			}
 			if !reflect.DeepEqual(expargs, arg) {
@@ -403,18 +416,14 @@ func TestProcessRequest(t *testing.T) {
 			}
 			*prply = sessions.V1ProcessMessageReply{
 				Attributes: &engine.AttrSProcessEventReply{
-					AlteredFields: []*engine.FieldsAltered{
-						{
-							MatchedProfileID: "ATTR_1001_SESSIONAUTH",
-							Fields:           []string{"*req.Password", "*req.PaypalAccount", "*req.RequestType", "*req.LCRProfile"},
-						},
-					},
+					MatchedProfiles: []string{"ATTR_1001_SESSIONAUTH"},
+					AlteredFields:   []string{"*req.Password", "*req.PaypalAccount", "*req.RequestType", "*req.LCRProfile"},
 					CGREvent: &utils.CGREvent{
 						Tenant: "cgrates.org",
 						ID:     "e7d35bf",
 						Event: map[string]interface{}{
-							"Account": "1001",
-
+							"Account":       "1001",
+							"CGRID":         "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 							"Category":      "call",
 							"Destination":   "1003",
 							"LCRProfile":    "premium_cli",
@@ -425,9 +434,6 @@ func TestProcessRequest(t *testing.T) {
 							"RequestType":   "*prepaid",
 							"ToR":           "*voice",
 							"Usage":         "10s",
-						},
-						APIOpts: map[string]interface{}{
-							"*originID": "1133dc80896edf5049b46aa911cb9085eeb27f4c",
 						},
 					},
 				},
@@ -441,19 +447,18 @@ func TestProcessRequest(t *testing.T) {
 		reqProcessor.Tenant, config.CgrConfig().GeneralCfg().DefaultTenant,
 		config.CgrConfig().GeneralCfg().DefaultTimezone, filters, nil)
 
-	internalSessionSChan := make(chan birpc.ClientConnector, 1)
+	internalSessionSChan := make(chan rpcclient.ClientConnector, 1)
 	internalSessionSChan <- sS
-	connMgr := engine.NewConnManager(config.CgrConfig())
-	connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS), utils.SessionSv1, internalSessionSChan)
-	connMgr.AddInternalConn(utils.ConcatenatedKey(rpcclient.BiRPCInternal, utils.MetaSessionS), utils.SessionSv1, internalSessionSChan)
+	connMgr := engine.NewConnManager(config.CgrConfig(), map[string]chan rpcclient.ClientConnector{
+		utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS):      internalSessionSChan,
+		utils.ConcatenatedKey(rpcclient.BiRPCInternal, utils.MetaSessionS): internalSessionSChan,
+	})
 	da := &DiameterAgent{
 		cgrCfg:  config.CgrConfig(),
 		filterS: filters,
 		connMgr: connMgr,
 	}
-	srv, _ := birpc.NewService(da, "", false)
-	da.ctx = context.WithClient(context.Background(), srv)
-	pr, err := processRequest(da.ctx, reqProcessor, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da.filterS)
+	pr, err := processRequest(reqProcessor, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da, da.filterS)
 	if err != nil {
 		t.Error(err)
 	} else if !pr {
@@ -463,18 +468,6 @@ func TestProcessRequest(t *testing.T) {
 	}
 
 	reqProcessor.Flags = utils.FlagsWithParamsFromSlice([]string{utils.MetaInitiate, utils.MetaAccounts, utils.MetaAttributes})
-
-	tmpls := []*config.FCTemplate{
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.OptsSesInitiate,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.MetaAttributes,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-	}
-	for _, v := range tmpls {
-		v.ComputePath()
-	}
-	clnReq := reqProcessor.Clone()
-	clnReq.RequestFields = append(clnReq.RequestFields, tmpls...)
 	cgrRplyNM = &utils.DataNode{Type: utils.NMMapType, Map: map[string]*utils.DataNode{}}
 	rply = utils.NewOrderedNavigableMap()
 
@@ -482,7 +475,7 @@ func TestProcessRequest(t *testing.T) {
 		reqProcessor.Tenant, config.CgrConfig().GeneralCfg().DefaultTenant,
 		config.CgrConfig().GeneralCfg().DefaultTimezone, filters, nil)
 
-	pr, err = processRequest(da.ctx, clnReq, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da.filterS)
+	pr, err = processRequest(reqProcessor, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da, da.filterS)
 	if err != nil {
 		t.Error(err)
 	} else if !pr {
@@ -492,18 +485,6 @@ func TestProcessRequest(t *testing.T) {
 	}
 
 	reqProcessor.Flags = utils.FlagsWithParamsFromSlice([]string{utils.MetaUpdate, utils.MetaAccounts, utils.MetaAttributes})
-
-	tmpls = []*config.FCTemplate{
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.OptsSesUpdate,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.MetaAttributes,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-	}
-	for _, v := range tmpls {
-		v.ComputePath()
-	}
-	clnReq = reqProcessor.Clone()
-	clnReq.RequestFields = append(clnReq.RequestFields, tmpls...)
 	cgrRplyNM = &utils.DataNode{Type: utils.NMMapType, Map: map[string]*utils.DataNode{}}
 	rply = utils.NewOrderedNavigableMap()
 
@@ -511,7 +492,7 @@ func TestProcessRequest(t *testing.T) {
 		reqProcessor.Tenant, config.CgrConfig().GeneralCfg().DefaultTenant,
 		config.CgrConfig().GeneralCfg().DefaultTimezone, filters, nil)
 
-	pr, err = processRequest(da.ctx, clnReq, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da.filterS)
+	pr, err = processRequest(reqProcessor, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da, da.filterS)
 	if err != nil {
 		t.Error(err)
 	} else if !pr {
@@ -519,22 +500,14 @@ func TestProcessRequest(t *testing.T) {
 	} else if len(rply.GetOrder()) != 2 {
 		t.Errorf("Expected the reply to have 2 values received: %s", rply.String())
 	}
+
 	reqProcessor.Flags = utils.FlagsWithParamsFromSlice([]string{utils.MetaTerminate, utils.MetaAccounts, utils.MetaAttributes, utils.MetaCDRs})
-	tmpls = []*config.FCTemplate{
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.OptsSesTerminate,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-	}
-	for _, v := range tmpls {
-		v.ComputePath()
-	}
 	reqProcessor.ReplyFields = []*config.FCTemplate{{Tag: "ResultCode",
 		Type: utils.MetaConstant, Path: utils.MetaRep + utils.NestingSep + "ResultCode",
 		Value: config.NewRSRParsersMustCompile("2001", utils.InfieldSep)}}
 	for _, v := range reqProcessor.ReplyFields {
 		v.ComputePath()
 	}
-	clnReq = reqProcessor.Clone()
-	clnReq.RequestFields = append(clnReq.RequestFields, tmpls...)
 	cgrRplyNM = &utils.DataNode{Type: utils.NMMapType, Map: map[string]*utils.DataNode{}}
 	rply = utils.NewOrderedNavigableMap()
 
@@ -542,7 +515,7 @@ func TestProcessRequest(t *testing.T) {
 		reqProcessor.Tenant, config.CgrConfig().GeneralCfg().DefaultTenant,
 		config.CgrConfig().GeneralCfg().DefaultTimezone, filters, nil)
 
-	pr, err = processRequest(da.ctx, clnReq, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da.filterS)
+	pr, err = processRequest(reqProcessor, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da, da.filterS)
 	if err != nil {
 		t.Error(err)
 	} else if !pr {
@@ -552,17 +525,6 @@ func TestProcessRequest(t *testing.T) {
 	}
 
 	reqProcessor.Flags = utils.FlagsWithParamsFromSlice([]string{utils.MetaMessage, utils.MetaAccounts, utils.MetaAttributes})
-	tmpls = []*config.FCTemplate{
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.OptsSesMessage,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-		{Type: utils.MetaConstant, Path: utils.MetaOpts + utils.NestingSep + utils.MetaAttributes,
-			Value: config.NewRSRParsersMustCompile("true", utils.InfieldSep)},
-	}
-	for _, v := range tmpls {
-		v.ComputePath()
-	}
-	clnReq = reqProcessor.Clone()
-	clnReq.RequestFields = append(clnReq.RequestFields, tmpls...)
 	cgrRplyNM = &utils.DataNode{Type: utils.NMMapType, Map: map[string]*utils.DataNode{}}
 	rply = utils.NewOrderedNavigableMap()
 
@@ -570,7 +532,7 @@ func TestProcessRequest(t *testing.T) {
 		reqProcessor.Tenant, config.CgrConfig().GeneralCfg().DefaultTenant,
 		config.CgrConfig().GeneralCfg().DefaultTimezone, filters, nil)
 
-	pr, err = processRequest(da.ctx, clnReq, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da.filterS)
+	pr, err = processRequest(reqProcessor, agReq, utils.DiameterAgent, connMgr, da.cgrCfg.DiameterAgentCfg().SessionSConns, da, da.filterS)
 	if err != nil {
 		t.Error(err)
 	} else if !pr {
@@ -578,4 +540,5 @@ func TestProcessRequest(t *testing.T) {
 	} else if len(rply.GetOrder()) != 1 {
 		t.Errorf("Expected the reply to have one value received: %s", rply.String())
 	}
+
 }

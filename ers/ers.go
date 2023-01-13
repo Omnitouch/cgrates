@@ -29,11 +29,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
@@ -164,7 +163,7 @@ func (erS *ERService) addReader(rdrID string, cfgIdx int) (err error) {
 	var rdr EventReader
 	if rdr, err = NewEventReader(erS.cfg, cfgIdx,
 		erS.rdrEvents, erS.partialEvents, erS.rdrErr,
-		erS.filterS, erS.stopLsn[rdrID], erS.connMgr); err != nil {
+		erS.filterS, erS.stopLsn[rdrID]); err != nil {
 		return
 	}
 	erS.rdrs[rdrID] = rdr
@@ -192,6 +191,16 @@ func (erS *ERService) processEvent(cgrEv *utils.CGREvent,
 			break
 		}
 	}
+	var cgrArgs utils.Paginator
+	if reqType == utils.MetaAuthorize ||
+		reqType == utils.MetaMessage ||
+		reqType == utils.MetaEvent {
+		if cgrArgs, err = utils.GetRoutePaginatorFromOpts(cgrEv.APIOpts); err != nil {
+			utils.Logger.Warning(fmt.Sprintf("<%s> args extraction for reader <%s> failed because <%s>",
+				utils.ERs, rdrCfg.ID, err.Error()))
+			err = nil // reset the error and continue the processing
+		}
+	}
 	// execute the action based on reqType
 	switch reqType {
 	default:
@@ -202,35 +211,94 @@ func (erS *ERService) processEvent(cgrEv *utils.CGREvent,
 			fmt.Sprintf("<%s> DRYRUN, reader: <%s>, CGREvent: <%s>",
 				utils.ERs, rdrCfg.ID, utils.ToJSON(cgrEv)))
 	case utils.MetaAuthorize:
+		authArgs := sessions.NewV1AuthorizeArgs(
+			rdrCfg.Flags.Has(utils.MetaAttributes),
+			rdrCfg.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaThresholds),
+			rdrCfg.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaStats),
+			rdrCfg.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaResources),
+			rdrCfg.Flags.Has(utils.MetaAccounts),
+			rdrCfg.Flags.Has(utils.MetaRoutes),
+			rdrCfg.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			rdrCfg.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs,
+			rdrCfg.Flags.Has(utils.MetaFD),
+			rdrCfg.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1AuthorizeReply)
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1AuthorizeEvent,
-			cgrEv, rply)
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1AuthorizeEvent,
+			authArgs, rply)
 	case utils.MetaInitiate:
+		initArgs := sessions.NewV1InitSessionArgs(
+			rdrCfg.Flags.Has(utils.MetaAttributes),
+			rdrCfg.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaThresholds),
+			rdrCfg.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaStats),
+			rdrCfg.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaResources),
+			rdrCfg.Flags.Has(utils.MetaAccounts),
+			cgrEv, rdrCfg.Flags.Has(utils.MetaFD))
 		rply := new(sessions.V1InitSessionReply)
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1InitiateSession,
-			cgrEv, rply)
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1InitiateSession,
+			initArgs, rply)
 	case utils.MetaUpdate:
+		updateArgs := sessions.NewV1UpdateSessionArgs(
+			rdrCfg.Flags.Has(utils.MetaAttributes),
+			rdrCfg.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaAccounts),
+			cgrEv, rdrCfg.Flags.Has(utils.MetaFD))
 		rply := new(sessions.V1UpdateSessionReply)
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1UpdateSession,
-			cgrEv, rply)
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1UpdateSession,
+			updateArgs, rply)
 	case utils.MetaTerminate:
+		terminateArgs := sessions.NewV1TerminateSessionArgs(
+			rdrCfg.Flags.Has(utils.MetaAccounts),
+			rdrCfg.Flags.Has(utils.MetaResources),
+			rdrCfg.Flags.Has(utils.MetaThresholds),
+			rdrCfg.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaStats),
+			rdrCfg.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			cgrEv, rdrCfg.Flags.Has(utils.MetaFD))
 		rply := utils.StringPointer("")
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1TerminateSession,
-			cgrEv, rply)
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1TerminateSession,
+			terminateArgs, rply)
 	case utils.MetaMessage:
+		evArgs := sessions.NewV1ProcessMessageArgs(
+			rdrCfg.Flags.Has(utils.MetaAttributes),
+			rdrCfg.Flags.ParamsSlice(utils.MetaAttributes, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaThresholds),
+			rdrCfg.Flags.ParamsSlice(utils.MetaThresholds, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaStats),
+			rdrCfg.Flags.ParamsSlice(utils.MetaStats, utils.MetaIDs),
+			rdrCfg.Flags.Has(utils.MetaResources),
+			rdrCfg.Flags.Has(utils.MetaAccounts),
+			rdrCfg.Flags.Has(utils.MetaRoutes),
+			rdrCfg.Flags.Has(utils.MetaRoutesIgnoreErrors),
+			rdrCfg.Flags.Has(utils.MetaRoutesEventCost),
+			cgrEv, cgrArgs,
+			rdrCfg.Flags.Has(utils.MetaFD),
+			rdrCfg.Flags.ParamValue(utils.MetaRoutesMaxCost),
+		)
 		rply := new(sessions.V1ProcessMessageReply) // need it so rpcclient can clone
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1ProcessMessage,
-			cgrEv, rply)
-		// if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
-		// cgrEv.Event[utils.Usage] = 0 // avoid further debits
-		// } else
-		if utils.OptAsBool(cgrEv.APIOpts, utils.OptsSesMessage) {
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1ProcessMessage,
+			evArgs, rply)
+		if utils.ErrHasPrefix(err, utils.RalsErrorPrfx) {
+			cgrEv.Event[utils.Usage] = 0 // avoid further debits
+		} else if evArgs.Debit {
 			cgrEv.Event[utils.Usage] = rply.MaxUsage // make sure the CDR reflects the debit
 		}
 	case utils.MetaEvent:
+		evArgs := &sessions.V1ProcessEventArgs{
+			Flags:     rdrCfg.Flags.SliceFlags(),
+			CGREvent:  cgrEv,
+			Paginator: cgrArgs,
+		}
 		rply := new(sessions.V1ProcessEventReply)
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1ProcessEvent,
-			cgrEv, rply)
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1ProcessEvent,
+			evArgs, rply)
 	case utils.MetaCDRs: // allow CDR processing
 	}
 	if err != nil {
@@ -240,7 +308,7 @@ func (erS *ERService) processEvent(cgrEv *utils.CGREvent,
 	if rdrCfg.Flags.Has(utils.MetaCDRs) &&
 		!rdrCfg.Flags.Has(utils.MetaDryRun) {
 		rplyCDRs := utils.StringPointer("")
-		err = erS.connMgr.Call(context.TODO(), erS.cfg.ERsCfg().SessionSConns, utils.SessionSv1ProcessCDR,
+		err = erS.connMgr.Call(erS.cfg.ERsCfg().SessionSConns, nil, utils.SessionSv1ProcessCDR,
 			cgrEv, rplyCDRs)
 	}
 
@@ -260,7 +328,7 @@ type erEvents struct {
 
 // processPartialEvent process the event as a partial event
 func (erS *ERService) processPartialEvent(ev *utils.CGREvent, rdrCfg *config.EventReaderCfg) (err error) {
-	// to identify the event the originID and originHost is used to create the originID
+	// to identify the event the originID and originHost is used to create the CGRID
 	orgID, err := ev.FieldAsString(utils.OriginID)
 	if err == utils.ErrNotFound { // the field is missing ignore the event
 		utils.Logger.Warning(
@@ -269,9 +337,9 @@ func (erS *ERService) processPartialEvent(ev *utils.CGREvent, rdrCfg *config.Eve
 		return
 	}
 	orgHost := utils.IfaceAsString(ev.Event[utils.OriginHost])
-	originID := utils.Sha1(orgID, orgHost)
+	cgrID := utils.Sha1(orgID, orgHost)
 
-	evs, has := erS.partialCache.Get(originID) // get the existing events from cache
+	evs, has := erS.partialCache.Get(cgrID) // get the existing events from cache
 	var cgrEvs *erEvents
 	if !has || evs == nil {
 		cgrEvs = &erEvents{
@@ -293,14 +361,14 @@ func (erS *ERService) processPartialEvent(ev *utils.CGREvent, rdrCfg *config.Eve
 	}
 	if partial := cgrEv.APIOpts[utils.PartialOpt]; !utils.IsSliceMember([]string{utils.FalseStr, utils.EmptyString},
 		utils.IfaceAsString(partial)) { // if is still partial set it back in cache
-		erS.partialCache.Set(originID, cgrEvs, nil)
+		erS.partialCache.Set(cgrID, cgrEvs, nil)
 		return
 	}
 
 	// complete event
 	if len(cgrEvs.events) != 1 { // remove it from cache if there were events in cache
-		erS.partialCache.Set(originID, nil, nil) // set it with nil in cache to ignore when we expire the item
-		erS.partialCache.Remove(originID)
+		erS.partialCache.Set(cgrID, nil, nil) // set it with nil in cache to ignore when we expire the item
+		erS.partialCache.Remove(cgrID)
 	}
 	go func() { erS.rdrEvents <- &erEvent{cgrEvent: cgrEv, rdrCfg: rdrCfg} }() // put the event on the complete events chanel( in a goroutine to not block the select from ListenAndServe)
 	return
@@ -331,7 +399,7 @@ func (erS *ERService) onEvicted(id string, value interface{}) {
 		}
 		erS.rdrEvents <- &erEvent{cgrEvent: cgrEv, rdrCfg: eEvs.rdrCfg}
 	case utils.MetaDumpToFile: // apply the cacheDumpFields to the united events and write the record to file
-		var expPath string
+		expPath := eEvs.rdrCfg.ProcessedPath
 		if eEvs.rdrCfg.Opts.PartialPath != nil {
 			expPath = *eEvs.rdrCfg.Opts.PartialPath
 		}
@@ -360,9 +428,9 @@ func (erS *ERService) onEvicted(id string, value interface{}) {
 					utils.MetaExp: utils.NewOrderedNavigableMap(),
 				})
 
-			if err = eeReq.SetFields(context.Background(), eEvs.rdrCfg.CacheDumpFields); err != nil {
+			if err = eeReq.SetFields(eEvs.rdrCfg.CacheDumpFields); err != nil {
 				utils.Logger.Warning(
-					fmt.Sprintf("<%s> Converting CDR with originID: <%s> to record , ignoring due to error: <%s>",
+					fmt.Sprintf("<%s> Converting CDR with CGRID: <%s> to record , ignoring due to error: <%s>",
 						utils.ERs, id, err.Error()))
 				return
 			}
@@ -390,9 +458,9 @@ func (erS *ERService) onEvicted(id string, value interface{}) {
 		}
 		csvWriter := csv.NewWriter(fileOut)
 		if eEvs.rdrCfg.Opts.PartialCSVFieldSeparator != nil {
-
 			csvWriter.Comma = rune((*eEvs.rdrCfg.Opts.PartialCSVFieldSeparator)[0])
 		}
+
 		if err = csvWriter.Write(record); err != nil {
 			utils.Logger.Err(fmt.Sprintf("<%s> Failed writing partial record %v to file: %s, error: %s",
 				utils.ERs, record, dumpFilePath, err.Error()))
@@ -429,9 +497,9 @@ func (erS *ERService) onEvicted(id string, value interface{}) {
 					utils.MetaExp: utils.NewOrderedNavigableMap(),
 				})
 
-			if err = eeReq.SetFields(context.Background(), eEvs.rdrCfg.CacheDumpFields); err != nil {
+			if err = eeReq.SetFields(eEvs.rdrCfg.CacheDumpFields); err != nil {
 				utils.Logger.Warning(
-					fmt.Sprintf("<%s> Converting CDR with originID: <%s> to record , ignoring due to error: <%s>",
+					fmt.Sprintf("<%s> Converting CDR with CGRID: <%s> to record , ignoring due to error: <%s>",
 						utils.ERs, id, err.Error()))
 				return
 			}

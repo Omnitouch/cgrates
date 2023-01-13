@@ -22,16 +22,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package general_tests
 
 import (
+	"net/rpc"
 	"path"
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/loaders"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
@@ -39,12 +38,13 @@ var (
 	tutSMGCfgPath string
 	tutSMGCfgDIR  string
 	tutSMGCfg     *config.CGRConfig
-	tutSMGRpc     *birpc.Client
+	tutSMGRpc     *rpc.Client
+	smgLoadInst   utils.LoadInstance // Share load information between tests
 
 	sTestTutSMG = []func(t *testing.T){
 		testTutSMGInitCfg,
 		testTutSMGResetDataDb,
-
+		testTutSMGResetStorDb,
 		testTutSMGStartEngine,
 		testTutSMGRpcConn,
 		testTutSMGLoadTariffPlanFromFolder,
@@ -76,7 +76,7 @@ func testTutSMGInitCfg(t *testing.T) {
 	tutSMGCfgPath = path.Join(*dataDir, "conf", "samples", tutSMGCfgDIR)
 	// Init config first
 	var err error
-	tutSMGCfg, err = config.NewCGRConfigFromPath(context.Background(), tutSMGCfgPath)
+	tutSMGCfg, err = config.NewCGRConfigFromPath(tutSMGCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -84,7 +84,14 @@ func testTutSMGInitCfg(t *testing.T) {
 
 // Remove data in both rating and accounting db
 func testTutSMGResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(tutSMGCfg); err != nil {
+	if err := engine.InitDataDb(tutSMGCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testTutSMGResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(tutSMGCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -107,26 +114,17 @@ func testTutSMGRpcConn(t *testing.T) {
 
 // Load the tariff plan, creating accounts and their balances
 func testTutSMGLoadTariffPlanFromFolder(t *testing.T) {
-	caching := utils.MetaReload
-	if tutSMGCfg.DataDbCfg().Type == utils.Internal {
-		caching = utils.MetaNone
-	}
-	var reply string
-	if err := tutSMGRpc.Call(context.Background(), utils.LoaderSv1Run,
-		&loaders.ArgsProcessFolder{
-			// StopOnError: true,
-			APIOpts: map[string]interface{}{utils.MetaCache: caching},
-		}, &reply); err != nil {
+	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "oldtutorial")}
+	if err := tutSMGRpc.Call(utils.APIerSv2LoadTariffPlanFromFolder, attrs, &smgLoadInst); err != nil {
 		t.Error(err)
-	} else if reply != utils.OK {
-		t.Error("Unexpected reply returned:", reply)
 	}
+	time.Sleep(time.Duration(*waitRater) * time.Millisecond) // Give time for scheduler to execute topups
 }
 
 // Check loaded stats
 func testTutSMGCacheStats(t *testing.T) {
 	var reply string
-	if err := tutSMGRpc.Call(context.Background(), utils.CacheSv1LoadCache, utils.NewAttrReloadCacheWithOpts(), &reply); err != nil {
+	if err := tutSMGRpc.Call(utils.CacheSv1LoadCache, utils.NewAttrReloadCacheWithOpts(), &reply); err != nil {
 		t.Error(err)
 	} else if reply != utils.OK {
 		t.Error(reply)
@@ -137,48 +135,46 @@ func testTutSMGCacheStats(t *testing.T) {
 	// 	SupplierProfiles: 3, AttributeProfiles: 2}
 	var rcvStats map[string]*ltcache.CacheStats
 	expectedStats := engine.GetDefaultEmptyCacheStats()
-	expectedStats[utils.CacheAccountsFilterIndexes].Items = 1
-	expectedStats[utils.CacheAccountsFilterIndexes].Groups = 1
-	expectedStats[utils.CacheActionProfilesFilterIndexes].Items = 1
-	expectedStats[utils.CacheActionProfilesFilterIndexes].Groups = 1
-	expectedStats[utils.CacheActionProfiles].Items = 1
-	expectedStats[utils.CacheRateFilterIndexes].Items = 2
-	expectedStats[utils.CacheRateFilterIndexes].Groups = 2
-	expectedStats[utils.CacheRateProfilesFilterIndexes].Items = 2
-	expectedStats[utils.CacheRateProfilesFilterIndexes].Groups = 1
-	expectedStats[utils.CacheRateProfiles].Items = 2
-	expectedStats[utils.CacheActionProfiles].Items = 1
-	expectedStats[utils.CacheResourceProfiles].Items = 1
-	expectedStats[utils.CacheResources].Items = 1
-	expectedStats[utils.CacheStatQueues].Items = 7
-	expectedStats[utils.CacheStatQueueProfiles].Items = 7
-	expectedStats[utils.CacheThresholds].Items = 1
-	expectedStats[utils.CacheThresholdProfiles].Items = 1
-	expectedStats[utils.CacheFilters].Items = 26
-	expectedStats[utils.CacheRouteProfiles].Items = 12
-	expectedStats[utils.CacheAttributeProfiles].Items = 8
-	expectedStats[utils.MetaDefault].Items = 0
-	expectedStats[utils.CacheLoadIDs].Items = 27
-	expectedStats[utils.CacheChargerProfiles].Items = 3
-	expectedStats[utils.CacheRPCConnections].Items = 1
-	expectedStats[utils.CacheThresholdFilterIndexes].Items = 1
+	expectedStats[utils.CacheDestinations].Items = 5
+	expectedStats[utils.CacheReverseDestinations].Items = 7
+	expectedStats[utils.CacheRatingPlans].Items = 4
+	expectedStats[utils.CacheRatingProfiles].Items = 5
+	expectedStats[utils.CacheActions].Items = 9
+	expectedStats[utils.CacheActionPlans].Items = 4
+	expectedStats[utils.CacheSharedGroups].Items = 1
+	expectedStats[utils.CacheResourceProfiles].Items = 3
+	expectedStats[utils.CacheResources].Items = 3
+	expectedStats[utils.CacheStatQueues].Items = 1
+	expectedStats[utils.CacheStatQueueProfiles].Items = 1
+	expectedStats[utils.CacheThresholds].Items = 7
+	expectedStats[utils.CacheThresholdProfiles].Items = 7
+	expectedStats[utils.CacheFilters].Items = 15
+	expectedStats[utils.CacheRouteProfiles].Items = 3
+	expectedStats[utils.CacheAttributeProfiles].Items = 2
+	expectedStats[utils.MetaDefault].Items = 1
+	expectedStats[utils.CacheActionTriggers].Items = 1
+	expectedStats[utils.CacheLoadIDs].Items = 30
+	expectedStats[utils.CacheChargerProfiles].Items = 1
+	expectedStats[utils.CacheRPCConnections].Items = 2
+	expectedStats[utils.CacheTimings].Items = 14
+	expectedStats[utils.CacheThresholdFilterIndexes].Items = 10
 	expectedStats[utils.CacheThresholdFilterIndexes].Groups = 1
-	expectedStats[utils.CacheStatFilterIndexes].Items = 7
+	expectedStats[utils.CacheStatFilterIndexes].Items = 2
 	expectedStats[utils.CacheStatFilterIndexes].Groups = 1
-	expectedStats[utils.CacheRouteFilterIndexes].Items = 16
+	expectedStats[utils.CacheRouteFilterIndexes].Items = 6
 	expectedStats[utils.CacheRouteFilterIndexes].Groups = 1
-	expectedStats[utils.CacheResourceFilterIndexes].Items = 1
+	expectedStats[utils.CacheResourceFilterIndexes].Items = 6
 	expectedStats[utils.CacheResourceFilterIndexes].Groups = 1
 	expectedStats[utils.CacheChargerFilterIndexes].Items = 1
 	expectedStats[utils.CacheChargerFilterIndexes].Groups = 1
-	expectedStats[utils.CacheAttributeFilterIndexes].Items = 10
-	expectedStats[utils.CacheAttributeFilterIndexes].Groups = 1
-	expectedStats[utils.CacheReverseFilterIndexes].Items = 19
-	expectedStats[utils.CacheReverseFilterIndexes].Groups = 16
-	if err := tutSMGRpc.Call(context.Background(), utils.CacheSv1GetCacheStats, new(utils.AttrCacheIDsWithAPIOpts), &rcvStats); err != nil {
+	expectedStats[utils.CacheAttributeFilterIndexes].Items = 3
+	expectedStats[utils.CacheAttributeFilterIndexes].Groups = 2
+	expectedStats[utils.CacheReverseFilterIndexes].Items = 15
+	expectedStats[utils.CacheReverseFilterIndexes].Groups = 13
+	if err := tutSMGRpc.Call(utils.CacheSv1GetCacheStats, new(utils.AttrCacheIDsWithAPIOpts), &rcvStats); err != nil {
 		t.Error("Got error on CacheSv1.GetCacheStats: ", err.Error())
 	} else if !reflect.DeepEqual(expectedStats, rcvStats) {
-		t.Errorf("expected: %+v,\n received: %+v", utils.ToJSON(expectedStats), utils.ToJSON(rcvStats))
+		t.Errorf("Calling APIerSv2.CacheSv1 expected: %+v,\n received: %+v", utils.ToJSON(expectedStats), utils.ToJSON(rcvStats))
 	}
 }
 

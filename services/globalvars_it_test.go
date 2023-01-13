@@ -24,24 +24,22 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestGlobalVarsReload(t *testing.T) {
 	cfg := config.NewDefaultCGRConfig()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
 	srv := NewGlobalVarS(cfg, srvDep)
-	ctx, cancel := context.WithCancel(context.TODO())
-	err := srv.Start(ctx, cancel)
+	err := srv.Start()
 	if !srv.IsRunning() {
 		t.Errorf("Expected service to be running")
 	}
 	if err != nil {
 		t.Errorf("\nExpected <nil>, \nReceived <%+v>", err)
 	}
-	err = srv.Reload(ctx, cancel)
+	err = srv.Reload()
 	if err != nil {
 		t.Errorf("\nExpected <nil>, \nReceived <%+v>", err)
 	}

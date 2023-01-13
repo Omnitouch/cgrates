@@ -19,6 +19,9 @@
 	"http": ":2080",
 },
 
+"stor_db": {
+	"db_type":"*internal",
+},
 
 "caches":{
 	"partitions": {
@@ -27,17 +30,23 @@
 	},
 },
 
+
+
 "schedulers": {
 	"enabled": true,				
 },
 
-"rates": {
+"rals": {
+	"enabled": true,
+},
+
+"chargers": {
 	"enabled": true,
 },
 
 "sessions": {
 	"enabled": true,
-	"rates_conns": ["*localhost"],
+	"rals_conns": ["*localhost"],
 	"resources_conns": ["*localhost"],
 	"chargers_conns": ["*localhost"],
 	"listen_bijson": ":3014",
@@ -47,7 +56,8 @@
  	"enabled": true,
 },
 
-"admins": {
+"apiers": {
 	"enabled": true,
+	"scheduler_conns": ["*internal"],
 },
 }

@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // Caps the structure that allocs requests for API
@@ -71,7 +71,8 @@ func (cR *Caps) Deallocate() {
 
 // NewCapsStats returns the stats for the caps
 func NewCapsStats(sampleinterval time.Duration, caps *Caps, stopChan chan struct{}) (cs *CapsStats) {
-	cs = &CapsStats{st: NewStatAverage(1, utils.MetaDynReq, nil)}
+	st, _ := NewStatAverage(1, utils.MetaDynReq, nil)
+	cs = &CapsStats{st: st}
 	go cs.loop(sampleinterval, stopChan, caps)
 	return
 }
@@ -120,9 +121,9 @@ func (cs *CapsStats) GetPeak() (peak int) {
 }
 
 // GetAverage returns the average allocated caps
-func (cs *CapsStats) GetAverage() (avg float64) {
+func (cs *CapsStats) GetAverage(roundingDecimals int) (avg float64) {
 	cs.RLock()
-	avg, _ = cs.st.GetValue().Float64()
+	avg = cs.st.GetFloat64Value(roundingDecimals)
 	cs.RUnlock()
 	return
 }

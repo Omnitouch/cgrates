@@ -22,10 +22,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewHttpAgent will construct a HTTPAgent
@@ -73,9 +72,9 @@ func (ha *HTTPAgent) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			utils.FirstNonEmpty(reqProcessor.Timezone,
 				config.CgrConfig().GeneralCfg().DefaultTimezone),
 			ha.filterS, nil)
-		lclProcessed, err := processRequest(context.TODO(), reqProcessor, agReq,
+		lclProcessed, err := processRequest(reqProcessor, agReq,
 			utils.HTTPAgent, ha.connMgr, ha.sessionConns,
-			agReq.filterS)
+			nil, agReq.filterS)
 		if err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> error: %s processing request: %s",

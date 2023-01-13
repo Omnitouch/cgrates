@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/antchfx/xmlquery"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var cdrXMLBroadsoft = `<?xml version="1.0" encoding="ISO-8859-1"?>
@@ -410,7 +410,7 @@ func TestXMLIndexes(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	dP := NewXMLProvider(doc, []string{})
+	dP := NewXMLProvider(doc, utils.HierarchyPath([]string{}))
 	if data, err := dP.FieldAsString([]string{"complete-success-notification", "userid"}); err != nil {
 		t.Error(err)
 	} else if data != "386" {
@@ -494,7 +494,7 @@ func TestFieldAsInterfaceInvalidSyntax(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	dP := NewXMLProvider(doc, []string{})
+	dP := NewXMLProvider(doc, utils.HierarchyPath([]string{}))
 	expected := "strconv.Atoi: parsing \"09]\": invalid syntax"
 	if _, err := dP.FieldAsString([]string{"complete-success-notification[09]]"}); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+q, received %+q", expected, err)
@@ -506,7 +506,7 @@ func TestFieldAsInterfaceInvalidSyntax1(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	dP := NewXMLProvider(doc, []string{})
+	dP := NewXMLProvider(doc, utils.HierarchyPath([]string{}))
 	expected := "filter rule <[0> needs to end in ]"
 	if _, err := dP.FieldAsString([]string{"complete-success-notification[0"}); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+q, received %+q", expected, err)

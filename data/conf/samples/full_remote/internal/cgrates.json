@@ -1,0 +1,110 @@
+{
+"general": {
+	"log_level": 7,
+	"node_id": "InternalEngine",
+},
+
+
+"listen": {
+	"rpc_json": ":2012",
+	"rpc_gob": ":2013",
+	"http": ":2080",
+},
+
+
+"rpc_conns": {
+	"conn1": {
+		"strategy": "*first",
+		"conns": [{"address": "127.0.0.1:2023", "transport":"*gob"}],
+	},
+},
+
+"caches":{
+	"partitions": {
+		"*destinations": {"limit":0},
+		"*reverse_destinations": {"limit":0},
+		"*rating_plans": {"limit":0},
+		"*rating_profiles": {"limit":0},
+		"*actions": {"limit":0},
+		"*action_plans": {"limit":0},
+		"*account_action_plans": {"limit":0},
+		"*action_triggers": {"limit":0},
+		"*shared_groups": {"limit":0},
+		"*timings": {"limit":0},
+		"*resource_profiles": {"limit":0},
+		"*resources": {"limit":0},
+		"*statqueue_profiles": {"limit":0},
+		"*statqueues": {"limit":0},
+		"*threshold_profiles": {"limit":0},
+		"*thresholds": {"limit":0},
+		"*filters": {"limit":0},
+		"*route_profiles": {"limit":0},
+		"*attribute_profiles": {"limit":0},
+		"*charger_profiles": {"limit":0},
+		"*dispatcher_profiles": {"limit":0},
+		"*dispatcher_hosts": {"limit":0},
+		"*resource_filter_indexes": {"limit":0},
+		"*stat_filter_indexes": {"limit":0},
+		"*threshold_filter_indexes": {"limit":0},
+		"*route_filter_indexes": {"limit":0},
+		"*attribute_filter_indexes": {"limit":0},
+		"*charger_filter_indexes": {"limit":0},
+		"*dispatcher_filter_indexes": {"limit":0},
+		"*reverse_filter_indexes": {"limit":0},
+		"*dispatcher_routes": {"limit":0},
+		"*dispatcher_loads": {"limit":0},
+		"*dispatchers": {"limit":0},
+		},
+	},
+
+
+"data_db": {
+	"db_type": "*internal",
+	"remote_conns": ["conn1"],
+	"items":{
+		"*accounts":{"limit":0, "remote":true},
+		"*reverse_destinations": {"limit":0, "remote":true},
+		"*destinations": {"limit":0, "remote":true},
+		"*rating_plans": {"limit":0, "remote":true},
+		"*rating_profiles":{"limit":0, "remote":true},
+		"*actions":{"limit":0, "remote":true},
+		"*action_plans": {"limit":0, "remote":true},
+		"*account_action_plans":{"limit":0, "remote":true},
+		"*action_triggers":{"limit":0, "remote":true},
+		"*shared_groups":{"limit":0, "remote":true},
+		"*timings": {"limit":0, "remote":true},
+		"*resource_profiles":{"limit":0, "remote":true},
+		"*resources":{"limit":0, "remote":true},
+		"*statqueue_profiles": {"limit":0, "remote":true},
+		"*statqueues": {"limit":0, "remote":true},
+		"*threshold_profiles": {"limit":0, "remote":true},
+		"*thresholds": {"limit":0, "remote":true},
+		"*filters": {"limit":0, "remote":true},
+		"*route_profiles":{"limit":0, "remote":true},
+		"*attribute_profiles":{"limit":0, "remote":true},
+		"*charger_profiles": {"limit":0, "remote":true},
+		"*dispatcher_profiles":{"limit":0, "remote":true},
+		"*dispatcher_hosts":{"limit":0, "remote":true},
+		"*load_ids":{"limit":0, "remote":true},
+		"*resource_filter_indexes": {"limit":0, "remote":true},
+		"*stat_filter_indexes": {"limit":0, "remote":true},
+		"*threshold_filter_indexes": {"limit":0, "remote":true},
+		"*route_filter_indexes": {"limit":0, "remote":true},
+		"*attribute_filter_indexes": {"limit":0, "remote":true},
+		"*charger_filter_indexes": {"limit":0, "remote":true},
+		"*dispatcher_filter_indexes": {"limit":0, "remote":true},
+		"*reverse_filter_indexes": {"limit":0, "remote":true},
+	},
+},
+
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+
+"apiers": {
+	"enabled": true,
+},
+
+}

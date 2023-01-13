@@ -22,8 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/ltcache"
 )
 
@@ -96,25 +95,18 @@ type CacheCfg struct {
 	RemoteConns      []string
 }
 
-// loadCacheCfg loads the Cache section of the configuration
-func (cCfg *CacheCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnCacheCfg := new(CacheJsonCfg)
-	if err = jsnCfg.GetSection(ctx, CacheJSON, jsnCacheCfg); err != nil {
-		return
-	}
-	return cCfg.loadFromJSONCfg(jsnCacheCfg)
-}
-
 func (cCfg *CacheCfg) loadFromJSONCfg(jsnCfg *CacheJsonCfg) (err error) {
 	if jsnCfg == nil {
 		return
 	}
-	for kJsn, vJsn := range jsnCfg.Partitions {
-		val := new(CacheParamCfg)
-		if err := val.loadFromJSONCfg(vJsn); err != nil {
-			return err
+	if jsnCfg.Partitions != nil {
+		for kJsn, vJsn := range *jsnCfg.Partitions {
+			val := new(CacheParamCfg)
+			if err := val.loadFromJSONCfg(vJsn); err != nil {
+				return err
+			}
+			cCfg.Partitions[kJsn] = val
 		}
-		cCfg.Partitions[kJsn] = val
 	}
 	if jsnCfg.Replication_conns != nil {
 		cCfg.ReplicationConns = make([]string, len(*jsnCfg.Replication_conns))
@@ -147,24 +139,30 @@ func (cCfg CacheCfg) AsTransCacheConfig() (tcCfg map[string]*ltcache.CacheConfig
 	return
 }
 
+// AddTmpCaches adds all the temporary caches configuration needed
+func (cCfg *CacheCfg) AddTmpCaches() {
+	cCfg.Partitions[utils.CacheRatingProfilesTmp] = &CacheParamCfg{
+		Limit: -1,
+		TTL:   time.Minute,
+	}
+}
+
 // AsMapInterface returns the config as a map[string]interface{}
-func (cCfg CacheCfg) AsMapInterface(string) interface{} {
+func (cCfg *CacheCfg) AsMapInterface() (mp map[string]interface{}) {
+	mp = make(map[string]interface{})
 	partitions := make(map[string]interface{}, len(cCfg.Partitions))
 	for key, value := range cCfg.Partitions {
 		partitions[key] = value.AsMapInterface()
 	}
-	mp := map[string]interface{}{utils.PartitionsCfg: partitions}
+	mp[utils.PartitionsCfg] = partitions
 	if cCfg.ReplicationConns != nil {
 		mp[utils.ReplicationConnsCfg] = cCfg.ReplicationConns
 	}
 	if cCfg.RemoteConns != nil {
 		mp[utils.RemoteConnsCfg] = cCfg.RemoteConns
 	}
-	return mp
+	return
 }
-
-func (CacheCfg) SName() string              { return CacheJSON }
-func (cCfg CacheCfg) CloneSection() Section { return cCfg.Clone() }
 
 // Clone returns a deep copy of CacheCfg
 func (cCfg CacheCfg) Clone() (cln *CacheCfg) {
@@ -181,50 +179,4 @@ func (cCfg CacheCfg) Clone() (cln *CacheCfg) {
 		cln.RemoteConns = utils.CloneStringSlice(cCfg.RemoteConns)
 	}
 	return
-}
-
-type CacheParamJsonCfg struct {
-	Limit      *int
-	Ttl        *string
-	Static_ttl *bool
-	Precache   *bool
-	Remote     *bool
-	Replicate  *bool
-}
-
-func diffCacheParamsJsonCfg(d map[string]*CacheParamJsonCfg, v2 map[string]*CacheParamCfg) map[string]*CacheParamJsonCfg {
-	if d == nil {
-		d = make(map[string]*CacheParamJsonCfg)
-	}
-	for k, val2 := range v2 {
-		d[k] = &CacheParamJsonCfg{
-			Limit:      utils.IntPointer(val2.Limit),
-			Ttl:        utils.StringPointer(val2.TTL.String()),
-			Static_ttl: utils.BoolPointer(val2.StaticTTL),
-			Precache:   utils.BoolPointer(val2.Precache),
-			Remote:     utils.BoolPointer(val2.Remote),
-			Replicate:  utils.BoolPointer(val2.Replicate),
-		}
-	}
-	return d
-}
-
-type CacheJsonCfg struct {
-	Partitions        map[string]*CacheParamJsonCfg
-	Replication_conns *[]string
-	Remote_conns      *[]string
-}
-
-func diffCacheJsonCfg(d *CacheJsonCfg, v1, v2 *CacheCfg) *CacheJsonCfg {
-	if d == nil {
-		d = new(CacheJsonCfg)
-	}
-	d.Partitions = diffCacheParamsJsonCfg(d.Partitions, v2.Partitions)
-	if !utils.SliceStringEqual(v1.ReplicationConns, v2.ReplicationConns) {
-		d.Replication_conns = &v2.ReplicationConns
-	}
-	if !utils.SliceStringEqual(v1.RemoteConns, v2.RemoteConns) {
-		d.Remote_conns = &v2.RemoteConns
-	}
-	return d
 }

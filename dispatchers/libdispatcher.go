@@ -26,11 +26,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -41,7 +39,6 @@ var (
 func init() {
 	gob.Register(new(LoadMetrics))
 	gob.Register(new(DispatcherRoute))
-	//gob.RegisterName("dispatchers.DispatcherRoute", DispatcherRoute{})
 }
 
 // isInternalDispatcherProfile compares the profile to the internal one
@@ -55,7 +52,7 @@ type DispatcherRoute struct {
 }
 
 // getDispatcherWithCache
-func getDispatcherWithCache(ctx *context.Context, dPrfl *engine.DispatcherProfile, dm *engine.DataManager) (d Dispatcher, err error) {
+func getDispatcherWithCache(dPrfl *engine.DispatcherProfile, dm *engine.DataManager) (d Dispatcher, err error) {
 	tntID := dPrfl.TenantID()
 	if x, ok := engine.Cache.Get(utils.CacheDispatchers,
 		tntID); ok && x != nil {
@@ -63,14 +60,14 @@ func getDispatcherWithCache(ctx *context.Context, dPrfl *engine.DispatcherProfil
 		return
 	}
 	if dPrfl.Hosts == nil { // dispatcher profile was not retrieved but built artificially above, try retrieving
-		if dPrfl, err = dm.GetDispatcherProfile(ctx, dPrfl.Tenant, dPrfl.ID,
+		if dPrfl, err = dm.GetDispatcherProfile(dPrfl.Tenant, dPrfl.ID,
 			true, true, utils.NonTransactional); err != nil {
 			return
 		}
 	}
 	if d, err = newDispatcher(dPrfl); err != nil {
 		return
-	} else if err = engine.Cache.Set(ctx, utils.CacheDispatchers, tntID, d, // cache the built Dispatcher
+	} else if err = engine.Cache.Set(utils.CacheDispatchers, tntID, d, // cache the built Dispatcher
 		nil, true, utils.EmptyString); err != nil {
 		return
 	}
@@ -81,8 +78,7 @@ func getDispatcherWithCache(ctx *context.Context, dPrfl *engine.DispatcherProfil
 // there will be different implementations based on strategy
 type Dispatcher interface {
 	// Dispatch is used to send the method over the connections given
-	Dispatch(dm *engine.DataManager, flts *engine.FilterS, cfg *config.CGRConfig,
-		ctx *context.Context, iPRCCh chan birpc.ClientConnector,
+	Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 		ev utils.DataProvider, tnt, routeID string, dR *DispatcherRoute,
 		serviceMethod string, args interface{}, reply interface{}) (err error)
 }
@@ -112,12 +108,11 @@ func newDispatcher(pfl *engine.DispatcherProfile) (d Dispatcher, err error) {
 }
 
 // getDispatcherHosts returns a list of host IDs matching the event with filters
-func getDispatcherHosts(fltrs *engine.FilterS, ev utils.DataProvider,
-	ctx *context.Context, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
+func getDispatcherHosts(fltrs *engine.FilterS, ev utils.DataProvider, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
 	hostIDs = make(engine.DispatcherHostIDs, 0, len(hosts))
 	for _, host := range hosts {
 		var pass bool
-		if pass, err = fltrs.Pass(ctx, tnt, host.FilterIDs, ev); err != nil {
+		if pass, err = fltrs.Pass(tnt, host.FilterIDs, ev); err != nil {
 			return
 		}
 		if pass {
@@ -130,37 +125,33 @@ func getDispatcherHosts(fltrs *engine.FilterS, ev utils.DataProvider,
 	return
 }
 
-// hostSorted is the sorting interface used by singleDispatcher
+// hostSorter is the sorting interface used by singleDispatcher
 type hostSorter interface {
-	Sort(fltrs *engine.FilterS, ev utils.DataProvider,
-		ctx *context.Context, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error)
+	Sort(fltrs *engine.FilterS, ev utils.DataProvider, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error)
 }
 
-// noSort will just return the matching hosts for the event.
+// noSort will just return the matching hosts for the event
 type noSort struct{}
 
-func (noSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider,
-	ctx *context.Context, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
-	return getDispatcherHosts(fltrs, ev, ctx, tnt, hosts)
+func (noSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
+	return getDispatcherHosts(fltrs, ev, tnt, hosts)
 }
 
 // randomSort will randomize the matching hosts for the event
 type randomSort struct{}
 
-func (randomSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider,
-	ctx *context.Context, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
+func (randomSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
 	rand.Shuffle(len(hosts), func(i, j int) {
 		hosts[i], hosts[j] = hosts[j], hosts[i]
 	})
-	return getDispatcherHosts(fltrs, ev, ctx, tnt, hosts)
+	return getDispatcherHosts(fltrs, ev, tnt, hosts)
 }
 
-// roundRoinSort will sort the matching hosts for the event in a round-robin fashion via nextIDx
+// roundRobinSort will sort the matching hosts for the event in a round-robin fashion via nextIDx
 // which will be increased on each Sort iteration
 type roundRobinSort struct{ nextIDx int }
 
-func (rs *roundRobinSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider,
-	ctx *context.Context, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
+func (rs *roundRobinSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider, tnt string, hosts engine.DispatcherHostProfiles) (hostIDs engine.DispatcherHostIDs, err error) {
 	dh := make(engine.DispatcherHostProfiles, len(hosts))
 	idx := rs.nextIDx
 	for i := 0; i < len(dh); i++ {
@@ -174,12 +165,11 @@ func (rs *roundRobinSort) Sort(fltrs *engine.FilterS, ev utils.DataProvider,
 	if rs.nextIDx >= len(hosts) {
 		rs.nextIDx = 0
 	}
-	return getDispatcherHosts(fltrs, ev, ctx, tnt, dh)
+	return getDispatcherHosts(fltrs, ev, tnt, dh)
 }
 
-// newSingleDispatcher is the constructor for singleDispatcher struct.
-func newSingleDispatcher(hosts engine.DispatcherHostProfiles, params map[string]interface{},
-	tntID string, sorter hostSorter) (_ Dispatcher, err error) {
+// newSingleDispatcher is the constructor for singleDispatcher struct
+func newSingleDispatcher(hosts engine.DispatcherHostProfiles, params map[string]interface{}, tntID string, sorter hostSorter) (_ Dispatcher, err error) {
 	if dflt, has := params[utils.MetaDefaultRatio]; has {
 		var ratio int64
 		if ratio, err = utils.IfaceAsTInt64(dflt); err != nil {
@@ -215,16 +205,15 @@ type singleResultDispatcher struct {
 	hosts  engine.DispatcherHostProfiles
 }
 
-func (sd *singleResultDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS, cfg *config.CGRConfig,
-	ctx *context.Context, iPRCCh chan birpc.ClientConnector,
+func (sd *singleResultDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 	ev utils.DataProvider, tnt, routeID string, dR *DispatcherRoute,
 	serviceMethod string, args interface{}, reply interface{}) (err error) {
 	if dR != nil && dR.HostID != utils.EmptyString { // route to previously discovered route
-		return callDHwithID(ctx, tnt, dR.HostID, routeID, dR, dm,
-			cfg, iPRCCh, serviceMethod, args, reply)
+		return callDHwithID(tnt, dR.HostID, routeID, dR, dm,
+			serviceMethod, args, reply)
 	}
 	var hostIDs []string
-	if hostIDs, err = sd.sorter.Sort(flts, ev, ctx, tnt, sd.hosts); err != nil {
+	if hostIDs, err = sd.sorter.Sort(flts, ev, tnt, sd.hosts); err != nil {
 		return
 	} else if len(hostIDs) == 0 { // in case we do not match any host
 		return utils.ErrDSPHostNotFound
@@ -238,15 +227,15 @@ func (sd *singleResultDispatcher) Dispatch(dm *engine.DataManager, flts *engine.
 				HostID:    hostID,
 			}
 		}
-		if err = callDHwithID(ctx, tnt, hostID, routeID, dRh, dm,
-			cfg, iPRCCh, serviceMethod, args, reply); err == nil ||
+		if err = callDHwithID(tnt, hostID, routeID, dRh, dm,
+			serviceMethod, args, reply); err == nil ||
 			(err != utils.ErrDSPHostNotFound &&
 				!rpcclient.IsNetworkError(err)) { // successful dispatch with normal errors
 			return
 		}
 		if err != nil {
 			// not found or network errors will continue with standard dispatching
-			utils.Logger.Warning(fmt.Sprintf("<%s> error <%s> dispatching to host with identity <%s>",
+			utils.Logger.Warning(fmt.Sprintf("<%s> error <%s> dispatching to host with identity <%q>",
 				utils.DispatcherS, err.Error(), hostID))
 		}
 	}
@@ -260,19 +249,18 @@ type broadcastDispatcher struct {
 	hosts    engine.DispatcherHostProfiles
 }
 
-func (b *broadcastDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS, cfg *config.CGRConfig,
-	ctx *context.Context, iPRCCh chan birpc.ClientConnector,
+func (b *broadcastDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 	ev utils.DataProvider, tnt, routeID string, dR *DispatcherRoute,
 	serviceMethod string, args interface{}, reply interface{}) (err error) {
 	var hostIDs []string
-	if hostIDs, err = getDispatcherHosts(flts, ev, ctx, tnt, b.hosts); err != nil {
+	if hostIDs, err = getDispatcherHosts(flts, ev, tnt, b.hosts); err != nil {
 		return
 	}
 	var hasHosts bool
 	pool := rpcclient.NewRPCPool(b.strategy, config.CgrConfig().GeneralCfg().ReplyTimeout)
 	for _, hostID := range hostIDs {
 		var dH *engine.DispatcherHost
-		if dH, err = dm.GetDispatcherHost(ctx, tnt, hostID, true, true, utils.NonTransactional); err != nil {
+		if dH, err = dm.GetDispatcherHost(tnt, hostID, true, true, utils.NonTransactional); err != nil {
 			if err == utils.ErrDSPHostNotFound {
 				utils.Logger.Warning(fmt.Sprintf("<%s> could not find host with ID %q",
 					utils.DispatcherS, hostID))
@@ -292,8 +280,6 @@ func (b *broadcastDispatcher) Dispatch(dm *engine.DataManager, flts *engine.Filt
 		}
 		pool.AddClient(&lazyDH{
 			dh:      dH,
-			cfg:     cfg,
-			iPRCCh:  iPRCCh,
 			routeID: routeID,
 			dR:      dRh,
 		})
@@ -301,7 +287,7 @@ func (b *broadcastDispatcher) Dispatch(dm *engine.DataManager, flts *engine.Filt
 	if !hasHosts { // in case we do not match any host
 		return utils.ErrDSPHostNotFound
 	}
-	return pool.Call(ctx, serviceMethod, args, reply)
+	return pool.Call(serviceMethod, args, reply)
 }
 
 type loadDispatcher struct {
@@ -311,11 +297,9 @@ type loadDispatcher struct {
 	hosts        engine.DispatcherHostProfiles
 }
 
-func (ld *loadDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS, cfg *config.CGRConfig,
-	ctx *context.Context, iPRCCh chan birpc.ClientConnector,
+func (ld *loadDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 	ev utils.DataProvider, tnt, routeID string, dR *DispatcherRoute,
 	serviceMethod string, args interface{}, reply interface{}) (err error) {
-
 	var lM *LoadMetrics
 	if x, ok := engine.Cache.Get(utils.CacheDispatcherLoads, ld.tntID); ok && x != nil {
 		var canCast bool
@@ -325,11 +309,11 @@ func (ld *loadDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 	} else if lM, err = newLoadMetrics(ld.hosts, ld.defaultRatio); err != nil {
 		return
 	}
-	if dR != nil { // route to previously discovered route
-		lM.incrementLoad(ctx, dR.HostID, ld.tntID)
-		err = callDHwithID(ctx, tnt, dR.HostID, routeID, dR, dm,
-			cfg, iPRCCh, serviceMethod, args, reply)
-		lM.decrementLoad(ctx, dR.HostID, ld.tntID) // call ended
+	if dR != nil && dR.HostID != utils.EmptyString { // route to previously discovered route
+		lM.incrementLoad(dR.HostID, ld.tntID)
+		err = callDHwithID(tnt, dR.HostID, routeID, dR, dm,
+			serviceMethod, args, reply)
+		lM.decrementLoad(dR.HostID, ld.tntID) // call ended
 		if err == nil ||
 			(err != utils.ErrDSPHostNotFound &&
 				!rpcclient.IsNetworkError(err)) { // successful dispatch with normal errors
@@ -340,7 +324,7 @@ func (ld *loadDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 			utils.DispatcherS, err.Error(), dR.HostID))
 	}
 	var hostIDs []string
-	if hostIDs, err = ld.sorter.Sort(flts, ev, ctx, tnt, lM.getHosts(ld.hosts)); err != nil {
+	if hostIDs, err = ld.sorter.Sort(flts, ev, tnt, lM.getHosts(ld.hosts)); err != nil {
 		return
 	} else if len(hostIDs) == 0 { // in case we do not match any host
 		return utils.ErrDSPHostNotFound
@@ -354,10 +338,10 @@ func (ld *loadDispatcher) Dispatch(dm *engine.DataManager, flts *engine.FilterS,
 				HostID:    hostID,
 			}
 		}
-		lM.incrementLoad(ctx, hostID, ld.tntID)
-		err = callDHwithID(ctx, tnt, hostID, routeID, dRh, dm,
-			cfg, iPRCCh, serviceMethod, args, reply)
-		lM.decrementLoad(ctx, hostID, ld.tntID) // call ended
+		lM.incrementLoad(hostID, ld.tntID)
+		err = callDHwithID(tnt, hostID, routeID, dRh, dm,
+			serviceMethod, args, reply)
+		lM.decrementLoad(hostID, ld.tntID) // call ended
 		if err == nil ||
 			(err != utils.ErrDSPHostNotFound &&
 				!rpcclient.IsNetworkError(err)) { // successful dispatch with normal errors
@@ -432,52 +416,46 @@ func (lM *LoadMetrics) getHosts(hosts engine.DispatcherHostProfiles) engine.Disp
 	return hlp.hosts
 }
 
-func (lM *LoadMetrics) incrementLoad(ctx *context.Context, hostID, tntID string) {
+func (lM *LoadMetrics) incrementLoad(hostID, tntID string) {
 	lM.mutex.Lock()
 	lM.HostsLoad[hostID]++
-	engine.Cache.ReplicateSet(ctx, utils.CacheDispatcherLoads, tntID, lM)
+	engine.Cache.ReplicateSet(utils.CacheDispatcherLoads, tntID, lM)
 	lM.mutex.Unlock()
 }
 
-func (lM *LoadMetrics) decrementLoad(ctx *context.Context, hostID, tntID string) {
+func (lM *LoadMetrics) decrementLoad(hostID, tntID string) {
 	lM.mutex.Lock()
 	lM.HostsLoad[hostID]--
-	engine.Cache.ReplicateSet(ctx, utils.CacheDispatcherLoads, tntID, lM)
+	engine.Cache.ReplicateSet(utils.CacheDispatcherLoads, tntID, lM)
 	lM.mutex.Unlock()
 }
 
-// callDHwithID is a wrapper on callDH using ID of the host which the other cannot do due to lazyDH
-// if routeID provided, will also cache once the call is successful
-func callDHwithID(ctx *context.Context, tnt, hostID, routeID string, dR *DispatcherRoute,
-	dm *engine.DataManager, cfg *config.CGRConfig, iPRCCh chan birpc.ClientConnector,
-	serviceMethod string, args, reply interface{}) (err error) {
-	var dH *engine.DispatcherHost
-	if dH, err = dm.GetDispatcherHost(ctx, tnt, hostID, true, true, utils.NonTransactional); err != nil {
-		return
-	}
-	if err = callDH(ctx, dH, routeID, dR, cfg, iPRCCh, serviceMethod, args, reply); err != nil {
-		return
-	}
-	return
+// lazyDH is created for the broadcast strategy so we can make sure host exists during setup phase
+type lazyDH struct {
+	dh      *engine.DispatcherHost
+	routeID string
+	dR      *DispatcherRoute
 }
 
-func callDH(ctx *context.Context,
-	dh *engine.DispatcherHost, routeID string, dR *DispatcherRoute,
-	cfg *config.CGRConfig, iPRCCh chan birpc.ClientConnector,
+func (l *lazyDH) Call(method string, args, reply interface{}) (err error) {
+	return callDH(l.dh, l.routeID, l.dR, method, args, reply)
+}
+
+func callDH(dh *engine.DispatcherHost, routeID string, dR *DispatcherRoute,
 	method string, args, reply interface{}) (err error) {
 	if routeID != utils.EmptyString { // cache the discovered route before dispatching
 		argsCache := &utils.ArgCacheReplicateSet{
 			Tenant: dh.Tenant,
 			APIOpts: map[string]interface{}{
 				utils.MetaSubsys: utils.MetaDispatchers,
-				utils.MetaNodeID: cfg.GeneralCfg().NodeID,
+				utils.MetaNodeID: config.CgrConfig().GeneralCfg().NodeID,
 			},
 			CacheID:  utils.CacheDispatcherRoutes,
 			ItemID:   routeID,
 			Value:    dR,
 			GroupIDs: []string{utils.ConcatenatedKey(utils.CacheDispatcherProfiles, dR.Tenant, dR.ProfileID)},
 		}
-		if err = engine.Cache.SetWithReplicate(ctx, argsCache); err != nil {
+		if err = engine.Cache.SetWithReplicate(argsCache); err != nil {
 			if !rpcclient.IsNetworkError(err) {
 				return
 			}
@@ -486,27 +464,23 @@ func callDH(ctx *context.Context,
 				utils.DispatcherS, err.Error(), dR))
 		}
 	}
-	var conn birpc.ClientConnector
-	if conn, err = dh.GetConn(ctx, cfg, iPRCCh); err != nil {
-		return
-	}
-	if err = conn.Call(ctx, method, args, reply); err != nil {
+	if err = dh.Call(method, args, reply); err != nil {
 		return
 	}
 	return
 }
 
-// lazyDH is created for the broadcast strategy so we can make sure host exists during setup phase
-type lazyDH struct {
-	dh      *engine.DispatcherHost
-	cfg     *config.CGRConfig
-	iPRCCh  chan birpc.ClientConnector
-	routeID string
-	dR      *DispatcherRoute
-}
-
-func (l *lazyDH) Call(ctx *context.Context, method string, args, reply interface{}) (err error) {
-	return callDH(ctx, l.dh, l.routeID, l.dR, l.cfg, l.iPRCCh, method, args, reply)
+// callDHwithID is a wrapper on callDH using ID of the host, will also cache once the call is successful
+func callDHwithID(tnt, hostID, routeID string, dR *DispatcherRoute, dm *engine.DataManager,
+	serviceMethod string, args, reply interface{}) (err error) {
+	var dH *engine.DispatcherHost
+	if dH, err = dm.GetDispatcherHost(tnt, hostID, true, true, utils.NonTransactional); err != nil {
+		return
+	}
+	if err = callDH(dH, routeID, dR, serviceMethod, args, reply); err != nil {
+		return
+	}
+	return
 }
 
 // newInternalHost returns an internal host as needed for internal dispatching

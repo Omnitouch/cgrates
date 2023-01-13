@@ -28,21 +28,19 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/ees"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/ees"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewS3ER return a new s3 event reader
 func NewS3ER(cfg *config.CGRConfig, cfgIdx int,
 	rdrEvents, partialEvents chan *erEvent, rdrErr chan error,
-	fltrS *engine.FilterS, rdrExit chan struct{}, connMgr *engine.ConnManager) (er EventReader, err error) {
+	fltrS *engine.FilterS, rdrExit chan struct{}) (er EventReader, err error) {
 
 	rdr := &S3ER{
-		connMgr:       connMgr,
 		cgrCfg:        cfg,
 		cfgIdx:        cfgIdx,
 		fltrS:         fltrS,
@@ -58,16 +56,16 @@ func NewS3ER(cfg *config.CGRConfig, cfgIdx int,
 		}
 	}
 	rdr.parseOpts(rdr.Config().Opts)
+	rdr.createPoster()
 	return rdr, nil
 }
 
 // S3ER implements EventReader interface for s3 message
 type S3ER struct {
 	// sync.RWMutex
-	cgrCfg  *config.CGRConfig
-	cfgIdx  int // index of config instance within ERsCfg.Readers
-	fltrS   *engine.FilterS
-	connMgr *engine.ConnManager
+	cgrCfg *config.CGRConfig
+	cfgIdx int // index of config instance within ERsCfg.Readers
+	fltrS  *engine.FilterS
 
 	rdrEvents     chan *erEvent // channel to dispatch the events created to
 	partialEvents chan *erEvent // channel to dispatch the partial events created to
@@ -83,6 +81,12 @@ type S3ER struct {
 	session   *session.Session
 
 	poster *ees.S3EE
+}
+
+type s3Client interface {
+	ListObjectsV2Pages(input *s3.ListObjectsV2Input, fn func(*s3.ListObjectsV2Output, bool) bool) error
+	GetObject(input *s3.GetObjectInput) (*s3.GetObjectOutput, error)
+	DeleteObject(input *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error)
 }
 
 // Config returns the curent configuration
@@ -109,8 +113,7 @@ func (rdr *S3ER) Serve() (err error) {
 	if rdr.Config().RunDelay == time.Duration(0) { // 0 disables the automatic read, maybe done per API
 		return
 	}
-
-	go rdr.readLoop() // read until the connection is closed
+	go rdr.readLoop(s3.New(rdr.session)) // read until the connection is closed
 	return
 }
 
@@ -128,7 +131,7 @@ func (rdr *S3ER) processMessage(body []byte) (err error) {
 			rdr.cgrCfg.GeneralCfg().DefaultTimezone),
 		rdr.fltrS, nil) // create an AgentRequest
 	var pass bool
-	if pass, err = rdr.fltrS.Pass(context.TODO(), agReq.Tenant, rdr.Config().Filters,
+	if pass, err = rdr.fltrS.Pass(agReq.Tenant, rdr.Config().Filters,
 		agReq); err != nil || !pass {
 		return
 	}
@@ -166,11 +169,10 @@ func (rdr *S3ER) parseOpts(opts *config.EventReaderOpts) {
 	}
 }
 
-func (rdr *S3ER) readLoop() (err error) {
-	scv := s3.New(rdr.session)
+func (rdr *S3ER) readLoop(scv s3Client) (err error) {
 	var keys []string
 	if err = scv.ListObjectsV2Pages(&s3.ListObjectsV2Input{Bucket: aws.String(rdr.bucket)},
-		func(lovo *s3.ListObjectsV2Output, b bool) bool {
+		func(lovo *s3.ListObjectsV2Output, _ bool) bool {
 			for _, objMeta := range lovo.Contents {
 				if objMeta.Key != nil {
 					keys = append(keys, *objMeta.Key)
@@ -199,10 +201,11 @@ func (rdr *S3ER) createPoster() {
 		processedOpt = new(config.EventExporterOpts)
 	}
 	rdr.poster = ees.NewS3EE(&config.EventExporterCfg{
-		ID:         rdr.Config().ID,
-		ExportPath: utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
-		Attempts:   rdr.cgrCfg.EEsCfg().GetDefaultExporter().Attempts,
-		Opts:       processedOpt,
+		ID:             rdr.Config().ID,
+		ExportPath:     utils.FirstNonEmpty(rdr.Config().ProcessedPath, rdr.Config().SourcePath),
+		Attempts:       rdr.cgrCfg.GeneralCfg().PosterAttempts,
+		Opts:           processedOpt,
+		FailedPostsDir: rdr.cgrCfg.GeneralCfg().FailedPostsDir,
 	}, nil)
 }
 
@@ -215,7 +218,7 @@ func (rdr *S3ER) isClosed() bool {
 	}
 }
 
-func (rdr *S3ER) readMsg(scv *s3.S3, key string) (err error) {
+func (rdr *S3ER) readMsg(scv s3Client, key string) (err error) {
 	if rdr.Config().ConcurrentReqs != -1 {
 		<-rdr.cap // do not try to read if the limit is reached
 		defer func() { rdr.cap <- struct{}{} }()
@@ -249,8 +252,7 @@ func (rdr *S3ER) readMsg(scv *s3.S3, key string) (err error) {
 	}
 
 	if rdr.poster != nil { // post it
-		if err = ees.ExportWithAttempts(context.Background(), rdr.poster, msg, key,
-			rdr.connMgr, rdr.cgrCfg.GeneralCfg().DefaultTenant); err != nil {
+		if err = ees.ExportWithAttempts(rdr.poster, msg, key); err != nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<%s> writing message %s error: %s",
 					utils.ERs, key, err.Error()))

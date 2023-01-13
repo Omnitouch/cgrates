@@ -99,9 +99,8 @@ func TestSafeMapStorageGetKeys(t *testing.T) {
 	expected := []string{"*req.field1", "*req.field2"}
 	reply := ms.GetKeys(false, 0, MetaReq)
 	sort.Strings(reply)
-
 	if !reflect.DeepEqual(reply, expected) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", expected, reply)
+		t.Errorf("Expected %v \n but received \n %v", expected, reply)
 	}
 }
 
@@ -146,18 +145,16 @@ func TestSafeMapStorageClone(t *testing.T) {
 	}
 }
 
-func TestClonedMapStorage(t *testing.T) {
+func TestSafeMapClonedMapStorage(t *testing.T) {
+
 	ms := &SafeMapStorage{
 		MapStorage: MapStorage{
-			"field1": []string{"v1", "v2"},
+			"field1": 2,
+			"field2": 3,
 		},
 	}
-	exp := MapStorage{
-		"field1": []string{"v1", "v2"},
-	}
-	msC := ms.ClonedMapStorage()
-	// fmt.Println(msC)
-	if !reflect.DeepEqual(exp, msC) {
-		t.Errorf("Expected %v \n but received \n %v", exp, msC)
+
+	if reply := ms.ClonedMapStorage(); reflect.DeepEqual(ms, reply) {
+		t.Errorf("Expected %v \n but received \n %v", ms, reply)
 	}
 }

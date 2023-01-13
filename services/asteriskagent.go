@@ -22,21 +22,21 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/engine"
+	"github.com/cgrates/cgrates/engine"
 
-	"github.com/Omnitouch/cgrates/agents"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/agents"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewAsteriskAgent returns the Asterisk Agent
 func NewAsteriskAgent(cfg *config.CGRConfig,
-	connMgr *engine.ConnManager,
+	shdChan *utils.SyncedChan, connMgr *engine.ConnManager,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &AsteriskAgent{
 		cfg:     cfg,
+		shdChan: shdChan,
 		connMgr: connMgr,
 		srvDep:  srvDep,
 	}
@@ -46,6 +46,7 @@ func NewAsteriskAgent(cfg *config.CGRConfig,
 type AsteriskAgent struct {
 	sync.RWMutex
 	cfg      *config.CGRConfig
+	shdChan  *utils.SyncedChan
 	stopChan chan struct{}
 
 	smas    []*agents.AsteriskAgent
@@ -54,7 +55,7 @@ type AsteriskAgent struct {
 }
 
 // Start should handle the sercive start
-func (ast *AsteriskAgent) Start(_ *context.Context, shtDwn context.CancelFunc) (err error) {
+func (ast *AsteriskAgent) Start() (err error) {
 	if ast.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
@@ -62,25 +63,25 @@ func (ast *AsteriskAgent) Start(_ *context.Context, shtDwn context.CancelFunc) (
 	ast.Lock()
 	defer ast.Unlock()
 
-	listenAndServe := func(sma *agents.AsteriskAgent, stopChan chan struct{}) {
+	listenAndServe := func(sma *agents.AsteriskAgent, stopChan chan struct{}, shdChan *utils.SyncedChan) {
 		if err := sma.ListenAndServe(stopChan); err != nil {
 			utils.Logger.Err(fmt.Sprintf("<%s> runtime error: %s!", utils.AsteriskAgent, err))
-			shtDwn()
+			shdChan.CloseOnce()
 		}
 	}
 	ast.stopChan = make(chan struct{})
 	ast.smas = make([]*agents.AsteriskAgent, len(ast.cfg.AsteriskAgentCfg().AsteriskConns))
 	for connIdx := range ast.cfg.AsteriskAgentCfg().AsteriskConns { // Instantiate connections towards asterisk servers
 		ast.smas[connIdx] = agents.NewAsteriskAgent(ast.cfg, connIdx, ast.connMgr)
-		go listenAndServe(ast.smas[connIdx], ast.stopChan)
+		go listenAndServe(ast.smas[connIdx], ast.stopChan, ast.shdChan)
 	}
 	return
 }
 
 // Reload handles the change of config
-func (ast *AsteriskAgent) Reload(ctx *context.Context, shtDwn context.CancelFunc) (err error) {
+func (ast *AsteriskAgent) Reload() (err error) {
 	ast.shutdown()
-	return ast.Start(ctx, shtDwn)
+	return ast.Start()
 }
 
 // Shutdown stops the service

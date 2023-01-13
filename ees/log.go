@@ -22,9 +22,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewLogEE(cfg *config.EventExporterCfg, dc *utils.SafeMapStorage) *LogEE {
@@ -42,15 +41,14 @@ type LogEE struct {
 
 func (vEe *LogEE) Cfg() *config.EventExporterCfg { return vEe.cfg }
 func (vEe *LogEE) Connect() error                { return nil }
-func (vEe *LogEE) ExportEvent(_ *context.Context, mp, _ interface{}) error {
+func (vEe *LogEE) ExportEvent(mp interface{}, _ string) error {
 	utils.Logger.Info(
 		fmt.Sprintf("<%s> <%s> exported: <%s>",
 			utils.EEs, vEe.Cfg().ID, utils.ToJSON(mp)))
 	return nil
 }
-func (vEe *LogEE) Close() error                             { return nil }
-func (vEe *LogEE) GetMetrics() *utils.SafeMapStorage        { return vEe.dc }
-func (vEe *LogEE) ExtraData(ev *utils.CGREvent) interface{} { return nil }
+func (vEe *LogEE) Close() error                      { return nil }
+func (vEe *LogEE) GetMetrics() *utils.SafeMapStorage { return vEe.dc }
 func (vEe *LogEE) PrepareMap(mp *utils.CGREvent) (interface{}, error) {
 	return mp.Event, nil
 }

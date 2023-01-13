@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestNewObjectDP(t *testing.T) {
@@ -53,11 +53,17 @@ func TestFieldAsInterfaceObjDPSliceOfInt(t *testing.T) {
 		obj:   []int{12, 13},
 		cache: make(map[string]interface{}),
 	}
+	objDp2 := &ObjectDP{
+		obj:   []interface{}{},
+		cache: make(map[string]interface{}),
+	}
 	expected := 13
 	if received, err := objDp.FieldAsInterface(object); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(received, expected) {
 		t.Errorf("Expected %+v, received %+v", expected, received)
+	} else if _, err = objDp2.FieldAsInterface([]string{"test"}); err != utils.ErrNotFound {
+		t.Error(err)
 	}
 }
 
@@ -67,7 +73,7 @@ func TestFieldAsInterfaceObjDPInvalidSyntax(t *testing.T) {
 		obj:   []int{12, 13},
 		cache: make(map[string]interface{}),
 	}
-	expected := "strconv.Atoi: parsing \"1]\": invalid syntax"
+	expected := utils.ErrNotFound.Error()
 	if _, err := objDp.FieldAsInterface(object); err == nil || err.Error() != expected {
 		t.Errorf("Expected %+v, received %+v", expected, err)
 	}
@@ -127,6 +133,9 @@ func TestFieldAsInterfaceObjDPValid1(t *testing.T) {
 		t.Error(err)
 	} else if rcv != 1 {
 		t.Errorf("Expected %+v, received %+v", 1, rcv)
+	}
+	if _, err = objDp.FieldAsInterface([]string{"val"}); err == nil || err != utils.ErrNotFound {
+		t.Error(err)
 	}
 }
 
@@ -191,34 +200,5 @@ func TestFieldAsInterfaceObjDPMultiplePaths(t *testing.T) {
 		t.Error(err)
 	} else if rcv != "1" {
 		t.Errorf("Expected %+v, received %+v", "1", rcv)
-	}
-}
-
-func TestFieldAsInterface(t *testing.T) {
-	type aNewStruct struct {
-		Field1 int
-		Field2 int
-	}
-	type pNewStruct struct {
-		Field3 aNewStruct
-		Field4 int
-		Field5 []string
-	}
-	objDp := &ObjectDP{
-		obj: pNewStruct{
-			Field3: aNewStruct{
-				Field1: 2,
-				Field2: 4,
-			},
-			Field4: 2,
-			Field5: []string{""},
-		},
-		cache: map[string]interface{}{
-			"field1": nil,
-		},
-	}
-	_, err := objDp.FieldAsInterface([]string{"field1"})
-	if err == nil || err != utils.ErrNotFound {
-		t.Error(err)
 	}
 }

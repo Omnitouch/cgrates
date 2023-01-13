@@ -23,11 +23,11 @@ package dispatchers
 
 import (
 	"reflect"
-	"sort"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var sTestsDspAttr = []func(t *testing.T){
@@ -211,7 +211,7 @@ func testDspAttrPingFailover2(t *testing.T) {
 }
 
 func testDspAttrGetAttrFailover(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -223,38 +223,29 @@ func testDspAttrGetAttrFailover(t *testing.T) {
 			utils.OptsContext: "simpleauth",
 		},
 	}
-	eAttrPrf := &engine.APIAttributeProfile{
-		Tenant:    ev.Tenant,
+	eAttrPrf := &engine.AttributeProfile{
+		Tenant:    args.Tenant,
 		ID:        "ATTR_1002_SIMPLEAUTH",
-		FilterIDs: []string{"*string:~*req.Account:1002", "*string:~*opts.*context:simpleauth"},
-		Attributes: []*engine.ExternalAttribute{{
-			FilterIDs: []string{},
-			Path:      utils.MetaReq + utils.NestingSep + "Password",
-			Type:      utils.MetaConstant,
-			Value:     "CGRateS.org",
-		}},
-		Blockers: utils.DynamicBlockers{
+		FilterIDs: []string{"*string:~*req.Account:1002"},
+		Contexts:  []string{"simpleauth"},
+		Attributes: []*engine.Attribute{
 			{
-				Blocker: false,
+				FilterIDs: []string{},
+				Path:      utils.MetaReq + utils.NestingSep + "Password",
+				Type:      utils.MetaConstant,
+				Value:     config.NewRSRParsersMustCompile("CGRateS.org", utils.InfieldSep),
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20.0,
 	}
+	eAttrPrf.Compile()
 	if *encoding == utils.MetaGOB {
 		eAttrPrf.Attributes[0].FilterIDs = nil // empty slice are nil in gob
 	}
 
 	eRply := &engine.AttrSProcessEventReply{
-		AlteredFields: []*engine.FieldsAltered{
-			{
-				MatchedProfileID: "cgrates.org:ATTR_1002_SIMPLEAUTH",
-				Fields:           []string{"*req.Password"},
-			},
-		},
+		MatchedProfiles: []string{"cgrates.org:ATTR_1002_SIMPLEAUTH"},
+		AlteredFields:   []string{"*req.Password"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "testAttributeSGetAttributeForEvent",
@@ -266,41 +257,40 @@ func testDspAttrGetAttrFailover(t *testing.T) {
 			APIOpts: map[string]interface{}{
 				utils.OptsAPIKey:  "attr12345",
 				utils.OptsContext: "simpleauth",
-				utils.MetaNodeID:  "DispatcherS1",
-				utils.MetaSubsys:  "*dispatchers",
 			},
 		},
 	}
 
-	var attrReply engine.APIAttributeProfile
+	var attrReply *engine.AttributeProfile
 	var rplyEv engine.AttrSProcessEventReply
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		args, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 
 	if err := dispEngine.RPC.Call(utils.AttributeSv1ProcessEvent,
-		ev, &rplyEv); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		args, &rplyEv); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
-	} else if reflect.DeepEqual(*eRply, &rplyEv) {
+	} else if reflect.DeepEqual(eRply, &rplyEv) {
 		t.Errorf("Expecting: %s, received: %s",
-			utils.ToJSON(*eRply), utils.ToJSON(rplyEv))
+			utils.ToJSON(eRply), utils.ToJSON(rplyEv))
 	}
 
 	allEngine2.stopEngine(t)
 
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err != nil {
+		args, &attrReply); err != nil {
 		t.Error(err)
 	}
-	sort.Strings(eAttrPrf.FilterIDs)
-	sort.Strings(attrReply.FilterIDs)
-	if !reflect.DeepEqual(*eAttrPrf, attrReply) {
-		t.Errorf("Expecting: %s, received: %s", utils.ToJSON(*eAttrPrf), utils.ToJSON(attrReply))
+	if attrReply != nil {
+		attrReply.Compile()
+	}
+	if !reflect.DeepEqual(eAttrPrf, attrReply) {
+		t.Errorf("Expecting: %s, received: %s", utils.ToJSON(eAttrPrf), utils.ToJSON(attrReply))
 	}
 
 	if err := dispEngine.RPC.Call(utils.AttributeSv1ProcessEvent,
-		ev, &rplyEv); err != nil {
+		args, &rplyEv); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eRply, &rplyEv) {
 		t.Errorf("Expecting: %s, received: %s",
@@ -333,7 +323,7 @@ func testDspAttrPing(t *testing.T) {
 }
 
 func testDspAttrTestMissingArgDispatcher(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -345,13 +335,13 @@ func testDspAttrTestMissingArgDispatcher(t *testing.T) {
 	}
 	var attrReply *engine.AttributeProfile
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.NewErrMandatoryIeMissing(utils.APIKey).Error() {
+		args, &attrReply); err == nil || err.Error() != utils.NewErrMandatoryIeMissing(utils.APIKey).Error() {
 		t.Errorf("Error:%v rply=%s", err, utils.ToJSON(attrReply))
 	}
 }
 
 func testDspAttrTestMissingApiKey(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -363,13 +353,13 @@ func testDspAttrTestMissingApiKey(t *testing.T) {
 	}
 	var attrReply *engine.AttributeProfile
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.NewErrMandatoryIeMissing(utils.APIKey).Error() {
+		args, &attrReply); err == nil || err.Error() != utils.NewErrMandatoryIeMissing(utils.APIKey).Error() {
 		t.Errorf("Error:%v rply=%s", err, utils.ToJSON(attrReply))
 	}
 }
 
 func testDspAttrTestUnknownApiKey(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -381,13 +371,13 @@ func testDspAttrTestUnknownApiKey(t *testing.T) {
 	}
 	var attrReply *engine.AttributeProfile
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.ErrUnknownApiKey.Error() {
+		args, &attrReply); err == nil || err.Error() != utils.ErrUnknownApiKey.Error() {
 		t.Error(err)
 	}
 }
 
 func testDspAttrTestAuthKey(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -400,13 +390,13 @@ func testDspAttrTestAuthKey(t *testing.T) {
 	}
 	var attrReply *engine.AttributeProfile
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.ErrUnauthorizedApi.Error() {
+		args, &attrReply); err == nil || err.Error() != utils.ErrUnauthorizedApi.Error() {
 		t.Error(err)
 	}
 }
 
 func testDspAttrTestAuthKey2(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -417,48 +407,41 @@ func testDspAttrTestAuthKey2(t *testing.T) {
 			utils.OptsContext: "simpleauth",
 		},
 	}
-	eAttrPrf := &engine.APIAttributeProfile{
-		Tenant:    ev.Tenant,
+	eAttrPrf := &engine.AttributeProfile{
+		Tenant:    args.Tenant,
 		ID:        "ATTR_1001_SIMPLEAUTH",
-		FilterIDs: []string{"*string:~*req.Account:1001", "*string:~*opts.*context:simpleauth"},
-		Attributes: []*engine.ExternalAttribute{{
-			FilterIDs: []string{},
-			Path:      utils.MetaReq + utils.NestingSep + "Password",
-			Type:      utils.MetaConstant,
-			Value:     "CGRateS.org",
-		}},
-		Blockers: utils.DynamicBlockers{
+		FilterIDs: []string{"*string:~*req.Account:1001"},
+		Contexts:  []string{"simpleauth"},
+		Attributes: []*engine.Attribute{
 			{
-				Blocker: false,
+				FilterIDs: []string{},
+				Path:      utils.MetaReq + utils.NestingSep + "Password",
+				Type:      utils.MetaConstant,
+				Value:     config.NewRSRParsersMustCompile("CGRateS.org", utils.InfieldSep),
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20.0,
 	}
+	eAttrPrf.Compile()
 	if *encoding == utils.MetaGOB {
 		eAttrPrf.Attributes[0].FilterIDs = nil // empty slice are nil in gob
 	}
-	var attrReply engine.APIAttributeProfile
+	var attrReply *engine.AttributeProfile
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err != nil {
+		args, &attrReply); err != nil {
 		t.Error(err)
 	}
-	sort.Strings(eAttrPrf.FilterIDs)
-	sort.Strings(attrReply.FilterIDs)
-	if !reflect.DeepEqual(*eAttrPrf, attrReply) {
-		t.Errorf("Expecting: %s, received: %s", utils.ToJSON(*eAttrPrf), utils.ToJSON(attrReply))
+	if attrReply != nil {
+		attrReply.Compile()
+	}
+	if !reflect.DeepEqual(eAttrPrf, attrReply) {
+		t.Errorf("Expecting: %s, received: %s", utils.ToJSON(eAttrPrf), utils.ToJSON(attrReply))
 	}
 
 	eRply := &engine.AttrSProcessEventReply{
-		AlteredFields: []*engine.FieldsAltered{
-			{
-				MatchedProfileID: "cgrates.org:ATTR_1001_SIMPLEAUTH",
-				Fields:           []string{"*req.Password"},
-			},
-		},
+		MatchedProfiles: []string{"cgrates.org:ATTR_1001_SIMPLEAUTH"},
+		AlteredFields:   []string{"*req.Password"},
+
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "testAttributeSGetAttributeForEvent",
@@ -469,15 +452,13 @@ func testDspAttrTestAuthKey2(t *testing.T) {
 			APIOpts: map[string]interface{}{
 				utils.OptsAPIKey:  "attr12345",
 				utils.OptsContext: "simpleauth",
-				utils.MetaNodeID:  "DispatcherS1",
-				utils.MetaSubsys:  "*dispatchers",
 			},
 		},
 	}
 
 	var rplyEv engine.AttrSProcessEventReply
 	if err := dispEngine.RPC.Call(utils.AttributeSv1ProcessEvent,
-		ev, &rplyEv); err != nil {
+		args, &rplyEv); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eRply, &rplyEv) {
 		t.Errorf("Expecting: %s, received: %s",
@@ -486,7 +467,7 @@ func testDspAttrTestAuthKey2(t *testing.T) {
 }
 
 func testDspAttrTestAuthKey3(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -500,13 +481,13 @@ func testDspAttrTestAuthKey3(t *testing.T) {
 	}
 	var attrReply *engine.AttributeProfile
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		args, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 }
 
 func testDspAttrGetAttrRoundRobin(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -518,38 +499,29 @@ func testDspAttrGetAttrRoundRobin(t *testing.T) {
 			utils.OptsContext: "simpleauth",
 		},
 	}
-	eAttrPrf := &engine.APIAttributeProfile{
-		Tenant:    ev.Tenant,
+	eAttrPrf := &engine.AttributeProfile{
+		Tenant:    args.Tenant,
 		ID:        "ATTR_1002_SIMPLEAUTH",
-		FilterIDs: []string{"*string:~*req.Account:1002", "*string:~*opts.*context:simpleauth"},
-		Attributes: []*engine.ExternalAttribute{{
-			FilterIDs: []string{},
-			Path:      utils.MetaReq + utils.NestingSep + "Password",
-			Type:      utils.MetaConstant,
-			Value:     "CGRateS.org",
-		}},
-		Blockers: utils.DynamicBlockers{
+		FilterIDs: []string{"*string:~*req.Account:1002"},
+		Contexts:  []string{"simpleauth"},
+		Attributes: []*engine.Attribute{
 			{
-				Blocker: false,
+				FilterIDs: []string{},
+				Path:      utils.MetaReq + utils.NestingSep + "Password",
+				Type:      utils.MetaConstant,
+				Value:     config.NewRSRParsersMustCompile("CGRateS.org", utils.InfieldSep),
 			},
 		},
-		Weights: utils.DynamicWeights{
-			{
-				Weight: 20,
-			},
-		},
+		Weight: 20.0,
 	}
+	eAttrPrf.Compile()
 	if *encoding == utils.MetaGOB {
 		eAttrPrf.Attributes[0].FilterIDs = nil // empty slice are nil in gob
 	}
 
 	eRply := &engine.AttrSProcessEventReply{
-		AlteredFields: []*engine.FieldsAltered{
-			{
-				MatchedProfileID: "cgrates.org:ATTR_1002_SIMPLEAUTH",
-				Fields:           []string{"*req.Password"},
-			},
-		},
+		MatchedProfiles: []string{"cgrates.org:ATTR_1002_SIMPLEAUTH"},
+		AlteredFields:   []string{"*req.Password"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "testAttributeSGetAttributeForEvent",
@@ -559,46 +531,44 @@ func testDspAttrGetAttrRoundRobin(t *testing.T) {
 				"Password":         "CGRateS.org",
 			},
 			APIOpts: map[string]interface{}{
-				utils.OptsAPIKey:  "attr12345",
-				utils.OptsContext: "simpleauth",
-				utils.MetaNodeID:  "DispatcherS1",
-				utils.MetaSubsys:  "*dispatchers",
+				utils.OptsAPIKey: "attr12345",
 			},
 		},
 	}
 
-	var attrReply engine.APIAttributeProfile
+	var attrReply *engine.AttributeProfile
 	var rplyEv engine.AttrSProcessEventReply
 	// To ALL2
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		args, &attrReply); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
 
 	// To ALL
 	if err := dispEngine.RPC.Call(utils.AttributeSv1GetAttributeForEvent,
-		ev, &attrReply); err != nil {
+		args, &attrReply); err != nil {
 		t.Error(err)
 	}
-
-	sort.Strings(eAttrPrf.FilterIDs)
-	sort.Strings(attrReply.FilterIDs)
-	if !reflect.DeepEqual(*eAttrPrf, attrReply) {
-		t.Errorf("Expecting: %s, received: %s", utils.ToJSON(*eAttrPrf), utils.ToJSON(attrReply))
+	if attrReply != nil {
+		attrReply.Compile()
+	}
+	if !reflect.DeepEqual(eAttrPrf, attrReply) {
+		t.Errorf("Expecting: %s, received: %s", utils.ToJSON(eAttrPrf), utils.ToJSON(attrReply))
 	}
 
 	// To ALL2
 	if err := dispEngine.RPC.Call(utils.AttributeSv1ProcessEvent,
-		ev, &rplyEv); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		args, &rplyEv); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	} else if reflect.DeepEqual(eRply, &rplyEv) {
 		t.Errorf("Expecting: %s, received: %s",
 			utils.ToJSON(eRply), utils.ToJSON(rplyEv))
 	}
 
+	eRply.APIOpts[utils.OptsContext] = "simpleauth"
 	// To ALL
 	if err := dispEngine.RPC.Call(utils.AttributeSv1ProcessEvent,
-		ev, &rplyEv); err != nil {
+		args, &rplyEv); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eRply, &rplyEv) {
 		t.Errorf("Expecting: %s, received: %s",
@@ -607,7 +577,7 @@ func testDspAttrGetAttrRoundRobin(t *testing.T) {
 }
 
 func testDspAttrGetAttrInternal(t *testing.T) {
-	ev := &utils.CGREvent{
+	args := &utils.CGREvent{
 		Tenant: "cgrates.org",
 		ID:     "testAttributeSGetAttributeForEvent",
 		Event: map[string]interface{}{
@@ -621,12 +591,8 @@ func testDspAttrGetAttrInternal(t *testing.T) {
 	}
 
 	eRply := &engine.AttrSProcessEventReply{
-		AlteredFields: []*engine.FieldsAltered{
-			{
-				MatchedProfileID: "cgrates.org:ATTR_1003_SIMPLEAUTH",
-				Fields:           []string{"*req.Password"},
-			},
-		},
+		MatchedProfiles: []string{"cgrates.org:ATTR_1003_SIMPLEAUTH"},
+		AlteredFields:   []string{"*req.Password"},
 		CGREvent: &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     "testAttributeSGetAttributeForEvent",
@@ -638,15 +604,13 @@ func testDspAttrGetAttrInternal(t *testing.T) {
 			APIOpts: map[string]interface{}{
 				utils.OptsAPIKey:  "attr12345",
 				utils.OptsContext: "simpleauth",
-				utils.MetaNodeID:  "DispatcherS1",
-				utils.MetaSubsys:  "*dispatchers",
 			},
 		},
 	}
 
 	var rplyEv engine.AttrSProcessEventReply
 	if err := dispEngine.RPC.Call(utils.AttributeSv1ProcessEvent,
-		ev, &rplyEv); err != nil {
+		args, &rplyEv); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eRply, &rplyEv) {
 		t.Errorf("Expecting: %s, received: %s",

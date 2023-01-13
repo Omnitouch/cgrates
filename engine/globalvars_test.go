@@ -18,35 +18,32 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"net/http"
 	"testing"
 )
 
-func TestGlobalvarsSetHTTPPstrTransport(t *testing.T) {
-	tmpTransport := httpPstrTransport
-	defer func() {
-		SetHTTPPstrTransport(tmpTransport)
-	}()
-	newTransport := &http.Transport{
-		DisableKeepAlives: true,
+func TestSetHTTPPstrTransport(t *testing.T) {
+	tmp := httpPstrTransport
+	SetHTTPPstrTransport(nil)
+	if httpPstrTransport != nil {
+		t.Error("Expected the transport to be nil", httpPstrTransport)
 	}
-	SetHTTPPstrTransport(newTransport)
-	if httpPstrTransport != newTransport {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", newTransport, httpPstrTransport)
-	}
+	httpPstrTransport = tmp
 }
 
-func TestGlobalvarsGetHTTPPstrTransport(t *testing.T) {
-	tmpTransport := httpPstrTransport
-	defer func() {
-		SetHTTPPstrTransport(tmpTransport)
-	}()
-	newTransport := &http.Transport{
-		DisableKeepAlives: true,
+func TestSetCdrStorage(t *testing.T) {
+	tmp := cdrStorage
+	SetCdrStorage(nil)
+	if cdrStorage != nil {
+		t.Error("Expected the cdrStorage to be nil", cdrStorage)
 	}
-	SetHTTPPstrTransport(newTransport)
-	getTransport := GetHTTPPstrTransport()
-	if getTransport != newTransport {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", newTransport, getTransport)
+	cdrStorage = tmp
+}
+
+func TestSetDataStorage(t *testing.T) {
+	tmp := dm
+	SetDataStorage(nil)
+	if dm != nil {
+		t.Error("Expected the dm to be nil", dm)
 	}
+	dm = tmp
 }

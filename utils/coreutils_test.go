@@ -20,12 +20,15 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/cgrates/rpcclient"
 )
 
 func TestGetStartTime(t *testing.T) {
@@ -330,7 +333,7 @@ func TestParseTimeDetectLayout(t *testing.T) {
 		t.Errorf("Unexpected time parsed: %v, expecting: %v", fsTm, expectedTime)
 	}
 	fsTmstampStr = "9999999999999999"
-	_, err = ParseTimeDetectLayout(fsTmstampStr, "")
+	fsTm, err = ParseTimeDetectLayout(fsTmstampStr, "")
 	if err == nil {
 		t.Error("Error expected: 'value out of range', received nil")
 	}
@@ -343,7 +346,7 @@ func TestParseTimeDetectLayout(t *testing.T) {
 		t.Errorf("Unexpected time parsed: %v, expecting: %v", fsTm, expectedTime)
 	}
 	fsTmstampStr = "9999999999999999999"
-	_, err = ParseTimeDetectLayout(fsTmstampStr, "")
+	fsTm, err = ParseTimeDetectLayout(fsTmstampStr, "")
 	if err == nil {
 		t.Error("Error expected: 'value out of range', received nil")
 	}
@@ -542,13 +545,46 @@ func TestParseTimeDetectLayout(t *testing.T) {
 	if err != nil || !date.UTC().Equal(expected.UTC()) {
 		t.Errorf("Expecting: %v, received: %v", expected.UTC(), date.UTC())
 	}
-	expErr := "unknown time zone 65"
-	if date, err := ParseTimeDetectLayout("2014-11-25T00:00:00+01:00", "65"); err == nil || err.Error() != expErr {
-		t.Errorf("Expecting error %v, received: %v", expErr, err)
-	} else if date != nilTime {
-		t.Errorf("Expecting %+v, received: %+v", nilTime, date)
-	}
 
+}
+
+func TestRoundDuration(t *testing.T) {
+	minute := time.Minute
+	result := RoundDuration(minute, 0)
+	expected := 0 * time.Second
+	if result != expected {
+		t.Errorf("Error rounding to minute1: expected %v was %v", expected, result)
+	}
+	result = RoundDuration(time.Second, time.Second+500*time.Millisecond)
+	expected = 2 * time.Second
+	if result != expected {
+		t.Errorf("Error rounding to minute1: expected %v was %v", expected, result)
+	}
+	result = RoundDuration(minute, time.Second)
+	expected = minute
+	if result != expected {
+		t.Errorf("Error rounding to minute2: expected %v was %v", expected, result)
+	}
+	result = RoundDuration(minute, 5*time.Second)
+	expected = minute
+	if result != expected {
+		t.Errorf("Error rounding to minute3: expected %v was %v", expected, result)
+	}
+	result = RoundDuration(minute, minute)
+	expected = minute
+	if result != expected {
+		t.Errorf("Error rounding to minute4: expected %v was %v", expected, result)
+	}
+	result = RoundDuration(minute, 90*time.Second)
+	expected = 120 * time.Second
+	if result != expected {
+		t.Errorf("Error rounding to minute5: expected %v was %v", expected, result)
+	}
+	result = RoundDuration(60, 120)
+	expected = 120.0
+	if result != expected {
+		t.Errorf("Error rounding to minute5: expected %v was %v", expected, result)
+	}
 }
 
 func TestRoundStatDuration(t *testing.T) {
@@ -616,6 +652,19 @@ func TestSplitSuffix(t *testing.T) {
 	}
 }
 
+func TestCopyHour(t *testing.T) {
+	var src, dst, eOut time.Time
+	if rcv := CopyHour(src, dst); !reflect.DeepEqual(rcv, eOut) {
+		t.Errorf("Expecting: %+v, received: %+v", eOut, rcv)
+	}
+	src = time.Date(2020, time.April, 18, 20, 10, 11, 01, time.UTC)
+	dst = time.Date(2019, time.May, 25, 23, 0, 4, 0, time.UTC)
+	eOut = time.Date(2019, time.May, 25, 20, 10, 11, 01, time.UTC)
+	if rcv := CopyHour(src, dst); !reflect.DeepEqual(rcv, eOut) {
+		t.Errorf("Expecting: %+v, received: %+v", eOut, rcv)
+	}
+}
+
 func TestParseDurationWithSecs(t *testing.T) {
 	var durExpected time.Duration
 	if rcv, err := ParseDurationWithSecs(""); err != nil {
@@ -680,6 +729,54 @@ func TestParseDurationWithNanosecs(t *testing.T) {
 	}
 }
 
+func TestMinDuration(t *testing.T) {
+	d1, _ := time.ParseDuration("1m")
+	d2, _ := time.ParseDuration("59s")
+	minD1 := MinDuration(d1, d2)
+	minD2 := MinDuration(d2, d1)
+	if minD1 != d2 || minD2 != d2 {
+		t.Error("Error getting min duration: ", minD1, minD2)
+	}
+}
+
+func TestParseZeroRatingSubject(t *testing.T) {
+	subj := []string{"", "*zero1024", "*zero1s", "*zero5m", "*zero10h"}
+	dur := []time.Duration{time.Second, 1024,
+		time.Second, 5 * time.Minute, 10 * time.Hour}
+	dfltRatingSubject := map[string]string{
+		MetaAny:   "*zero1ns",
+		MetaVoice: "*zero1s",
+	}
+	for i, s := range subj {
+		if i == 0 {
+			if d, err := ParseZeroRatingSubject(MetaVoice, s, dfltRatingSubject, false); err == nil {
+				t.Error("Error parsing rating subject: ", s, d, err)
+			}
+
+		} else {
+			if d, err := ParseZeroRatingSubject(MetaVoice, s, dfltRatingSubject, true); err != nil || d != dur[i] {
+				t.Error("Error parsing rating subject: ", s, d, err)
+			}
+
+		}
+		if d, err := ParseZeroRatingSubject(MetaData, EmptyString, dfltRatingSubject, true); err != nil || d != time.Nanosecond {
+			t.Error("Error parsing rating subject: ", EmptyString, d, err)
+		}
+		if d, err := ParseZeroRatingSubject(MetaSMS, EmptyString, dfltRatingSubject, true); err != nil || d != time.Nanosecond {
+			t.Error("Error parsing rating subject: ", EmptyString, d, err)
+		}
+		if d, err := ParseZeroRatingSubject(MetaMMS, EmptyString, dfltRatingSubject, true); err != nil || d != time.Nanosecond {
+			t.Error("Error parsing rating subject: ", EmptyString, d, err)
+		}
+		if d, err := ParseZeroRatingSubject(MetaMonetary, EmptyString, dfltRatingSubject, true); err != nil || d != time.Nanosecond {
+			t.Error("Error parsing rating subject: ", EmptyString, d, err)
+		}
+		expecting := "malformed rating subject: test"
+		if _, err := ParseZeroRatingSubject(MetaMonetary, "test", dfltRatingSubject, true); err == nil || err.Error() != expecting {
+			t.Errorf("Expecting: %+v, received: %+v ", expecting, err)
+		}
+	}
+}
 func TestConcatenatedKey(t *testing.T) {
 	if key := ConcatenatedKey("a"); key != "a" {
 		t.Error("Unexpected key value received: ", key)
@@ -697,6 +794,24 @@ func TestSplitConcatenatedKey(t *testing.T) {
 	eOut := []string{"test1", "test2", "test3"}
 	if rcv := SplitConcatenatedKey(key); !reflect.DeepEqual(eOut, rcv) {
 		t.Errorf("Expecting: %+v, received: %+v", eOut, rcv)
+	}
+}
+
+func TestInfieldJoin(t *testing.T) {
+	if rcv := InfieldJoin(""); rcv != "" {
+		t.Errorf("Expecting: empty string, received: %+v", ToJSON(rcv))
+	}
+	key := "test1;test2;test3"
+
+	eOut := "test1;test2;test3"
+	if rcv := InfieldJoin(key); !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting: %+v, received: %+v", ToJSON(eOut), ToJSON(rcv))
+	}
+	key2 := "test10;test12"
+
+	eOut = "test1;test2;test3;test10;test12"
+	if rcv := InfieldJoin(key, key2); !reflect.DeepEqual(eOut, rcv) {
+		t.Errorf("Expecting: %+v, received: %+v", ToJSON(eOut), ToJSON(rcv))
 	}
 }
 
@@ -929,34 +1044,74 @@ func TestMaskSuffix(t *testing.T) {
 	}
 }
 
+func TestTimeIs0h(t *testing.T) {
+	t1, err := time.Parse(time.RFC3339, "2012-11-01T22:08:41+00:00")
+	if err != nil {
+		t.Error("time parsing error")
+	}
+	result := TimeIs0h(t1)
+	if result != false {
+		t.Error("time is 0 when it's supposed to be", t1)
+	}
+}
+
 func TestToJSON(t *testing.T) {
 	if outNilObj := ToJSON(nil); outNilObj != "null" {
 		t.Errorf("Expecting null, received: <%q>", outNilObj)
 	}
 }
 
+func TestClone(t *testing.T) {
+	a := 15
+	var b int
+	err := Clone(a, &b)
+	if err != nil {
+		t.Error("Cloning failed")
+	}
+	if b != a {
+		t.Error("Expected:", a, ", received:", b)
+	}
+	// Clone from an interface
+	c := "mystr"
+	ifaceC := interface{}(c)
+	clndIface := reflect.Indirect(reflect.New(reflect.TypeOf(ifaceC))).Interface().(string)
+	if err := Clone(ifaceC, &clndIface); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(ifaceC, clndIface) {
+		t.Errorf("Expecting: %+v, received: %+v", ifaceC, clndIface)
+	}
+
+	if err := Clone(math.NaN, nil); err == nil {
+		t.Error("Expected error")
+	}
+}
+
 func TestFib(t *testing.T) {
 	fib := Fib()
 	if tmp := fib(); tmp != 1 {
-		t.Error("Expecting: 1, received ", tmp)
+		t.Error("Expecting: 1s, received ", tmp)
 	}
 	if tmp := fib(); tmp != 1 {
-		t.Error("Expecting: 1, received ", tmp)
+		t.Error("Expecting: 1s, received ", tmp)
 	}
 	if tmp := fib(); tmp != 2 {
-		t.Error("Expecting: 2, received ", tmp)
+		t.Error("Expecting: 2s, received ", tmp)
 	}
 	if tmp := fib(); tmp != 3 {
-		t.Error("Expecting: 3, received ", tmp)
+		t.Error("Expecting: 3s, received ", tmp)
 	}
 	if tmp := fib(); tmp != 5 {
-		t.Error("Expecting: 5, received ", tmp)
+		t.Error("Expecting: 5s, received ", tmp)
 	}
 }
 
 func TestStringPointer(t *testing.T) {
+	result := StringPointer("*zero")
+	if *result != EmptyString {
+		t.Errorf("Expecting: `%+q`, received `%+q`", EmptyString, *result)
+	}
 	str := "test_string"
-	result := StringPointer(str)
+	result = StringPointer(str)
 	expected := &str
 	if *result != *expected {
 		t.Errorf("Expecting: %+v, received: %+v", &str, result)
@@ -998,6 +1153,15 @@ func TestBoolPointer(t *testing.T) {
 	}
 }
 
+func TestStringMapPointer(t *testing.T) {
+	t1 := map[string]bool{"cgr1": true, "cgr2": true}
+	expected := &t1
+	result := StringMapPointer(t1)
+	if *result == nil {
+		t.Error("Expected:", expected, ", received: nil")
+	}
+}
+
 func TestMapStringStringPointer(t *testing.T) {
 	mp := map[string]string{"string1": "string2"}
 	result := MapStringStringPointer(mp)
@@ -1028,6 +1192,16 @@ func TestDurationPointer(t *testing.T) {
 	}
 }
 
+func TestSliceStringPointer(t *testing.T) {
+	sl := []string{"test"}
+	result := SliceStringPointer(sl)
+	exp := result
+	if !reflect.DeepEqual(result, exp) {
+		t.Errorf("Expeced:%+q but received %+q", exp, result)
+	}
+
+}
+
 func TestToIJSON(t *testing.T) {
 	str := "string"
 	received := ToIJSON(str)
@@ -1037,10 +1211,38 @@ func TestToIJSON(t *testing.T) {
 	}
 }
 
+func TestLen(t *testing.T) {
+	t1 := Int64Slice{2112443, 414241412, 41231241}
+	result := t1.Len()
+	expected := 3
+	if result != expected {
+		t.Error("Expected:", expected, ", received:", result)
+	}
+}
+
+func TestSwap(t *testing.T) {
+	t1 := Int64Slice{414241412, 41231241}
+	t1.Swap(0, 1)
+	var expected int64 = 414241412
+	if t1[1] != expected {
+		t.Error("Expected:", expected, ", received:", t1[1])
+	}
+}
+
+func TestLess(t *testing.T) {
+	t1 := Int64Slice{414241412, 41231241}
+	expected := false
+	if t1.Less(0, 1) != expected {
+		t.Error("Expected:", expected, ", received:", t1.Less(1, 2))
+	}
+}
+
 func TestGetCGRVersion(t *testing.T) {
 	GitLastLog = `commit 73014daa0c1d7edcb532d5fe600b8a20d588cdf8
 Author: DanB <danb@cgrates.org>
-Date:   Fri Dec 30 19:48:09 2016 +0100
+AuthorDate:   Fri Dec 30 19:48:09 2016 +0100
+Commit: DanB <danb@cgrates.org>
+CommitDate:   Fri Dec 30 19:48:09 2016 +0100
 
 	Fixes for db driver to avoid returning new values in case of errors
 `
@@ -1070,14 +1272,14 @@ Date:   Fri Dec 30 19:48:09 2016 +0100
 	} else if vers != expVers {
 		t.Errorf("Expecting: <%s>, received: <%s>", expVers, vers)
 	}
-	GitLastLog = `Date: : :
+	GitLastLog = `CommitDate: : :
 `
 	if vers, err := GetCGRVersion(); err == nil || err.Error() != "Building version - cannot split commit date" {
 		t.Error(err)
 	} else if vers != expVers {
 		t.Errorf("Expecting: <%s>, received: <%s>", expVers, vers)
 	}
-	GitLastLog = `Date: wrong format
+	GitLastLog = `CommitDate: wrong format
 `
 	if vers, err := GetCGRVersion(); err == nil || err.Error() != `Building version - error: <parsing time "wrong format" as "Mon Jan 2 15:04:05 2006 -0700": cannot parse "wrong format" as "Mon"> compiling commit date` {
 		t.Error(err)
@@ -1095,6 +1297,38 @@ Date:   Fri Dec 30 19:48:09 2016 +0100
 	} else if vers != expVers {
 		t.Errorf("Expecting: <%s>, received: <%s>", expVers, vers)
 	}
+
+	GitLastLog = `commit c34d5753cf5ae15a3b7ae9bea30a4900fb8191a0
+Author:     nickolasdaniel <nickolas.filip@itsyscom.com>
+AuthorDate: Wed Feb 2 16:54:59 2022 +0200
+Commit:     nickolasdaniel <nickolas.filip@itsyscom.com>
+CommitDate: Wed Feb 2 16:54:59 2022 +0200
+	
+		Changed the build script and GetCGRVersion() to get the CommitDate instead of AuthorDate
+`
+	expVers = "CGRateS@" + Version
+	eVers = expVers + "-20220202145459-c34d5753cf5a"
+	if vers, err := GetCGRVersion(); err != nil {
+		t.Error(err)
+	} else if vers != eVers {
+		t.Errorf("Expecting: <%s>, received: <%s>", eVers, vers)
+	}
+
+	GitLastLog = `commit c34d5753cf5ae15a3b7ae9bea30a4900fb8191a0
+Author:     nickolasdaniel <nickolas.filip@itsyscom.com>
+AuthorDate: Thu Jun 5 12:14:49 2026 +0800
+Commit:     nickolasdaniel <nickolas.filip@itsyscom.com>
+CommitDate: Wed Feb 2 16:54:59 2022 +0200
+	
+		Changed the build script and GetCGRVersion() to get the CommitDate instead of AuthorDate
+`
+	expVers = "CGRateS@" + Version
+	eVers = expVers + "-20220202145459-c34d5753cf5a"
+	if vers, err := GetCGRVersion(); err != nil {
+		t.Error(err)
+	} else if vers != eVers {
+		t.Errorf("Expecting: <%s>, received: <%s>", eVers, vers)
+	}
 }
 
 func TestNewTenantID(t *testing.T) {
@@ -1108,11 +1342,6 @@ func TestNewTenantID(t *testing.T) {
 	}
 	eOut = &TenantID{Tenant: "cgrates.org", ID: "id"}
 	if rcv := NewTenantID("cgrates.org:id"); *rcv != *eOut {
-		t.Errorf("Expecting: %+v, received %+v", eOut, rcv)
-	}
-
-	eOut = &TenantID{Tenant: "cgrates.org", ID: "id"}
-	if rcv := NewTenantID("cgrates.org:id"); !eOut.Equal(rcv) {
 		t.Errorf("Expecting: %+v, received %+v", eOut, rcv)
 	}
 }
@@ -1140,6 +1369,102 @@ func TestTenantIDWithCache(t *testing.T) {
 	eOut = "cgrates.org:id"
 	if rcv := tID.TenantID.TenantID(); rcv != eOut {
 		t.Errorf("Expecting: %q, received: %q", eOut, rcv)
+	}
+}
+
+type TestRPC struct {
+}
+
+func (tRPC *TestRPC) V1Copy(args *string, reply *string) error {
+	*reply = *args
+	return nil
+}
+
+func (tRPC *TestRPC) V1Error(args *string, reply *string) error {
+	return errors.New("V1_err_test")
+}
+
+func (tRPC *TestRPC) Call(args interface{}, reply interface{}) error {
+	return nil
+}
+
+func (tRPC *TestRPC) V1Error2(args interface{}, reply interface{}) (int, error) {
+	return 0, nil
+}
+
+func (tRPC *TestRPC) V1Error3(args interface{}, reply interface{}) int {
+	return 0
+}
+
+func TestRPCCall(t *testing.T) {
+	if err := RPCCall("wrong", "test", nil, nil); err == nil || err != rpcclient.ErrUnsupporteServiceMethod {
+		t.Errorf("Expecting: %+v, received: %+v", rpcclient.ErrUnsupporteServiceMethod, err)
+	}
+	var reply string
+	if err := RPCCall(&TestRPC{}, "TestRPCV1.Copy", StringPointer("test"), &reply); err != nil {
+		t.Errorf("Expecting: <nil>, received: %+v", err)
+	}
+	if err := RPCCall(&TestRPC{}, "TestRPCV1.Error", StringPointer("test"), &reply); err == nil || err.Error() != "V1_err_test" {
+		t.Errorf("Expecting: <V1_err_test>, received: <%+v>", err)
+	}
+	if err := RPCCall(&TestRPC{}, "TestRPCV1.Unexist", StringPointer("test"), &reply); err == nil || err != rpcclient.ErrUnsupporteServiceMethod {
+		t.Errorf("Expecting: %+v, received: %+v", rpcclient.ErrUnsupporteServiceMethod, err)
+	}
+
+	if err := RPCCall(&TestRPC{}, "TestRPCV1.Error2", StringPointer("test"), &reply); err == nil || err != ErrServerError {
+		t.Errorf("Expecting: %+v, received: %+v", ErrServerError, err)
+	}
+
+	if err := RPCCall(&TestRPC{}, "TestRPCV1.Error3", StringPointer("test"), &reply); err == nil || err != ErrServerError {
+		t.Errorf("Expecting: %+v, received: %+v", ErrServerError, err)
+	}
+}
+
+type TestRPC2 struct {
+}
+
+func (tRPC *TestRPC2) Copy(args *string, reply *string) error {
+	*reply = *args
+	return nil
+}
+
+func (tRPC *TestRPC2) Error(args *string, reply *string) error {
+	return errors.New("V1_err_test")
+}
+
+func (tRPC *TestRPC2) Call(args interface{}, reply interface{}) error {
+	return nil
+}
+
+func (tRPC *TestRPC2) Error2(args interface{}, reply interface{}) (int, error) {
+	return 0, nil
+}
+
+func (tRPC *TestRPC2) Error3(args interface{}, reply interface{}) int {
+	return 0
+}
+
+func TestRPCAPICall(t *testing.T) {
+	if err := APIerRPCCall("wrong", "test", nil, nil); err == nil || err != rpcclient.ErrUnsupporteServiceMethod {
+		t.Errorf("Expecting: %+v, received: %+v", rpcclient.ErrUnsupporteServiceMethod, err)
+	}
+	var reply string
+	if err := APIerRPCCall(&TestRPC2{}, "TestRPC2.Copy", StringPointer("test"), &reply); err != nil {
+		t.Errorf("Expecting: <nil>, received: %+v", err)
+	}
+	if err := APIerRPCCall(&TestRPC2{}, "TestRPC2.Error", StringPointer("test"), &reply); err == nil || err.Error() != "V1_err_test" {
+		t.Errorf("Expecting: <V1_err_test>, received: <%+v>", err)
+	}
+	if err := APIerRPCCall(&TestRPC2{}, "TestRPC2.Unexist", StringPointer("test"), &reply); err == nil || err != rpcclient.ErrUnsupporteServiceMethod {
+		t.Errorf("Expecting: %+v, received: %+v", rpcclient.ErrUnsupporteServiceMethod, err)
+	}
+
+	if err := APIerRPCCall(&TestRPC2{}, "TestRPC2.Error2", StringPointer("test"), &reply); err == nil || err != ErrServerError {
+		t.Errorf("Expecting: %+v, received: %+v", ErrServerError, err)
+	}
+
+	if err := APIerRPCCall(&TestRPC2{}, "TestRPC2.Error3", StringPointer("test"), &reply); err == nil || err != ErrServerError {
+		t.Errorf("Expecting: %+v, received: %+v", ErrServerError, err)
 	}
 }
 
@@ -1223,6 +1548,13 @@ func TestGetUrlRawArguments(t *testing.T) {
 	}
 }
 
+func TestWarnExecTime(t *testing.T) {
+	//without Log
+	WarnExecTime(time.Now(), "MyTestFunc", time.Second)
+	//With Log
+	WarnExecTime(time.Now(), "MyTestFunc", time.Nanosecond)
+}
+
 func TestCastRPCErr(t *testing.T) {
 	err := errors.New("test")
 	if rcv := CastRPCErr(err); rcv != err {
@@ -1289,8 +1621,8 @@ func TestGetPathIndex(t *testing.T) {
 func TestIsURL(t *testing.T) {
 	urls := map[string]bool{
 		"/etc/usr/":                           false,
-		"https://github.com/Omnitouch/cgrates/": true,
-		"http://github.com/Omnitouch/cgrates/i": true,
+		"https://github.com/cgrates/cgrates/": true,
+		"http://github.com/cgrates/cgrates/i": true,
 	}
 	for url, expected := range urls {
 		if rply := IsURL(url); rply != expected {
@@ -1381,6 +1713,96 @@ func TestMonthlyEstimated(t *testing.T) {
 	}
 }
 
+type server struct{}
+
+type client struct{}
+
+func (c client) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	err = ErrExists
+	return
+}
+
+func (srv *server) BiRPCv1ValidMethod(cl rpcclient.ClientConnector, args interface{}, req interface{}) error {
+	return nil
+}
+
+func (srv *server) BiRPCv1MultipleParams(cl rpcclient.ClientConnector, args interface{}, req interface{}) (int, error) {
+	return 1, nil
+}
+
+func (srv *server) BiRPCv1NoErrorReturn(cl rpcclient.ClientConnector, args interface{}, req interface{}) int {
+	return 1
+}
+
+func (srv *server) BiRPCv1FinalError(cl rpcclient.ClientConnector, args interface{}, req interface{}) (err error) {
+	err = ErrExists
+	return
+}
+
+func TestCoreUtilsBiRPCCall(t *testing.T) {
+	srv := new(server)
+	var clnt rpcclient.ClientConnector
+	var args int
+	var reply *int
+	serviceMethod := "testv1.v2.v3"
+
+	expected := rpcclient.ErrUnsupporteServiceMethod
+	err := BiRPCCall(srv, clnt, serviceMethod, args, reply)
+
+	if err == nil || err != expected {
+		t.Errorf("\nExpected: <%v>, \nReceived: <%v>", expected, err)
+	}
+
+	serviceMethod = "testv1.fail"
+
+	err = BiRPCCall(srv, clnt, serviceMethod, args, reply)
+
+	if err == nil || err != expected {
+		t.Errorf("\nExpected: <%v>, \nReceived: <%v>", expected, err)
+	}
+
+	serviceMethod = "Testv1.ValidMethod"
+
+	err = BiRPCCall(srv, clnt, serviceMethod, args, reply)
+
+	if err != nil {
+		t.Errorf("\nExpected: <%v>, \nReceived: <%v>", nil, err)
+	}
+
+	serviceMethod = "Testv1.MultipleParams"
+
+	expected = ErrServerError
+	err = BiRPCCall(srv, clnt, serviceMethod, args, reply)
+
+	if err == nil || err != expected {
+		t.Errorf("\nExpected: <%v>, \nReceived: <%v>", expected, err)
+	}
+
+	serviceMethod = "Testv1.NoErrorReturn"
+	err = BiRPCCall(srv, clnt, serviceMethod, args, reply)
+
+	expected = ErrServerError
+	if err == nil || err != expected {
+		t.Errorf("\nExpected: <%v>, \nReceived: <%v>", expected, err)
+	}
+
+	serviceMethod = "Testv1.FinalError"
+	err = BiRPCCall(srv, clnt, serviceMethod, args, reply)
+
+	expected = ErrExists
+	if err == nil || err != expected {
+		t.Errorf("\nExpected: <%v>, \nReceived: <%v>", expected, err)
+	}
+
+	var c client
+	c.Call("testString", args, reply)
+
+	err = BiRPCCall(srv, c, serviceMethod, args, reply)
+	if err == nil || err != expected {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", expected, err)
+	}
+}
+
 func TestCoreUtilsGenerateDBItemOpts(t *testing.T) {
 	apiKey := "testKey1"
 	routeID := "testKey2"
@@ -1390,7 +1812,7 @@ func TestCoreUtilsGenerateDBItemOpts(t *testing.T) {
 	expected := map[string]interface{}{
 		OptsAPIKey:    apiKey,
 		OptsRouteID:   routeID,
-		MetaCache:     cache,
+		CacheOpt:      cache,
 		RemoteHostOpt: rmtHost,
 	}
 	received := GenerateDBItemOpts(apiKey, routeID, cache, rmtHost)
@@ -1405,11 +1827,18 @@ func TestCoreUtilsGenerateDBItemOpts(t *testing.T) {
 	}
 }
 
-func TestSliceStringPointer(t *testing.T) {
-	sliceTest := []string{"ELEMENT_1", "ELEMENT_2"}
-	rcv := SliceStringPointer(sliceTest)
-	if fmt.Sprintf("%T", rcv) != "*[]string" {
-		t.Error("Could not convert to pointer slice")
+func TestTenantIDConcatenated(t *testing.T) {
+	tnt := &TenantID{
+		Tenant: "cgrates.org",
+		ID:     "1",
+	}
+	tntOpts := &TenantIDWithAPIOpts{
+		TenantID: tnt,
+	}
+	rcvExpect := "cgrates.org:1"
+	concTnt := tntOpts.TenantIDConcatenated()
+	if concTnt != rcvExpect {
+		t.Errorf("\nExpected: <%+v>, \nReceived: <%+v>", rcvExpect, concTnt)
 	}
 }
 
@@ -1449,228 +1878,6 @@ func TestCoreUtilsSplitPath(t *testing.T) {
 	}
 }
 
-func TestFibDuration(t *testing.T) {
-	// fib := Fib()
-	// if tmp := fib(); tmp != 1 {
-	// 	t.Error("Expecting: 1, received ", tmp)
-	// }
-	// if tmp := fib(); tmp != 1 {
-	// 	t.Error("Expecting: 1, received ", tmp)
-	// }
-	// if tmp := fib(); tmp != 2 {
-	// 	t.Error("Expecting: 2, received ", tmp)
-	// }
-	// if tmp := fib(); tmp != 3 {
-	// 	t.Error("Expecting: 3, received ", tmp)
-	// }
-	// if tmp := fib(); tmp != 5 {
-	// 	t.Error("Expecting: 5, received ", tmp)
-	// }
-	if tmp := FibDuration(1*time.Second, 0); tmp() != 1*time.Second {
-		t.Error("Expecting: 1, received ", tmp())
-	}
-	if tmp := FibDuration(1*time.Second, 0); tmp() != 1*time.Second {
-		t.Error("Expecting: 1, received ", tmp())
-	}
-	if tmp := FibDuration(2*time.Second, 0); tmp() != 2*time.Second {
-		t.Error("Expecting: 2, received ", tmp())
-	}
-	if tmp := FibDuration(2*time.Second, 0); tmp() != 2*time.Second {
-		t.Error("Expecting: 2, received ", tmp())
-	}
-	if tmp := FibDuration(2*time.Second, 0); tmp() != 2*time.Second {
-		t.Error("Expecting: 2, received ", tmp())
-	}
-	if tmp := FibDuration(2*time.Second, 4); tmp() != 4*time.Nanosecond {
-		t.Error("Expecting: 4, received ", tmp())
-	}
-}
-
-func TestCoreUtilsPaginate(t *testing.T) {
-	var in []string
-
-	if rcv, err := Paginate(in, 2, 2, 6); err != nil {
-		t.Error(err)
-	} else if rcv != nil {
-		t.Error("expected nil return")
-	}
-
-	in = []string{"FLTR_1", "FLTR_2", "FLTR_3", "FLTR_4", "FLTR_5", "FLTR_6", "FLTR_7",
-		"FLTR_8", "FLTR_9", "FLTR_10", "FLTR_11", "FLTR_12", "FLTR_13", "FLTR_14",
-		"FLTR_15", "FLTR_16", "FLTR_17", "FLTR_18", "FLTR_19", "FLTR_20"}
-
-	exp := []string{"FLTR_7", "FLTR_8"}
-	if rcv, err := Paginate(in, 2, 6, 9); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
-	}
-
-	exp = []string{"FLTR_19", "FLTR_20"}
-	if rcv, err := Paginate(in, 0, 18, 50); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
-	}
-
-	if rcv, err := Paginate(in, 0, 0, 50); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(rcv, in) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", in, rcv)
-	}
-
-	experr := `SERVER_ERROR: maximum number of items exceeded`
-	if _, err := Paginate(in, 0, 0, 19); err == nil || err.Error() != experr {
-		t.Error(err)
-	}
-
-	if rcv, err := Paginate(in, 25, 18, 50); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rcv)
-	}
-
-	var expOut []string
-	if rcv, err := Paginate(in, 2, 22, 50); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(rcv, expOut) {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", expOut, rcv)
-	}
-
-	if _, err := Paginate(in, 2, 4, 5); err == nil || err.Error() != experr {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
-	}
-
-	if _, err := Paginate(in, 0, 18, 19); err == nil || err.Error() != experr {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
-	}
-
-}
-
-type pag struct {
-	limit    int
-	offset   int
-	maxItems int
-}
-
-func testName(p pag) string {
-	return fmt.Sprintf("limit:<%d>, offset:<%d>, maxItems:<%d>", p.limit, p.offset, p.maxItems)
-}
-
-func TestCoreUtilsPagination(t *testing.T) {
-	in := []string{"FLTR_1", "FLTR_2", "FLTR_3", "FLTR_4", "FLTR_5"}
-	experr := "SERVER_ERROR: maximum number of items exceeded"
-	cases := []struct {
-		p   pag
-		err string
-	}{
-		{pag{limit: 0, offset: 0, maxItems: 1}, experr},
-		{pag{limit: 1, offset: 0, maxItems: 1}, ""},
-		{pag{limit: 0, offset: 1, maxItems: 1}, experr},
-		{pag{limit: 0, offset: 0, maxItems: 2}, experr},
-		{pag{limit: 0, offset: 1, maxItems: 2}, experr},
-		{pag{limit: 0, offset: 2, maxItems: 2}, experr},
-		{pag{limit: 1, offset: 0, maxItems: 2}, ""},
-		{pag{limit: 1, offset: 1, maxItems: 2}, ""},
-		{pag{limit: 2, offset: 0, maxItems: 2}, ""},
-		{pag{limit: 0, offset: 0, maxItems: 3}, experr},
-		{pag{limit: 0, offset: 1, maxItems: 3}, experr},
-		{pag{limit: 0, offset: 2, maxItems: 3}, experr},
-		{pag{limit: 0, offset: 3, maxItems: 3}, experr},
-		{pag{limit: 1, offset: 0, maxItems: 3}, ""},
-		{pag{limit: 1, offset: 1, maxItems: 3}, ""},
-		{pag{limit: 1, offset: 2, maxItems: 3}, ""},
-		{pag{limit: 2, offset: 0, maxItems: 3}, ""},
-		{pag{limit: 2, offset: 1, maxItems: 3}, ""},
-		{pag{limit: 3, offset: 0, maxItems: 3}, ""},
-		{pag{limit: 0, offset: 0, maxItems: 4}, experr},
-		{pag{limit: 0, offset: 1, maxItems: 4}, experr},
-		{pag{limit: 0, offset: 2, maxItems: 4}, experr},
-		{pag{limit: 0, offset: 3, maxItems: 4}, experr},
-		{pag{limit: 0, offset: 4, maxItems: 4}, experr},
-		{pag{limit: 1, offset: 0, maxItems: 4}, ""},
-		{pag{limit: 1, offset: 1, maxItems: 4}, ""},
-		{pag{limit: 1, offset: 2, maxItems: 4}, ""},
-		{pag{limit: 1, offset: 3, maxItems: 4}, ""},
-		{pag{limit: 2, offset: 0, maxItems: 4}, ""},
-		{pag{limit: 2, offset: 1, maxItems: 4}, ""},
-		{pag{limit: 2, offset: 2, maxItems: 4}, ""},
-		{pag{limit: 3, offset: 0, maxItems: 4}, ""},
-		{pag{limit: 3, offset: 1, maxItems: 4}, ""},
-		{pag{limit: 4, offset: 0, maxItems: 4}, ""},
-		{pag{limit: 0, offset: 0, maxItems: 5}, ""},
-		{pag{limit: 0, offset: 1, maxItems: 5}, ""},
-		{pag{limit: 0, offset: 2, maxItems: 5}, ""},
-		{pag{limit: 0, offset: 3, maxItems: 5}, ""},
-		{pag{limit: 0, offset: 4, maxItems: 5}, ""},
-		{pag{limit: 0, offset: 5, maxItems: 5}, ""},
-		{pag{limit: 1, offset: 0, maxItems: 5}, ""},
-		{pag{limit: 1, offset: 1, maxItems: 5}, ""},
-		{pag{limit: 1, offset: 2, maxItems: 5}, ""},
-		{pag{limit: 1, offset: 3, maxItems: 5}, ""},
-		{pag{limit: 1, offset: 4, maxItems: 5}, ""},
-		{pag{limit: 2, offset: 0, maxItems: 5}, ""},
-		{pag{limit: 2, offset: 1, maxItems: 5}, ""},
-		{pag{limit: 2, offset: 2, maxItems: 5}, ""},
-		{pag{limit: 2, offset: 3, maxItems: 5}, ""},
-		{pag{limit: 3, offset: 0, maxItems: 5}, ""},
-		{pag{limit: 3, offset: 1, maxItems: 5}, ""},
-		{pag{limit: 3, offset: 2, maxItems: 5}, ""},
-		{pag{limit: 4, offset: 0, maxItems: 5}, ""},
-		{pag{limit: 4, offset: 1, maxItems: 5}, ""},
-		{pag{limit: 5, offset: 0, maxItems: 5}, ""},
-	}
-
-	for _, c := range cases {
-		t.Run(testName(c.p), func(t *testing.T) {
-			_, err := Paginate(in, c.p.limit, c.p.offset, c.p.maxItems)
-			if err != nil {
-				if c.err == "" {
-					t.Error("did not expect error")
-				}
-			} else if c.err != "" {
-				t.Errorf("expected error")
-			}
-		})
-	}
-}
-
-func TestAPITPDataGetPaginateOpts(t *testing.T) {
-	opts := map[string]interface{}{
-		PageLimitOpt:    1.3,
-		PageOffsetOpt:   4,
-		PageMaxItemsOpt: "5",
-	}
-
-	if limit, offset, maxItems, err := GetPaginateOpts(opts); err != nil {
-		t.Error(err)
-	} else if limit != 1 {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", 1, limit)
-	} else if offset != 4 {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", 4, offset)
-	} else if maxItems != 5 {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", 5, maxItems)
-	}
-
-	opts[PageMaxItemsOpt] = false
-	experr := `cannot convert field<bool>: false to int`
-	if _, _, _, err := GetPaginateOpts(opts); err == nil || err.Error() != experr {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
-	}
-
-	opts[PageOffsetOpt] = struct{}{}
-	experr = `cannot convert field<struct {}>: {} to int`
-	if _, _, _, err := GetPaginateOpts(opts); err == nil || err.Error() != experr {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
-	}
-
-	opts[PageLimitOpt] = true
-	experr = `cannot convert field<bool>: true to int`
-	if _, _, _, err := GetPaginateOpts(opts); err == nil || err.Error() != experr {
-		t.Errorf("expected: <%+v>, \nreceived: <%+v>", experr, err)
-	}
-}
-
 func TestCoreUtilsFibSeqNrOverflow(t *testing.T) {
 	fib := Fib()
 	for i := 0; i < 92; i++ { // the 93rd fibonacci number in the sequence would normally overflow
@@ -1694,46 +1901,8 @@ func TestCoreUtilsFibDurationSeqNrOverflow(t *testing.T) {
 			t.Errorf("expected: <%+v>, \nreceived: <%+v>", AbsoluteMaxDuration, rcv)
 		}
 	}
-}
-
-func TestUnzip(t *testing.T) {
-
-	if rcv := Unzip("Test error for unzip", "Test dest"); rcv == nil {
-		t.Error(rcv)
-	}
-
-}
-
-func TestToUnescapedJSON(t *testing.T) {
-	type testStruc struct {
-		testInt int
-	}
-
-	a := func(a int, b int) int {
-		return a + b
-	}
-
-	r := testStruc{testInt: 999}
-	expErr := "json: unsupported type: func(int, int) int"
-	if _, err := ToUnescapedJSON(a); err == nil || err.Error() != expErr {
-		t.Errorf("Expected: <%+v>, received: <%+v>", expErr, err)
-	}
-	exp := []byte{123, 125, 10}
-	if rcv, err := ToUnescapedJSON(r); err != nil {
-		t.Error(err)
-		t.Errorf("Expected %v, received %v", ToJSON(exp), ToJSON(rcv))
-	}
-}
-
-func TestCloneOfObject(t *testing.T) {
-
-	pgnt := Paginator{
-		MaxItems: IntPointer(7),
-	}
-	exp := Paginator{
-		MaxItems: IntPointer(7),
-	}
-	if rcv := pgnt.Clone(); !reflect.DeepEqual(exp, rcv) {
-		t.Errorf("Expected %v, received %v", ToJSON(exp), ToJSON(rcv))
+	fib = FibDuration(time.Second, 6)
+	if rcv := fib(); rcv != 6 {
+		t.Errorf("expected: <%+v>, \nreceived: <%+v>", AbsoluteMaxDuration, rcv)
 	}
 }

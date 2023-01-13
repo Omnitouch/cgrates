@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	kafka "github.com/segmentio/kafka-go"
 )
 
@@ -49,7 +49,7 @@ func TestKafkaER(t *testing.T) {
 	"readers": [
 		{
 			"id": "kafka",										// identifier of the EventReader profile
-			"type": "*kafkaJSONMap",							// reader type <*fileCSV>
+			"type": "*kafka_json_map",							// reader type <*file_csv>
 			"run_delay":  "-1",									// sleep interval in seconds between consecutive runs, -1 to use automation via inotify or 0 to disable running all together
 			"concurrent_requests": 1024,						// maximum simultaneous requests/files to process, 0 for unlimited
 			"source_path": "localhost:9092",					// read data from this path
@@ -58,7 +58,7 @@ func TestKafkaER(t *testing.T) {
 			"filters": [],										// limit parsing based on the filters
 			"flags": [],										// flags to influence the event processing
 			"fields":[									// import fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
-				{"tag": "OriginID", "type": "*composed", "value": "~*req.OriginID", "path": "*cgreq.OriginID"},
+				{"tag": "CGRID", "type": "*composed", "value": "~*req.CGRID", "path": "*cgreq.CGRID"},
 			],
 		},
 	],
@@ -75,7 +75,7 @@ func TestKafkaER(t *testing.T) {
 	rdrExit = make(chan struct{}, 1)
 
 	if rdr, err = NewKafkaER(cfg, 1, rdrEvents, make(chan *erEvent, 1),
-		rdrErr, new(engine.FilterS), rdrExit, nil); err != nil {
+		rdrErr, new(engine.FilterS), rdrExit); err != nil {
 		t.Fatal(err)
 	}
 	w := kafka.NewWriter(kafka.WriterConfig{
@@ -84,11 +84,11 @@ func TestKafkaER(t *testing.T) {
 		WriteTimeout: 5 * time.Second,
 		ReadTimeout:  5 * time.Second,
 	})
-	randomOriginID := utils.UUIDSha1Prefix()
+	randomCGRID := utils.UUIDSha1Prefix()
 	w.WriteMessages(context.Background(),
 		kafka.Message{
-			Key:   []byte(randomOriginID), // for the momment we do not proccess the key
-			Value: []byte(fmt.Sprintf(`{"OriginID": "%s"}`, randomOriginID)),
+			Key:   []byte(randomCGRID), // for the momment we do not proccess the key
+			Value: []byte(fmt.Sprintf(`{"CGRID": "%s"}`, randomCGRID)),
 		},
 	)
 
@@ -105,8 +105,9 @@ func TestKafkaER(t *testing.T) {
 		expected := &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     ev.cgrEvent.ID,
+			Time:   ev.cgrEvent.Time,
 			Event: map[string]interface{}{
-				"OriginID": randomOriginID,
+				"CGRID": randomCGRID,
 			},
 			APIOpts: map[string]interface{}{},
 		}

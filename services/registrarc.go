@@ -21,13 +21,12 @@ package services
 import (
 	"sync"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/registrarc"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/registrarc"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // NewRegistrarCService returns the Dispatcher Service
@@ -58,7 +57,7 @@ type RegistrarCService struct {
 }
 
 // Start should handle the sercive start
-func (dspS *RegistrarCService) Start(*context.Context, context.CancelFunc) (err error) {
+func (dspS *RegistrarCService) Start() (err error) {
 	if dspS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
@@ -75,7 +74,7 @@ func (dspS *RegistrarCService) Start(*context.Context, context.CancelFunc) (err 
 }
 
 // Reload handles the change of config
-func (dspS *RegistrarCService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (dspS *RegistrarCService) Reload() (err error) {
 	dspS.rldChan <- struct{}{}
 	return // for the momment nothing to reload
 }

@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/rpc/jsonrpc"
 	"os"
 	"path"
 	"reflect"
@@ -38,13 +39,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/cgrates/birpc/jsonrpc"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cenkalti/rpc2"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 	"golang.org/x/net/websocket"
 )
 
@@ -52,12 +51,34 @@ var (
 	server *Server
 
 	sTestsServer = []func(t *testing.T){
+		testServeGOBPortFail,
 		testServeJSON,
+		testServeJSONFail,
+		testServeJSONFailRpcEnabled,
+		testServeGOB,
+		testServeHHTPPass,
+		testServeHHTPPassUseBasicAuth,
+		testServeHHTPEnableHttp,
 		testServeHHTPFail,
+		testServeHHTPFailEnableRpc,
+		testServeBiJSON,
+		testServeBiJSONEmptyBiRPCServer,
 		testServeBiJSONInvalidPort,
+		testServeBiGoB,
+		testServeBiGoBEmptyBiRPCServer,
 		testServeBiGoBInvalidPort,
+		testServeGOBTLS,
+		testServeJSONTls,
+		testServeCodecTLSErr,
 		testLoadTLSConfigErr,
+		testServeHTTPTLS,
+		testServeHTTPTLSWithBasicAuth,
+		testServeHTTPTLSError,
+		testServeHTTPTLSHttpNotEnabled,
 		testHandleRequest,
+		testBiRPCRegisterName,
+		testAcceptBiRPC,
+		testAcceptBiRPCError,
 		testRpcRegisterActions,
 		testWebSocket,
 	}
@@ -71,13 +92,13 @@ func TestServerIT(t *testing.T) {
 	}
 }
 
-type mockRegister struct{}
+type mockRegister string
 
-func (*mockRegister) ForTest(ctx *context.Context, args, reply interface{}) error {
+func (x *mockRegister) ForTest(method *rpc2.Client, args *interface{}, reply *interface{}) error {
 	return nil
 }
 
-func (*mockRegister) Ping(ctx *context.Context, in string, out *string) error {
+func (robj *mockRegister) Ping(in string, out *string) error {
 	*out = utils.Pong
 	return nil
 }
@@ -95,14 +116,16 @@ func (mkL *mockListener) Accept() (net.Conn, error) {
 	return nil, utils.ErrDisconnected
 }
 
-func (mkL *mockListener) Close() error { return mkL.p1.Close() }
-func (*mockListener) Addr() net.Addr   { return nil }
+func (mkL *mockListener) Close() error   { return mkL.p1.Close() }
+func (mkL *mockListener) Addr() net.Addr { return nil }
 
 func testHandleRequest(t *testing.T) {
-	cfgDflt := config.NewDefaultCGRConfig()
-	cfgDflt.CoreSCfg().CapsStatsInterval = 1
+	cfg := config.NewDefaultCGRConfig()
+	cfg.CoreSCfg().CapsStatsInterval = 1
 	caps := engine.NewCaps(0, utils.MetaBusy)
 	rcv := NewServer(caps)
+
+	rcv.rpcEnabled = true
 
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:2080/json_rpc",
 		bytes.NewBuffer([]byte("1")))
@@ -115,19 +138,20 @@ func testHandleRequest(t *testing.T) {
 	if w.Body.String() != utils.EmptyString {
 		t.Errorf("Expected: %q ,received: %q", utils.EmptyString, w.Body.String())
 	}
+
+	rcv.StopBiRPC()
 }
 
 func testServeJSON(t *testing.T) {
 	caps := engine.NewCaps(100, utils.MetaBusy)
 	server = NewServer(caps)
 	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
 
 	buff := new(bytes.Buffer)
 	log.SetOutput(buff)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	defer server.Stop()
-	go server.ServeJSON(ctx, cancel, ":88845")
+
+	go server.ServeJSON(":88845", shdChan)
 	runtime.Gosched()
 
 	expected := "listen tcp: address 88845: invalid port"
@@ -135,50 +159,218 @@ func testServeJSON(t *testing.T) {
 		t.Errorf("Expected %+v, received %+v", expected, rcv)
 	}
 
+	shdChan.CloseOnce()
+	server.StopBiRPC()
 }
 
-func testServeHHTPFail(t *testing.T) {
-	cfgDflt := config.NewDefaultCGRConfig()
+func testServeJSONFail(t *testing.T) {
 	caps := engine.NewCaps(100, utils.MetaBusy)
 	server = NewServer(caps)
 	server.RpcRegister(new(mockRegister))
-	var closed bool
-	ch := make(chan struct{})
-	go server.ServeHTTP(func() {
-		closed = true
-		close(ch)
-	},
-		"invalid_port_format",
-		cfgDflt.HTTPCfg().JsonRPCURL,
-		cfgDflt.HTTPCfg().WSURL,
-		cfgDflt.HTTPCfg().PrometheusURL,
-		cfgDflt.HTTPCfg().UseBasicAuth,
-		cfgDflt.HTTPCfg().AuthUsers,
-	)
+	shdChan := utils.NewSyncedChan()
+
+	p1, p2 := net.Pipe()
+	l := &mockListener{
+		p1: p1,
+	}
+	go server.accept(l, utils.JSONCaps, newCapsJSONCodec, shdChan)
+	runtime.Gosched()
+	_, ok := <-shdChan.Done()
+	if ok {
+		t.Errorf("Expected to be close")
+	}
+	p2.Close()
+	runtime.Gosched()
+
+	shdChan.CloseOnce()
+	server.StopBiRPC()
+}
+
+func testServeJSONFailRpcEnabled(t *testing.T) {
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+	server.rpcEnabled = false
+
+	go server.serveCodec(":9999", utils.JSONCaps, newCapsJSONCodec, shdChan)
+	runtime.Gosched()
+
+	shdChan.CloseOnce()
+	server.StopBiRPC()
+}
+
+func testServeGOB(t *testing.T) {
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeGOB(":27697", shdChan)
+	runtime.Gosched()
+
+	shdChan.CloseOnce()
+	server.StopBiRPC()
+}
+
+func testServeHHTPPass(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeHTTP(
+		":6555",
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
 
 	runtime.Gosched()
 
-	select {
-	case <-ch:
-		if !closed {
-			t.Errorf("Expected to be close")
-		}
-	case <-time.After(50 * time.Millisecond):
-		t.Fatal("Timeout")
-	}
-	server.Stop()
+	shdChan.CloseOnce()
+	server.StopBiRPC()
 }
 
-func testServeBiJSONInvalidPort(t *testing.T) {
-	cfgDflt := config.NewDefaultCGRConfig()
+func testServeHHTPPassUseBasicAuth(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeHTTP(
+		":56432",
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		!cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+
+	runtime.Gosched()
+
+	shdChan.CloseOnce()
+	server.StopBiRPC()
+}
+
+func testServeHHTPEnableHttp(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeHTTP(
+		":45779",
+		utils.EmptyString,
+		utils.EmptyString,
+		!cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+
+	runtime.Gosched()
+
+	shdChan.CloseOnce()
+	server.StopBiRPC()
+}
+
+func testServeHHTPFail(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeHTTP(
+		"invalid_port_format",
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+
+	runtime.Gosched()
+
+	_, ok := <-shdChan.Done()
+	if ok {
+		t.Errorf("Expected to be close")
+	}
+	server.StopBiRPC()
+}
+
+func testServeHHTPFailEnableRpc(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	shdChan := utils.NewSyncedChan()
+	server.rpcEnabled = false
+
+	go server.ServeHTTP(":1000",
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+
+	shdChan.CloseOnce()
+	server.StopBiRPC()
+}
+
+func testServeBiJSON(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	server.birpcSrv = rpc2.NewServer()
+
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
+
+	ss := sessions.NewSessionS(cfg, dm, nil)
+
+	go func() {
+		if err := server.ServeBiRPC(":3434", "", ss.OnBiJSONConnect, ss.OnBiJSONDisconnect); err != nil {
+			t.Error(err)
+		}
+	}()
+	runtime.Gosched()
+}
+
+func testServeBiJSONEmptyBiRPCServer(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
 	caps := engine.NewCaps(100, utils.MetaBusy)
 	server = NewServer(caps)
 	server.RpcRegister(new(mockRegister))
 
-	data := engine.NewInternalDB(nil, nil, cfgDflt.DataDbCfg().Items)
-	dm := engine.NewDataManager(data, cfgDflt.CacheCfg(), nil)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 
-	ss := sessions.NewSessionS(cfgDflt, dm, nil, nil)
+	ss := sessions.NewSessionS(cfg, dm, nil)
+
+	expectedErr := "BiRPCServer should not be nil"
+	go func() {
+		if err := server.ServeBiRPC(":3430", "", ss.OnBiJSONConnect, ss.OnBiJSONDisconnect); err == nil || err.Error() != "BiRPCServer should not be nil" {
+			t.Errorf("Expected %+v, received %+v", expectedErr, err)
+		}
+	}()
+
+	runtime.Gosched()
+}
+
+func testServeBiJSONInvalidPort(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	server.birpcSrv = rpc2.NewServer()
+
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
+
+	ss := sessions.NewSessionS(cfg, dm, nil)
 
 	expectedErr := "listen tcp: address invalid_port_format: missing port in address"
 	if err := server.ServeBiRPC("invalid_port_format", "", ss.OnBiJSONConnect,
@@ -189,17 +381,58 @@ func testServeBiJSONInvalidPort(t *testing.T) {
 	server.StopBiRPC()
 }
 
-func testServeBiGoBInvalidPort(t *testing.T) {
-	cfgDflt := config.NewDefaultCGRConfig()
+func testServeBiGoB(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
 	caps := engine.NewCaps(100, utils.MetaBusy)
 	server = NewServer(caps)
 	server.RpcRegister(new(mockRegister))
-	server.birpcSrv = birpc.NewBirpcServer()
+	server.birpcSrv = rpc2.NewServer()
 
-	data := engine.NewInternalDB(nil, nil, cfgDflt.DataDbCfg().Items)
-	dm := engine.NewDataManager(data, cfgDflt.CacheCfg(), nil)
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
 
-	ss := sessions.NewSessionS(cfgDflt, dm, nil, nil)
+	ss := sessions.NewSessionS(cfg, dm, nil)
+
+	go func() {
+		if err := server.ServeBiRPC("", ":9343", ss.OnBiJSONConnect, ss.OnBiJSONDisconnect); err != nil {
+			t.Log(err)
+		}
+	}()
+	runtime.Gosched()
+}
+
+func testServeBiGoBEmptyBiRPCServer(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
+
+	ss := sessions.NewSessionS(cfg, dm, nil)
+
+	expectedErr := "BiRPCServer should not be nil"
+	go func() {
+		if err := server.ServeBiRPC("", ":93430", ss.OnBiJSONConnect, ss.OnBiJSONDisconnect); err == nil || err.Error() != "BiRPCServer should not be nil" {
+			t.Errorf("Expected %+v, received %+v", expectedErr, err)
+		}
+	}()
+
+	runtime.Gosched()
+}
+
+func testServeBiGoBInvalidPort(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	server.birpcSrv = rpc2.NewServer()
+
+	data := engine.NewInternalDB(nil, nil, true, cfg.DataDbCfg().Items)
+	dm := engine.NewDataManager(data, cfg.CacheCfg(), nil)
+
+	ss := sessions.NewSessionS(cfg, dm, nil)
 
 	expectedErr := "listen tcp: address invalid_port_format: missing port in address"
 	if err := server.ServeBiRPC("", "invalid_port_format", ss.OnBiJSONConnect,
@@ -208,6 +441,121 @@ func testServeBiGoBInvalidPort(t *testing.T) {
 	}
 
 	server.StopBiRPC()
+}
+
+func testServeGOBTLS(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeGOBTLS(
+		":34476",
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		4,
+		cfg.TLSCfg().ServerName,
+		shdChan,
+	)
+	runtime.Gosched()
+
+	server.StopBiRPC()
+}
+
+func testServeJSONTls(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	go server.ServeJSONTLS(
+		":64779",
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		4,
+		cfg.TLSCfg().ServerName,
+		shdChan,
+	)
+	runtime.Gosched()
+}
+
+func testServeGOBPortFail(t *testing.T) {
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	buff := new(bytes.Buffer)
+	log.SetOutput(buff)
+
+	go server.serveCodecTLS(
+		"34776",
+		utils.GOBCaps,
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		4,
+		"Server_name",
+		newCapsGOBCodec,
+		shdChan,
+	)
+	runtime.Gosched()
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout")
+	case <-shdChan.Done():
+	}
+	expected := "listen tcp: address 34776: missing port in address when listening"
+	if rcv := buff.String(); !strings.Contains(rcv, expected) {
+		t.Errorf("Expected %+v, received %+v", expected, rcv)
+	}
+
+	log.SetOutput(os.Stderr)
+}
+
+func testServeCodecTLSErr(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	//if rpc is not enabled, won t be able to serve
+	server.rpcEnabled = false
+	server.serveCodecTLS("13567",
+		utils.GOBCaps,
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		4,
+		cfg.TLSCfg().ServerName,
+		newCapsGOBCodec,
+		shdChan)
+
+	//unable to load TLS config when there is an inexisting server certificate file
+	server.rpcEnabled = true
+	server.serveCodecTLS("13567",
+		utils.GOBCaps,
+		"/usr/share/cgrates/tls/inexisting_cert",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		4,
+		cfg.TLSCfg().ServerName,
+		newCapsGOBCodec,
+		shdChan)
+
+	_, ok := <-shdChan.Done()
+	if ok {
+		t.Errorf("Expected to be close")
+	}
 }
 
 func testLoadTLSConfigErr(t *testing.T) {
@@ -254,10 +602,188 @@ TEST
 	}
 }
 
-type mockListenError mockListener
+func testServeHTTPTLS(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
 
-func (*mockListenError) Accept() (net.Conn, error) {
+	shdChan := utils.NewSyncedChan()
+
+	//cannot serve HHTPTls when rpc is not enabled
+	server.rpcEnabled = false
+	server.ServeHTTPTLS(
+		"17789",
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		cfg.TLSCfg().ServerPolicy,
+		cfg.TLSCfg().ServerName,
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+
+	//Invalid port address
+	server.rpcEnabled = true
+	go server.ServeHTTPTLS(
+		"17789",
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		cfg.TLSCfg().ServerPolicy,
+		cfg.TLSCfg().ServerName,
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+	runtime.Gosched()
+
+	_, ok := <-shdChan.Done()
+	if ok {
+		t.Errorf("Expected to be close")
+	}
+}
+
+func testServeHTTPTLSWithBasicAuth(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	//Invalid port address
+	server.rpcEnabled = true
+	go server.ServeHTTPTLS(
+		"57235",
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		cfg.TLSCfg().ServerPolicy,
+		cfg.TLSCfg().ServerName,
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		!cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+	runtime.Gosched()
+
+	_, ok := <-shdChan.Done()
+	if ok {
+		t.Errorf("Expected to be close")
+	}
+}
+
+func testServeHTTPTLSError(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	//Invalid port address
+	go server.ServeHTTPTLS(
+		"57235",
+		"/usr/share/cgrates/tls/inexisting_file",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		cfg.TLSCfg().ServerPolicy,
+		cfg.TLSCfg().ServerName,
+		cfg.HTTPCfg().HTTPJsonRPCURL,
+		cfg.HTTPCfg().HTTPWSURL,
+		!cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+	runtime.Gosched()
+
+	_, ok := <-shdChan.Done()
+	if ok {
+		t.Errorf("Expected to be close")
+	}
+}
+
+func testServeHTTPTLSHttpNotEnabled(t *testing.T) {
+	cfg := config.NewDefaultCGRConfig()
+	caps := engine.NewCaps(100, utils.MetaBusy)
+	server = NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+
+	shdChan := utils.NewSyncedChan()
+
+	server.httpEnabled = false
+	go server.ServeHTTPTLS(
+		"17789",
+		"/usr/share/cgrates/tls/server.crt",
+		"/usr/share/cgrates/tls/server.key",
+		"/usr/share/cgrates/tls/ca.crt",
+		cfg.TLSCfg().ServerPolicy,
+		cfg.TLSCfg().ServerName,
+		utils.EmptyString,
+		utils.EmptyString,
+		cfg.HTTPCfg().HTTPUseBasicAuth,
+		cfg.HTTPCfg().HTTPAuthUsers,
+		shdChan)
+
+	shdChan.CloseOnce()
+}
+
+func testBiRPCRegisterName(t *testing.T) {
+	caps := engine.NewCaps(0, utils.MetaBusy)
+	server := NewServer(caps)
+
+	handler := func(method *rpc2.Client, args *interface{}, reply *interface{}) error {
+		return nil
+	}
+	go server.BiRPCRegisterName(utils.APIerSv1Ping, handler)
+	runtime.Gosched()
+
+	server.StopBiRPC()
+}
+
+func testAcceptBiRPC(t *testing.T) {
+	caps := engine.NewCaps(0, utils.MetaBusy)
+	server := NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	server.birpcSrv = rpc2.NewServer()
+
+	p1, p2 := net.Pipe()
+	l := &mockListener{
+		p1: p1,
+	}
+	go server.acceptBiRPC(server.birpcSrv, l, utils.JSONCaps, newCapsBiRPCJSONCodec)
+	rpc := jsonrpc.NewClient(p2)
+	var reply string
+	expected := "rpc2: can't find method AttributeSv1.Ping"
+	if err := rpc.Call(utils.AttributeSv1Ping, utils.CGREvent{}, &reply); err == nil || err.Error() != expected {
+		t.Errorf("Expected %+v, received %+v", expected, err)
+	}
+
+	p2.Close()
+	runtime.Gosched()
+}
+
+type mockListenError struct {
+	*mockListener
+}
+
+func (mK *mockListenError) Accept() (net.Conn, error) {
 	return nil, errors.New("use of closed network connection")
+}
+
+func testAcceptBiRPCError(t *testing.T) {
+	caps := engine.NewCaps(10, utils.MetaBusy)
+	server := NewServer(caps)
+	server.RpcRegister(new(mockRegister))
+	server.birpcSrv = rpc2.NewServer()
+
+	//it will contain "use of closed network connection"
+	l := new(mockListenError)
+	go server.acceptBiRPC(server.birpcSrv, l, utils.JSONCaps, newCapsBiRPCJSONCodec)
+	runtime.Gosched()
 }
 
 func testRpcRegisterActions(t *testing.T) {
@@ -272,7 +798,7 @@ func testRpcRegisterActions(t *testing.T) {
 	rmtIP, _ := utils.GetRemoteIP(r)
 	rmtAddr, _ := net.ResolveIPAddr(utils.EmptyString, rmtIP)
 
-	rpcReq := newRPCRequest(birpc.DefaultServer, r.Body, rmtAddr, server.caps, nil)
+	rpcReq := newRPCRequest(r.Body, rmtAddr, server.caps, nil)
 	rpcReq.remoteAddr = utils.NewNetAddr("network", "127.0.0.1:2012")
 
 	if n, err := rpcReq.Write([]byte(`TEST`)); err != nil {
@@ -314,7 +840,7 @@ func testWebSocket(t *testing.T) {
 
 	rpc := jsonrpc.NewClient(conn1)
 	var reply string
-	err = rpc.Call(context.TODO(), "mockRegister.Ping", "", &reply)
+	err = rpc.Call("mockRegister.Ping", "", &reply)
 	if err != nil {
 		t.Fatal(err)
 	}

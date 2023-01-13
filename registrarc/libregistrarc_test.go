@@ -27,9 +27,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -86,7 +86,7 @@ func TestGetConnPort(t *testing.T) {
 	cfg.ListenCfg().RPCGOBListen = ":2013"
 	cfg.ListenCfg().HTTPTLSListen = ":2081"
 	cfg.ListenCfg().HTTPListen = ":2080"
-	cfg.HTTPCfg().JsonRPCURL = "/json_rpc"
+	cfg.HTTPCfg().HTTPJsonRPCURL = "/json_rpc"
 
 	if port, err := getConnPort(cfg, utils.MetaJSON, false); err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestRegister(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.RemoteAddr = "127.0.0.1:2356"
-	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil, nil)
+	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil)
 	if rplyID, err := register(req); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(id, *rplyID) {
@@ -232,7 +232,7 @@ func TestRegister(t *testing.T) {
 	}
 	errCfg := config.NewDefaultCGRConfig()
 
-	connMgr := engine.NewConnManager(errCfg)
+	engine.NewConnManager(errCfg, map[string]chan rpcclient.ClientConnector{})
 	errCfg.CacheCfg().Partitions[utils.CacheDispatcherHosts].Replicate = true
 	errCfg.RPCConns()["errCon"] = &config.RPCConn{
 		Strategy: utils.MetaFirst,
@@ -246,7 +246,7 @@ func TestRegister(t *testing.T) {
 		},
 	}
 	errCfg.CacheCfg().ReplicationConns = []string{"errCon"}
-	engine.Cache = engine.NewCacheS(errCfg, nil, connMgr, nil)
+	engine.Cache = engine.NewCacheS(errCfg, nil, nil)
 	req.Body = io.NopCloser(bytes.NewBuffer(uargsJSON))
 	if _, err := register(req); err != utils.ErrPartiallyExecuted {
 		t.Errorf("Expected error: %s ,received: %v", utils.ErrPartiallyExecuted, err)
@@ -320,7 +320,7 @@ func TestRegister(t *testing.T) {
 	if _, err := register(req); err == nil {
 		t.Errorf("Expected error,received: nil")
 	}
-	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil, nil)
+	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil)
 }
 
 type errRecorder struct{}
@@ -473,7 +473,7 @@ func TestRegisterRegistrarSv1UnregisterRPCHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.RemoteAddr = "127.0.0.1:2356"
-	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil, nil)
+	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil)
 	if rplyID, err := register(req); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(id, *rplyID) {
@@ -514,17 +514,17 @@ func TestRegisterRegistrarSv1UnregisterRPCHostsError(t *testing.T) {
 			},
 		},
 	}
-	connMgr := engine.NewConnManager(cfg)
+	engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{})
 	cfg.RPCConns()["errCon"] = config.CgrConfig().RPCConns()["errCon"]
 	cfg.CacheCfg().ReplicationConns = []string{"errCon"}
 	cfg.CacheCfg().Partitions[utils.CacheRPCConnections].Replicate = true
-	engine.Cache = engine.NewCacheS(cfg, nil, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, nil, nil)
 	_, err = register(req)
 	if err == nil || err != utils.ErrPartiallyExecuted {
 		t.Fatal(err)
 	}
 	delete(config.CgrConfig().RPCConns(), "errCon")
-	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil, nil)
+	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil)
 }
 
 func TestRegisterRegistrarSv1RegisterRPCHosts(t *testing.T) {
@@ -566,7 +566,7 @@ func TestRegisterRegistrarSv1RegisterRPCHosts(t *testing.T) {
 	} else if !reflect.DeepEqual(id, *rplyID) {
 		t.Errorf("Expected: %q ,received: %q", string(id), string(*rplyID))
 	}
-	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil, nil)
+	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil)
 }
 
 func TestRegisterRegistrarSv1RegisterRPCHostsError(t *testing.T) {
@@ -615,15 +615,15 @@ func TestRegisterRegistrarSv1RegisterRPCHostsError(t *testing.T) {
 			},
 		},
 	}
-	connMgr := engine.NewConnManager(cfg)
+	engine.NewConnManager(cfg, map[string]chan rpcclient.ClientConnector{})
 	cfg.RPCConns()["errCon1"] = config.CgrConfig().RPCConns()["errCon1"]
 	cfg.CacheCfg().ReplicationConns = []string{"errCon1"}
 	cfg.CacheCfg().Partitions[utils.CacheRPCConnections].Replicate = true
-	engine.Cache = engine.NewCacheS(cfg, nil, connMgr, nil)
+	engine.Cache = engine.NewCacheS(cfg, nil, nil)
 	_, err = register(req)
 	if err == nil || err != utils.ErrPartiallyExecuted {
 		t.Fatal(err)
 	}
 	delete(config.CgrConfig().RPCConns(), "errCon1")
-	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil, nil)
+	engine.Cache = engine.NewCacheS(config.CgrConfig(), nil, nil)
 }

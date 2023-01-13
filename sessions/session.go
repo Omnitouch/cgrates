@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // SessionID is given by an agent as the answer to GetActiveSessionIDs API
@@ -33,14 +33,14 @@ type SessionID struct {
 	OriginID   string
 }
 
-// OptsOriginID returns the OptsOriginID formated using the SessionID
-func (s *SessionID) OptsOriginID() string {
+// CGRID returns the CGRID formated using the SessionID
+func (s *SessionID) CGRID() string {
 	return utils.Sha1(s.OriginID, s.OriginHost)
 }
 
 // ExternalSession is used when displaying active sessions via RPC
 type ExternalSession struct {
-	//CGRID         string
+	CGRID         string
 	RunID         string
 	ToR           string            // type of record, meta-field, should map to one of the TORs hardcoded inside the server <*voice|*data|*sms|*generic>
 	OriginID      string            // represents the unique accounting id given by the telecom switch generating the CDR
@@ -68,7 +68,9 @@ type ExternalSession struct {
 
 // Session is the main structure to describe a call
 type Session struct {
-	lk            sync.RWMutex
+	lk sync.RWMutex
+
+	CGRID         string
 	Tenant        string
 	ResourceID    string
 	ClientConnID  string          // connection ID towards the client so we can recover from passive
@@ -102,16 +104,18 @@ func (s *Session) RUnlock() {
 	s.lk.RUnlock()
 }
 
-// originID is method to return the originID of a session
+// cgrID is method to return the CGRID of a session
 // not thread safe
-func (s *Session) originID() string {
-	return utils.IfaceAsString(s.OptsStart[utils.MetaOriginID])
+func (s *Session) cgrID() (cgrID string) {
+	cgrID = s.CGRID
+	return
 }
 
 // Clone is a thread safe method to clone the sessions information
 func (s *Session) Clone() (cln *Session) {
 	s.RLock()
 	cln = &Session{
+		CGRID:         s.CGRID,
 		Tenant:        s.Tenant,
 		ResourceID:    s.ResourceID,
 		ClientConnID:  s.ClientConnID,
@@ -134,8 +138,8 @@ func (s *Session) AsExternalSessions(tmz, nodeID string) (aSs []*ExternalSession
 	aSs = make([]*ExternalSession, len(s.SRuns))
 	for i, sr := range s.SRuns {
 		aSs[i] = &ExternalSession{
-			//CGRID:         utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]),
-			RunID:         sr.RunID,
+			CGRID:         s.CGRID,
+			RunID:         sr.Event.GetStringIgnoreErrors(utils.RunID),
 			ToR:           sr.Event.GetStringIgnoreErrors(utils.ToR),
 			OriginID:      s.EventStart.GetStringIgnoreErrors(utils.OriginID),
 			OriginHost:    s.EventStart.GetStringIgnoreErrors(utils.OriginHost),
@@ -156,6 +160,13 @@ func (s *Session) AsExternalSessions(tmz, nodeID string) (aSs []*ExternalSession
 		if sr.NextAutoDebit != nil {
 			aSs[i].NextAutoDebit = *sr.NextAutoDebit
 		}
+		if sr.CD != nil {
+			aSs[i].LoopIndex = sr.CD.LoopIndex
+			aSs[i].DurationIndex = sr.CD.DurationIndex
+			aSs[i].MaxRate = sr.CD.MaxRate
+			aSs[i].MaxRateUnit = sr.CD.MaxRateUnit
+			aSs[i].MaxCostSoFar = sr.CD.MaxCostSoFar
+		}
 	}
 	s.RUnlock()
 	return
@@ -164,8 +175,8 @@ func (s *Session) AsExternalSessions(tmz, nodeID string) (aSs []*ExternalSession
 // AsExternalSession returns the session as an ExternalSession using the SRuns given
 func (s *Session) AsExternalSession(sr *SRun, tmz, nodeID string) (aS *ExternalSession) {
 	aS = &ExternalSession{
-		//CGRID:         utils.IfaceAsString(s.OptsStart[utils.MetaOriginID]),
-		RunID:         sr.RunID,
+		CGRID:         s.CGRID,
+		RunID:         sr.Event.GetStringIgnoreErrors(utils.RunID),
 		ToR:           sr.Event.GetStringIgnoreErrors(utils.ToR),
 		OriginID:      s.EventStart.GetStringIgnoreErrors(utils.OriginID),
 		OriginHost:    s.EventStart.GetStringIgnoreErrors(utils.OriginHost),
@@ -186,7 +197,13 @@ func (s *Session) AsExternalSession(sr *SRun, tmz, nodeID string) (aS *ExternalS
 	if sr.NextAutoDebit != nil {
 		aS.NextAutoDebit = *sr.NextAutoDebit
 	}
-
+	if sr.CD != nil {
+		aS.LoopIndex = sr.CD.LoopIndex
+		aS.DurationIndex = sr.CD.DurationIndex
+		aS.MaxRate = sr.CD.MaxRate
+		aS.MaxRateUnit = sr.CD.MaxRateUnit
+		aS.MaxCostSoFar = sr.CD.MaxCostSoFar
+	}
 	return
 }
 
@@ -239,13 +256,14 @@ func (s *Session) stopDebitLoops() {
 
 // SRun is one billing run for the Session
 type SRun struct {
-	Event engine.MapEvent // Event received from ChargerS
+	Event     engine.MapEvent        // Event received from ChargerS
+	CD        *engine.CallDescriptor // initial CD used for debits, updated on each debit
+	EventCost *engine.EventCost
 
 	ExtraDuration time.Duration // keeps the current duration debited on top of what has been asked
 	LastUsage     time.Duration // last requested Duration
 	TotalUsage    time.Duration // sum of lastUsage
 	NextAutoDebit *time.Time
-	RunID         string
 }
 
 // Clone returns the cloned version of SRun
@@ -256,8 +274,37 @@ func (sr *SRun) Clone() (clsr *SRun) {
 		LastUsage:     sr.LastUsage,
 		TotalUsage:    sr.TotalUsage,
 	}
+	if sr.CD != nil {
+		clsr.CD = sr.CD.Clone()
+	}
+	if sr.EventCost != nil {
+		clsr.EventCost = sr.EventCost.Clone()
+	}
 	if sr.NextAutoDebit != nil {
 		clsr.NextAutoDebit = utils.TimePointer(*sr.NextAutoDebit)
+	}
+	return
+}
+
+// debitReserve attempty to debit from ExtraDuration and returns remaining duration
+// if lastUsage is not nil, the ExtraDuration is corrected
+func (sr *SRun) debitReserve(dur time.Duration, lastUsage *time.Duration) (rDur time.Duration) {
+	if lastUsage != nil &&
+		sr.LastUsage != *lastUsage {
+		diffUsage := sr.LastUsage - *lastUsage
+		sr.ExtraDuration += diffUsage
+		sr.TotalUsage -= sr.LastUsage
+		sr.TotalUsage += *lastUsage
+		sr.LastUsage = *lastUsage
+	}
+	// debit from reserved
+	if sr.ExtraDuration >= dur {
+		sr.ExtraDuration -= dur
+		sr.LastUsage = dur
+		sr.TotalUsage += dur
+	} else {
+		rDur = dur - sr.ExtraDuration
+		sr.ExtraDuration = 0
 	}
 	return
 }

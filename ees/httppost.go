@@ -23,10 +23,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewHTTPPostEE(cfg *config.EventExporterCfg, cgrCfg *config.CGRConfig, filterS *engine.FilterS,
@@ -62,7 +61,7 @@ func (httpPost *HTTPPostEE) composeHeader(cgrCfg *config.CGRConfig, filterS *eng
 		return
 	}
 	var exp *utils.OrderedNavigableMap
-	if exp, err = composeHeaderTrailer(context.Background(), utils.MetaHdr, httpPost.Cfg().HeaderFields(), httpPost.dc, cgrCfg, filterS); err != nil {
+	if exp, err = composeHeaderTrailer(utils.MetaHdr, httpPost.Cfg().HeaderFields(), httpPost.dc, cgrCfg, filterS); err != nil {
 		return
 	}
 	for el := exp.GetFirstElement(); el != nil; el = el.Next() {
@@ -78,12 +77,12 @@ func (httpPost *HTTPPostEE) Cfg() *config.EventExporterCfg { return httpPost.cfg
 
 func (httpPost *HTTPPostEE) Connect() (_ error) { return }
 
-func (httpPost *HTTPPostEE) ExportEvent(ctx *context.Context, content, _ interface{}) (err error) {
+func (httpPost *HTTPPostEE) ExportEvent(content interface{}, _ string) (err error) {
 	httpPost.reqs.get()
 	defer httpPost.reqs.done()
 	pReq := content.(*HTTPPosterRequest)
 	var req *http.Request
-	if req, err = prepareRequest(ctx, httpPost.Cfg().ExportPath, utils.ContentForm, pReq.Body, pReq.Header); err != nil {
+	if req, err = prepareRequest(httpPost.Cfg().ExportPath, utils.ContentForm, pReq.Body, pReq.Header); err != nil {
 		return
 	}
 	_, err = sendHTTPReq(httpPost.client, req)
@@ -93,8 +92,6 @@ func (httpPost *HTTPPostEE) ExportEvent(ctx *context.Context, content, _ interfa
 func (httpPost *HTTPPostEE) Close() (_ error) { return }
 
 func (httpPost *HTTPPostEE) GetMetrics() *utils.SafeMapStorage { return httpPost.dc }
-
-func (httpPost *HTTPPostEE) ExtraData(ev *utils.CGREvent) interface{} { return nil }
 
 func (httpPost *HTTPPostEE) PrepareMap(mp *utils.CGREvent) (interface{}, error) {
 	urlVals := url.Values{}

@@ -22,11 +22,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/ers"
+	"github.com/cgrates/cgrates/ers"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 // TestEventReaderSCoverage for cover testing
@@ -35,8 +35,9 @@ func TestEventReaderSCoverage(t *testing.T) {
 	cfg.SessionSCfg().Enabled = true
 	filterSChan := make(chan *engine.FilterS, 1)
 	filterSChan <- nil
+	shdChan := utils.NewSyncedChan()
 	srvDep := map[string]*sync.WaitGroup{utils.DataDB: new(sync.WaitGroup)}
-	srv := NewEventReaderService(cfg, filterSChan, nil, srvDep)
+	srv := NewEventReaderService(cfg, filterSChan, shdChan, nil, srvDep)
 
 	if srv.IsRunning() {
 		t.Errorf("Expected service to be down")
@@ -46,6 +47,7 @@ func TestEventReaderSCoverage(t *testing.T) {
 		RWMutex:     sync.RWMutex{},
 		cfg:         cfg,
 		filterSChan: filterSChan,
+		shdChan:     shdChan,
 		ers:         &ers.ERService{},
 		rldChan:     make(chan struct{}, 1),
 		stopChan:    make(chan struct{}, 1),

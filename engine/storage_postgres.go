@@ -19,8 +19,40 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"github.com/Omnitouch/cgrates/utils"
+	"fmt"
+	"time"
+
+	"github.com/cgrates/cgrates/utils"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
+
+// NewPostgresStorage returns the posgres storDB
+func NewPostgresStorage(host, port, name, user, password, sslmode string, maxConn, maxIdleConn int, connMaxLifetime time.Duration) (*SQLStorage, error) {
+	connectString := fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=%s", host, port, name, user, password, sslmode)
+	db, err := gorm.Open(postgres.Open(connectString), &gorm.Config{AllowGlobalUpdate: true})
+	if err != nil {
+		return nil, err
+	}
+	postgressStorage := new(PostgresStorage)
+	if postgressStorage.Db, err = db.DB(); err != nil {
+		return nil, err
+	}
+	if err = postgressStorage.Db.Ping(); err != nil {
+		return nil, err
+	}
+	postgressStorage.Db.SetMaxIdleConns(maxIdleConn)
+	postgressStorage.Db.SetMaxOpenConns(maxConn)
+	postgressStorage.Db.SetConnMaxLifetime(connMaxLifetime)
+	//db.LogMode(true)
+	postgressStorage.db = db
+	return &SQLStorage{
+		Db:      postgressStorage.Db,
+		db:      postgressStorage.db,
+		StorDB:  postgressStorage,
+		SQLImpl: postgressStorage,
+	}, nil
+}
 
 type PostgresStorage struct {
 	SQLStorage
@@ -47,6 +79,22 @@ func (poS *PostgresStorage) SetVersions(vrs Versions, overwrite bool) (err error
 	}
 	tx.Commit()
 	return
+}
+
+func (poS *PostgresStorage) extraFieldsExistsQry(field string) string {
+	return fmt.Sprintf(" extra_fields ?'%s'", field)
+}
+
+func (poS *PostgresStorage) extraFieldsValueQry(field, value string) string {
+	return fmt.Sprintf(" (extra_fields ->> '%s') = '%s'", field, value)
+}
+
+func (poS *PostgresStorage) notExtraFieldsExistsQry(field string) string {
+	return fmt.Sprintf(" NOT extra_fields ?'%s'", field)
+}
+
+func (poS *PostgresStorage) notExtraFieldsValueQry(field, value string) string {
+	return fmt.Sprintf(" NOT (extra_fields ?'%s' AND (extra_fields ->> '%s') = '%s')", field, field, value)
 }
 
 func (poS *PostgresStorage) GetStorageType() string {

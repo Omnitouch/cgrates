@@ -22,28 +22,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
-	"github.com/ericlagergren/decimal"
+	"github.com/cgrates/cgrates/utils"
 )
-
-type GeneralOpts struct {
-	ExporterIDs []*utils.DynamicStringSliceOpt
-}
 
 // GeneralCfg is the general config section
 type GeneralCfg struct {
-	NodeID               string // Identifier for this engine instance
-	RoundingDecimals     int    // Number of decimals to round end prices at
-	DBDataEncoding       string // The encoding used to store object data in strings: <msgpack|json>
-	TpExportPath         string // Path towards export folder for offline Tariff Plans
-	DefaultReqType       string // Use this request type if not defined on top
-	DefaultCategory      string // set default type of record
-	DefaultTenant        string // set default tenant
-	DefaultTimezone      string // default timezone for timestamps where not specified <""|UTC|Local|$IANA_TZ_DB>
+	NodeID               string        // Identifier for this engine instance
+	Logger               string        // dictates the way logs are displayed/stored
+	LogLevel             int           // system wide log level, nothing higher than this will be logged
+	RoundingDecimals     int           // Number of decimals to round end prices at
+	DBDataEncoding       string        // The encoding used to store object data in strings: <msgpack|json>
+	TpExportPath         string        // Path towards export folder for offline Tariff Plans
+	PosterAttempts       int           // Time to wait before writing the failed posts in a single file
+	FailedPostsDir       string        // Directory path where we store failed http requests
+	FailedPostsTTL       time.Duration // Directory path where we store failed http requests
+	DefaultReqType       string        // Use this request type if not defined on top
+	DefaultCategory      string        // set default type of record
+	DefaultTenant        string        // set default tenant
+	DefaultTimezone      string        // default timezone for timestamps where not specified <""|UTC|Local|$IANA_TZ_DB>
 	DefaultCaching       string
 	ConnectAttempts      int           // number of initial connection attempts before giving up
-	Reconnects           int           // number of recconect attempts in case of connection lost <-1 for infinite | nb>
+	Reconnects           int           // number of reconnect attempts in case of connection lost <-1 for infinite | nb>
 	MaxReconnectInterval time.Duration // time to wait in between reconnect attempts
 	ConnectTimeout       time.Duration // timeout for RPC connection attempts
 	ReplyTimeout         time.Duration // timeout replies if not reaching back
@@ -52,30 +51,6 @@ type GeneralCfg struct {
 	DigestEqual          string        //
 	RSRSep               string        // separator used to split RSRParser (by default is used ";")
 	MaxParallelConns     int           // the maximum number of connections used by the *parallel strategy
-
-	DecimalMaxScale     int
-	DecimalMinScale     int
-	DecimalPrecision    int
-	DecimalRoundingMode decimal.RoundingMode
-	Opts                *GeneralOpts
-}
-
-func (gencfg *GeneralCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnGeneralCfg := new(GeneralJsonCfg)
-	if err = jsnCfg.GetSection(ctx, GeneralJSON, jsnGeneralCfg); err != nil {
-		return
-	}
-	return gencfg.loadFromJSONCfg(jsnGeneralCfg)
-}
-
-// loadGeneralCfg loads the General opts section of the configuration
-func (generalOpts *GeneralOpts) loadFromJSONCfg(jsnCfg *GeneralOptsJson) {
-	if jsnCfg == nil {
-		return
-	}
-	if jsnCfg.ExporterIDs != nil {
-		generalOpts.ExporterIDs = append(generalOpts.ExporterIDs, jsnCfg.ExporterIDs...)
-	}
 }
 
 // loadFromJSONCfg loads General config from JsonCfg
@@ -86,6 +61,13 @@ func (gencfg *GeneralCfg) loadFromJSONCfg(jsnGeneralCfg *GeneralJsonCfg) (err er
 	if jsnGeneralCfg.Node_id != nil && *jsnGeneralCfg.Node_id != "" {
 		gencfg.NodeID = *jsnGeneralCfg.Node_id
 	}
+	if jsnGeneralCfg.Logger != nil {
+		gencfg.Logger = *jsnGeneralCfg.Logger
+	}
+	if jsnGeneralCfg.Log_level != nil {
+		gencfg.LogLevel = *jsnGeneralCfg.Log_level
+	}
+
 	if jsnGeneralCfg.Dbdata_encoding != nil {
 		gencfg.DBDataEncoding = strings.TrimPrefix(*jsnGeneralCfg.Dbdata_encoding, "*")
 	}
@@ -125,6 +107,17 @@ func (gencfg *GeneralCfg) loadFromJSONCfg(jsnGeneralCfg *GeneralJsonCfg) (err er
 	if jsnGeneralCfg.Tpexport_dir != nil {
 		gencfg.TpExportPath = *jsnGeneralCfg.Tpexport_dir
 	}
+	if jsnGeneralCfg.Poster_attempts != nil {
+		gencfg.PosterAttempts = *jsnGeneralCfg.Poster_attempts
+	}
+	if jsnGeneralCfg.Failed_posts_dir != nil {
+		gencfg.FailedPostsDir = *jsnGeneralCfg.Failed_posts_dir
+	}
+	if jsnGeneralCfg.Failed_posts_ttl != nil {
+		if gencfg.FailedPostsTTL, err = utils.ParseDurationWithNanosecs(*jsnGeneralCfg.Failed_posts_ttl); err != nil {
+			return err
+		}
+	}
 	if jsnGeneralCfg.Default_timezone != nil {
 		gencfg.DefaultTimezone = *jsnGeneralCfg.Default_timezone
 	}
@@ -149,34 +142,20 @@ func (gencfg *GeneralCfg) loadFromJSONCfg(jsnGeneralCfg *GeneralJsonCfg) (err er
 		gencfg.MaxParallelConns = *jsnGeneralCfg.Max_parallel_conns
 	}
 
-	if jsnGeneralCfg.Decimal_max_scale != nil {
-		gencfg.DecimalMaxScale = *jsnGeneralCfg.Decimal_max_scale
-	}
-	if jsnGeneralCfg.Decimal_min_scale != nil {
-		gencfg.DecimalMinScale = *jsnGeneralCfg.Decimal_min_scale
-	}
-	if jsnGeneralCfg.Decimal_precision != nil {
-		gencfg.DecimalPrecision = *jsnGeneralCfg.Decimal_precision
-	}
-	if jsnGeneralCfg.Decimal_rounding_mode != nil {
-		gencfg.DecimalRoundingMode, err = utils.NewRoundingMode(*jsnGeneralCfg.Decimal_rounding_mode)
-	}
-	if jsnGeneralCfg.Opts != nil {
-		gencfg.Opts.loadFromJSONCfg(jsnGeneralCfg.Opts)
-	}
-	return
+	return nil
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (gencfg GeneralCfg) AsMapInterface(string) interface{} {
-	opts := map[string]interface{}{
-		utils.MetaExporterIDs: gencfg.Opts.ExporterIDs,
-	}
-	mp := map[string]interface{}{
+func (gencfg *GeneralCfg) AsMapInterface() (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
 		utils.NodeIDCfg:               gencfg.NodeID,
+		utils.LoggerCfg:               gencfg.Logger,
+		utils.LogLevelCfg:             gencfg.LogLevel,
 		utils.RoundingDecimalsCfg:     gencfg.RoundingDecimals,
 		utils.DBDataEncodingCfg:       utils.Meta + gencfg.DBDataEncoding,
 		utils.TpExportPathCfg:         gencfg.TpExportPath,
+		utils.PosterAttemptsCfg:       gencfg.PosterAttempts,
+		utils.FailedPostsDirCfg:       gencfg.FailedPostsDir,
 		utils.DefaultReqTypeCfg:       gencfg.DefaultReqType,
 		utils.DefaultCategoryCfg:      gencfg.DefaultCategory,
 		utils.DefaultTenantCfg:        gencfg.DefaultTenant,
@@ -190,53 +169,46 @@ func (gencfg GeneralCfg) AsMapInterface(string) interface{} {
 		utils.RSRSepCfg:               gencfg.RSRSep,
 		utils.MaxParallelConnsCfg:     gencfg.MaxParallelConns,
 		utils.LockingTimeoutCfg:       "0",
+		utils.FailedPostsTTLCfg:       "0",
 		utils.ConnectTimeoutCfg:       "0",
 		utils.ReplyTimeoutCfg:         "0",
-		utils.DecimalMaxScaleCfg:      gencfg.DecimalMaxScale,
-		utils.DecimalMinScaleCfg:      gencfg.DecimalMinScale,
-		utils.DecimalPrecisionCfg:     gencfg.DecimalPrecision,
-		utils.DecimalRoundingModeCfg:  utils.RoundingModeToString(gencfg.DecimalRoundingMode),
-		utils.OptsCfg:                 opts,
 	}
 
 	if gencfg.MaxReconnectInterval != 0 {
-		mp[utils.MaxReconnectIntervalCfg] = gencfg.MaxReconnectInterval.String()
+		initialMP[utils.MaxReconnectIntervalCfg] = gencfg.MaxReconnectInterval.String()
 	}
 
 	if gencfg.LockingTimeout != 0 {
-		mp[utils.LockingTimeoutCfg] = gencfg.LockingTimeout.String()
+		initialMP[utils.LockingTimeoutCfg] = gencfg.LockingTimeout.String()
+	}
+
+	if gencfg.FailedPostsTTL != 0 {
+		initialMP[utils.FailedPostsTTLCfg] = gencfg.FailedPostsTTL.String()
 	}
 
 	if gencfg.ConnectTimeout != 0 {
-		mp[utils.ConnectTimeoutCfg] = gencfg.ConnectTimeout.String()
+		initialMP[utils.ConnectTimeoutCfg] = gencfg.ConnectTimeout.String()
 	}
 
 	if gencfg.ReplyTimeout != 0 {
-		mp[utils.ReplyTimeoutCfg] = gencfg.ReplyTimeout.String()
+		initialMP[utils.ReplyTimeoutCfg] = gencfg.ReplyTimeout.String()
 	}
 
-	return mp
-}
-
-func (GeneralCfg) SName() string                { return GeneralJSON }
-func (gencfg GeneralCfg) CloneSection() Section { return gencfg.Clone() }
-
-func (generalOpts *GeneralOpts) Clone() *GeneralOpts {
-	if generalOpts == nil {
-		return nil
-	}
-	return &GeneralOpts{
-		ExporterIDs: utils.CloneDynamicStringSliceOpt(generalOpts.ExporterIDs),
-	}
+	return
 }
 
 // Clone returns a deep copy of GeneralCfg
 func (gencfg GeneralCfg) Clone() *GeneralCfg {
 	return &GeneralCfg{
 		NodeID:               gencfg.NodeID,
+		Logger:               gencfg.Logger,
+		LogLevel:             gencfg.LogLevel,
 		RoundingDecimals:     gencfg.RoundingDecimals,
 		DBDataEncoding:       gencfg.DBDataEncoding,
 		TpExportPath:         gencfg.TpExportPath,
+		PosterAttempts:       gencfg.PosterAttempts,
+		FailedPostsDir:       gencfg.FailedPostsDir,
+		FailedPostsTTL:       gencfg.FailedPostsTTL,
 		DefaultReqType:       gencfg.DefaultReqType,
 		DefaultCategory:      gencfg.DefaultCategory,
 		DefaultTenant:        gencfg.DefaultTenant,
@@ -252,131 +224,5 @@ func (gencfg GeneralCfg) Clone() *GeneralCfg {
 		DigestEqual:          gencfg.DigestEqual,
 		RSRSep:               gencfg.RSRSep,
 		MaxParallelConns:     gencfg.MaxParallelConns,
-		DecimalMaxScale:      gencfg.DecimalMaxScale,
-		DecimalMinScale:      gencfg.DecimalMinScale,
-		DecimalPrecision:     gencfg.DecimalPrecision,
-		DecimalRoundingMode:  gencfg.DecimalRoundingMode,
-		Opts:                 gencfg.Opts.Clone(),
 	}
-}
-
-type GeneralOptsJson struct {
-	ExporterIDs []*utils.DynamicStringSliceOpt `json:"*exporterIDs"`
-}
-
-// General config section
-type GeneralJsonCfg struct {
-	Node_id                *string
-	Rounding_decimals      *int
-	Dbdata_encoding        *string
-	Tpexport_dir           *string
-	Default_request_type   *string
-	Default_category       *string
-	Default_tenant         *string
-	Default_timezone       *string
-	Default_caching        *string
-	Connect_attempts       *int
-	Reconnects             *int
-	Max_reconnect_interval *string
-	Connect_timeout        *string
-	Reply_timeout          *string
-	Locking_timeout        *string
-	Digest_separator       *string
-	Digest_equal           *string
-	Rsr_separator          *string
-	Max_parallel_conns     *int
-
-	Decimal_max_scale     *int
-	Decimal_min_scale     *int
-	Decimal_precision     *int
-	Decimal_rounding_mode *string
-	Opts                  *GeneralOptsJson
-}
-
-func diffGeneralOptsJsonCfg(d *GeneralOptsJson, v1, v2 *GeneralOpts) *GeneralOptsJson {
-	if d == nil {
-		d = new(GeneralOptsJson)
-	}
-	if !utils.DynamicStringSliceOptEqual(v1.ExporterIDs, v2.ExporterIDs) {
-		d.ExporterIDs = v2.ExporterIDs
-	}
-	return d
-}
-
-func diffGeneralJsonCfg(d *GeneralJsonCfg, v1, v2 *GeneralCfg) *GeneralJsonCfg {
-	if d == nil {
-		d = new(GeneralJsonCfg)
-	}
-
-	if v1.NodeID != v2.NodeID {
-		d.Node_id = utils.StringPointer(v2.NodeID)
-	}
-	if v1.RoundingDecimals != v2.RoundingDecimals {
-		d.Rounding_decimals = utils.IntPointer(v2.RoundingDecimals)
-	}
-	if v1.DBDataEncoding != v2.DBDataEncoding {
-		d.Dbdata_encoding = utils.StringPointer(v2.DBDataEncoding)
-	}
-	if v1.TpExportPath != v2.TpExportPath {
-		d.Tpexport_dir = utils.StringPointer(v2.TpExportPath)
-	}
-	if v1.DefaultReqType != v2.DefaultReqType {
-		d.Default_request_type = utils.StringPointer(v2.DefaultReqType)
-	}
-	if v1.DefaultCategory != v2.DefaultCategory {
-		d.Default_category = utils.StringPointer(v2.DefaultCategory)
-	}
-	if v1.DefaultTenant != v2.DefaultTenant {
-		d.Default_tenant = utils.StringPointer(v2.DefaultTenant)
-	}
-	if v1.DefaultTimezone != v2.DefaultTimezone {
-		d.Default_timezone = utils.StringPointer(v2.DefaultTimezone)
-	}
-	if v1.DefaultCaching != v2.DefaultCaching {
-		d.Default_caching = utils.StringPointer(v2.DefaultCaching)
-	}
-	if v1.ConnectAttempts != v2.ConnectAttempts {
-		d.Connect_attempts = utils.IntPointer(v2.ConnectAttempts)
-	}
-	if v1.Reconnects != v2.Reconnects {
-		d.Reconnects = utils.IntPointer(v2.Reconnects)
-	}
-	if v1.MaxReconnectInterval != v2.MaxReconnectInterval {
-		d.Max_reconnect_interval = utils.StringPointer(v2.MaxReconnectInterval.String())
-	}
-	if v1.ConnectTimeout != v2.ConnectTimeout {
-		d.Connect_timeout = utils.StringPointer(v2.ConnectTimeout.String())
-	}
-	if v1.ReplyTimeout != v2.ReplyTimeout {
-		d.Reply_timeout = utils.StringPointer(v2.ReplyTimeout.String())
-	}
-	if v1.LockingTimeout != v2.LockingTimeout {
-		d.Locking_timeout = utils.StringPointer(v2.LockingTimeout.String())
-	}
-	if v1.DigestSeparator != v2.DigestSeparator {
-		d.Digest_separator = utils.StringPointer(v2.DigestSeparator)
-	}
-	if v1.DigestEqual != v2.DigestEqual {
-		d.Digest_equal = utils.StringPointer(v2.DigestEqual)
-	}
-	if v1.RSRSep != v2.RSRSep {
-		d.Rsr_separator = utils.StringPointer(v2.RSRSep)
-	}
-	if v1.MaxParallelConns != v2.MaxParallelConns {
-		d.Max_parallel_conns = utils.IntPointer(v2.MaxParallelConns)
-	}
-	if v1.DecimalMaxScale != v2.DecimalMaxScale {
-		d.Decimal_max_scale = utils.IntPointer(v2.DecimalMaxScale)
-	}
-	if v1.DecimalMinScale != v2.DecimalMinScale {
-		d.Decimal_min_scale = utils.IntPointer(v2.DecimalMinScale)
-	}
-	if v1.DecimalPrecision != v2.DecimalPrecision {
-		d.Decimal_precision = utils.IntPointer(v2.DecimalPrecision)
-	}
-	if v1.DecimalRoundingMode != v2.DecimalRoundingMode {
-		d.Decimal_rounding_mode = utils.StringPointer(v2.DecimalRoundingMode.String())
-	}
-	d.Opts = diffGeneralOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

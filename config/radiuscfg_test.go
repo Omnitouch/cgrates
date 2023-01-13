@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -32,8 +32,8 @@ func TestRadiusAgentCfgloadFromJsonCfgCase1(t *testing.T) {
 		Listen_net:          utils.StringPointer(utils.UDP),
 		Listen_auth:         utils.StringPointer("127.0.0.1:1812"),
 		Listen_acct:         utils.StringPointer("127.0.0.1:1813"),
-		Client_secrets:      map[string]string{utils.MetaDefault: "CGRateS.org"},
-		Client_dictionaries: map[string]string{utils.MetaDefault: "/usr/share/cgrates/radius/dict/"},
+		Client_secrets:      &map[string]string{utils.MetaDefault: "CGRateS.org"},
+		Client_dictionaries: &map[string]string{utils.MetaDefault: "/usr/share/cgrates/radius/dict/"},
 		Sessions_conns:      &[]string{utils.ConcatenatedKey(utils.MetaInternal, utils.MetaSessionS)},
 		Request_processors: &[]*ReqProcessorJsnCfg{
 			{
@@ -41,7 +41,7 @@ func TestRadiusAgentCfgloadFromJsonCfgCase1(t *testing.T) {
 				Filters:        &[]string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 				Flags:          &[]string{utils.MetaDryRun},
 				Timezone:       utils.StringPointer(utils.EmptyString),
-				Tenant:         utils.StringPointer("~*opts.*originID"),
+				Tenant:         utils.StringPointer("~*req.CGRID"),
 				Request_fields: &[]*FcTemplateJsonCfg{},
 				Reply_fields: &[]*FcTemplateJsonCfg{
 					{
@@ -50,7 +50,7 @@ func TestRadiusAgentCfgloadFromJsonCfgCase1(t *testing.T) {
 						Type:      utils.StringPointer(utils.MetaConstant),
 						Value:     utils.StringPointer("1"),
 						Mandatory: utils.BoolPointer(true),
-						Layout:    utils.StringPointer(time.RFC3339),
+						Layout:    utils.StringPointer(string(time.RFC3339)),
 					},
 				},
 			},
@@ -70,7 +70,7 @@ func TestRadiusAgentCfgloadFromJsonCfgCase1(t *testing.T) {
 				Filters:       []string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 				Flags:         utils.FlagsWithParams{utils.MetaDryRun: {}},
 				Timezone:      utils.EmptyString,
-				Tenant:        NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+				Tenant:        NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 				RequestFields: []*FCTemplate{},
 				ReplyFields: []*FCTemplate{
 					{
@@ -93,10 +93,6 @@ func TestRadiusAgentCfgloadFromJsonCfgCase1(t *testing.T) {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, cfg.radiusAgentCfg) {
 		t.Errorf("Expected %+v \n, received %+v", utils.ToJSON(expected), utils.ToJSON(cfg.radiusAgentCfg))
-	}
-	cfgJSON = nil
-	if err = cfg.radiusAgentCfg.loadFromJSONCfg(cfgJSON, cfg.generalCfg.RSRSep); err != nil {
-		t.Error(err)
 	}
 }
 
@@ -165,7 +161,7 @@ func TestRadiusAgentCfgAsMapInterface(t *testing.T) {
 				"id": "OutboundAUTHDryRun",
 				"filters": ["*string:~*req.request_type:OutboundAUTH","*string:~*req.Msisdn:497700056231"],
 				"tenant": "cgrates.org",
-				"flags": ["*dryRun"],
+				"flags": ["*dryrun"],
 				"request_fields":[],
 				"reply_fields":[
 					{"tag": "Allow", "path": "*rep.response.Allow", "type": "*constant", 
@@ -191,7 +187,7 @@ func TestRadiusAgentCfgAsMapInterface(t *testing.T) {
 				utils.IDCfg:            "OutboundAUTHDryRun",
 				utils.FiltersCfg:       []string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 				utils.TenantCfg:        "cgrates.org",
-				utils.FlagsCfg:         []string{"*dryRun"},
+				utils.FlagsCfg:         []string{"*dryrun"},
 				utils.TimezoneCfg:      "",
 				utils.RequestFieldsCfg: []map[string]interface{}{},
 				utils.ReplyFieldsCfg: []map[string]interface{}{
@@ -247,7 +243,7 @@ func TestRadiusAgentCfgClone(t *testing.T) {
 				Filters:       []string{"*string:~*req.request_type:OutboundAUTH", "*string:~*req.Msisdn:497700056231"},
 				Flags:         utils.FlagsWithParams{utils.MetaDryRun: {}},
 				Timezone:      utils.EmptyString,
-				Tenant:        NewRSRParsersMustCompile("~*opts.*originID", utils.InfieldSep),
+				Tenant:        NewRSRParsersMustCompile("~*req.CGRID", utils.InfieldSep),
 				RequestFields: []*FCTemplate{},
 				ReplyFields: []*FCTemplate{
 					{
@@ -277,125 +273,5 @@ func TestRadiusAgentCfgClone(t *testing.T) {
 	}
 	if rcv.ClientDictionaries[utils.MetaDefault] = ""; ban.ClientDictionaries[utils.MetaDefault] != "/usr/share/cgrates/radius/dict/" {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffRadiusAgentJsonCfg(t *testing.T) {
-	var d *RadiusAgentJsonCfg
-
-	v1 := &RadiusAgentCfg{
-		Enabled:            false,
-		ListenNet:          "tcp",
-		ListenAuth:         "radius_auth",
-		ListenAcct:         "radius_account",
-		ClientSecrets:      map[string]string{},
-		ClientDictionaries: map[string]string{},
-		SessionSConns:      []string{"*localhost"},
-		RequestProcessors:  []*RequestProcessor{},
-	}
-
-	v2 := &RadiusAgentCfg{
-		Enabled:    true,
-		ListenNet:  "udp",
-		ListenAuth: "radius_auth2",
-		ListenAcct: "radius_account2",
-		ClientSecrets: map[string]string{
-			"radius_user": "radius_pass",
-		},
-		ClientDictionaries: map[string]string{
-			"radius_dict1": "radius_val1",
-		},
-		SessionSConns: []string{"*birpc"},
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID:      "REQ_PROC1",
-				Filters: []string{"filter1"},
-			},
-		},
-	}
-
-	expected := &RadiusAgentJsonCfg{
-		Enabled:     utils.BoolPointer(true),
-		Listen_net:  utils.StringPointer("udp"),
-		Listen_auth: utils.StringPointer("radius_auth2"),
-		Listen_acct: utils.StringPointer("radius_account2"),
-		Client_secrets: map[string]string{
-			"radius_user": "radius_pass",
-		},
-		Client_dictionaries: map[string]string{
-			"radius_dict1": "radius_val1",
-		},
-		Sessions_conns: &[]string{"*birpc"},
-		Request_processors: &[]*ReqProcessorJsnCfg{
-			{
-				ID:      utils.StringPointer("REQ_PROC1"),
-				Filters: &[]string{"filter1"},
-			},
-		},
-	}
-
-	rcv := diffRadiusAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v1 = v2
-	expected = &RadiusAgentJsonCfg{
-		Client_secrets:      map[string]string{},
-		Client_dictionaries: map[string]string{},
-		Request_processors: &[]*ReqProcessorJsnCfg{
-			{},
-		},
-	}
-	rcv = diffRadiusAgentJsonCfg(d, v1, v2, ";")
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-}
-
-func TestRadiusAgentCloneSection(t *testing.T) {
-	rdagCfg := &RadiusAgentCfg{
-		Enabled:    true,
-		ListenNet:  "udp",
-		ListenAuth: "radius_auth2",
-		ListenAcct: "radius_account2",
-		ClientSecrets: map[string]string{
-			"radius_user": "radius_pass",
-		},
-		ClientDictionaries: map[string]string{
-			"radius_dict1": "radius_val1",
-		},
-		SessionSConns: []string{"*birpc"},
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID:      "REQ_PROC1",
-				Filters: []string{"filter1"},
-			},
-		},
-	}
-
-	exp := &RadiusAgentCfg{
-		Enabled:    true,
-		ListenNet:  "udp",
-		ListenAuth: "radius_auth2",
-		ListenAcct: "radius_account2",
-		ClientSecrets: map[string]string{
-			"radius_user": "radius_pass",
-		},
-		ClientDictionaries: map[string]string{
-			"radius_dict1": "radius_val1",
-		},
-		SessionSConns: []string{"*birpc"},
-		RequestProcessors: []*RequestProcessor{
-			{
-				ID:      "REQ_PROC1",
-				Filters: []string{"filter1"},
-			},
-		},
-	}
-
-	rcv := rdagCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
 	}
 }

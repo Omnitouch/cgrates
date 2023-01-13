@@ -21,10 +21,12 @@ package ees
 import (
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 func TestNewRpcEE(t *testing.T) {
@@ -33,7 +35,7 @@ func TestNewRpcEE(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig())
+	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig(), make(map[string]chan rpcclient.ClientConnector))
 
 	rcv, err := NewRpcEE(eeSCfg, dc, connMgr)
 	if err != nil {
@@ -74,7 +76,7 @@ func TestRPCCfg(t *testing.T) {
 			ConcurrentRequests: 0,
 		},
 		codec:         utils.MetaJSON,
-		serviceMethod: utils.AdminSv1ComputeFilterIndexIDs,
+		serviceMethod: utils.APIerSv1ComputeFilterIndexes,
 	}
 	exp := &config.EventExporterCfg{
 		ID:                 utils.MetaDefault,
@@ -106,7 +108,7 @@ func TestRPCConnect(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig())
+	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig(), make(map[string]chan rpcclient.ClientConnector))
 	rpcEe, err := NewRpcEE(eeSCfg, dc, connMgr)
 	if err != nil {
 		t.Error(err)
@@ -116,42 +118,13 @@ func TestRPCConnect(t *testing.T) {
 	}
 }
 
-// func TestRPCExportEvent(t *testing.T) {
-// 	eeSCfg := config.NewDefaultCGRConfig().EEsCfg().GetDefaultExporter()
-// 	dc, err := newEEMetrics("Local")
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-// 	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig())
-// 	rpcEe, err := NewRpcEE(eeSCfg, dc, connMgr)
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-
-// 	// rpcEe.connMgr.
-
-// 	// internalCacheSChann := make(chan birpc.ClientConnector, 1)
-// 	// rpcEe.connMgr.AddInternalConn(utils.ConcatenatedKey(utils.MetaJSON, utils.MetaCaches), "", internalCacheSChann)
-// 	rpcEe.connIDs = []string{utils.ConcatenatedKey(utils.MetaJSON, utils.MetaCaches)utils.MetaInternal}
-
-// 	rpcEe.serviceMethod = utils.APIerSv1ExportToFolder
-// 	args := &utils.TenantWithAPIOpts{
-// 		Tenant:  "cgrates.org",
-// 		APIOpts: map[string]interface{}{},
-// 	}
-
-// 	if err := rpcEe.ExportEvent(context.Background(), args, ""); err != nil {
-// 		t.Error(err)
-// 	}
-// }
-
 func TestRPCClose(t *testing.T) {
 	eeSCfg := config.NewDefaultCGRConfig().EEsCfg().GetDefaultExporter()
 	dc, err := newEEMetrics("Local")
 	if err != nil {
 		t.Error(err)
 	}
-	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig())
+	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig(), make(map[string]chan rpcclient.ClientConnector))
 	rpcEe, err := NewRpcEE(eeSCfg, dc, connMgr)
 	if err != nil {
 		t.Error(err)
@@ -172,7 +145,7 @@ func TestRPCGetMetrics(t *testing.T) {
 			"just_a_field": "just_a_value",
 		},
 	}
-	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig())
+	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig(), make(map[string]chan rpcclient.ClientConnector))
 	rpcEe, err := NewRpcEE(eeSCfg, dc, connMgr)
 	if err != nil {
 		t.Error(err)
@@ -189,15 +162,15 @@ func TestRPCPrepareMap(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig())
+	connMgr := engine.NewConnManager(config.NewDefaultCGRConfig(), make(map[string]chan rpcclient.ClientConnector))
 	rpcEe, err := NewRpcEE(eeSCfg, dc, connMgr)
 	if err != nil {
 		t.Error(err)
 	}
 
-	exp := &utils.CGREvent{
+	cgrEv := &utils.CGREvent{
 		Tenant: "cgrates.org",
-		ID:     "testID1",
+		ID:     "CGRID1",
 		Event: map[string]interface{}{
 			utils.Usage: 21,
 		},
@@ -206,16 +179,7 @@ func TestRPCPrepareMap(t *testing.T) {
 		},
 	}
 
-	cgrEv := &utils.CGREvent{
-		Tenant: "cgrates.org",
-		ID:     "testID1",
-		Event: map[string]interface{}{
-			utils.Usage: 21,
-		},
-		APIOpts: map[string]interface{}{
-			utils.MetaSubsys: "*attributes",
-		},
-	}
+	exp := cgrEv
 
 	rcv, err := rpcEe.PrepareMap(cgrEv)
 	if err != nil {
@@ -224,5 +188,53 @@ func TestRPCPrepareMap(t *testing.T) {
 
 	if !reflect.DeepEqual(rcv, exp) {
 		t.Errorf("Expected %+v \n but received \n %+v", utils.ToJSON(exp), utils.ToJSON(rcv))
+	}
+}
+
+func TestRPCParseOpts(t *testing.T) {
+	rpcEE := &RPCee{
+		cfg: &config.EventExporterCfg{
+			Opts: &config.EventExporterOpts{
+				RPCCodec:        utils.StringPointer("RPCCodec"),
+				ServiceMethod:   utils.StringPointer("ServiceMethod"),
+				KeyPath:         utils.StringPointer("KeyPath"),
+				CertPath:        utils.StringPointer("CertPath"),
+				CAPath:          utils.StringPointer("CAPath"),
+				TLS:             utils.BoolPointer(true),
+				ConnIDs:         utils.SliceStringPointer([]string{"ConnID"}),
+				RPCConnTimeout:  utils.DurationPointer(time.Second),
+				RPCReplyTimeout: utils.DurationPointer(time.Minute),
+			},
+		},
+	}
+
+	exp := &RPCee{
+		cfg: &config.EventExporterCfg{
+			Opts: &config.EventExporterOpts{
+				RPCCodec:        utils.StringPointer("RPCCodec"),
+				ServiceMethod:   utils.StringPointer("ServiceMethod"),
+				KeyPath:         utils.StringPointer("KeyPath"),
+				CertPath:        utils.StringPointer("CertPath"),
+				CAPath:          utils.StringPointer("CAPath"),
+				TLS:             utils.BoolPointer(true),
+				ConnIDs:         utils.SliceStringPointer([]string{"ConnID"}),
+				RPCConnTimeout:  utils.DurationPointer(time.Second),
+				RPCReplyTimeout: utils.DurationPointer(time.Minute),
+			},
+		},
+		codec:         "RPCCodec",
+		serviceMethod: "ServiceMethod",
+		keyPath:       "KeyPath",
+		certPath:      "CertPath",
+		caPath:        "CAPath",
+		connIDs:       []string{"ConnID"},
+		connTimeout:   time.Second,
+		replyTimeout:  time.Minute,
+		tls:           true,
+	}
+	if err := rpcEE.parseOpts(); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(rpcEE, exp) {
+		t.Errorf("expected: <%+v>, \nreceived: <%+v>", exp, rpcEE)
 	}
 }

@@ -22,21 +22,20 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/apis"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewAttributeService returns the Attribute Service
 func NewAttributeService(cfg *config.CGRConfig, dm *DataDBService,
-	cacheS *CacheService, filterSChan chan *engine.FilterS,
-	server *cores.Server, internalChan chan birpc.ClientConnector,
-	anz *AnalyzerService, dspS *DispatcherService,
+	cacheS *engine.CacheS, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalChan chan rpcclient.ClientConnector,
+	anz *AnalyzerService,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &AttributeService{
 		connChan:    internalChan,
@@ -47,7 +46,6 @@ func NewAttributeService(cfg *config.CGRConfig, dm *DataDBService,
 		server:      server,
 		anz:         anz,
 		srvDep:      srvDep,
-		dspS:        dspS,
 	}
 }
 
@@ -56,83 +54,57 @@ type AttributeService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	dm          *DataDBService
-	cacheS      *CacheService
+	cacheS      *engine.CacheS
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
 
-	attrS    *engine.AttributeS
-	rpc      *apis.AttributeSv1         // useful on restart
-	connChan chan birpc.ClientConnector // publish the internal Subsystem when available
+	attrS    *engine.AttributeService
+	rpc      *v1.AttributeSv1               // useful on restart
+	connChan chan rpcclient.ClientConnector // publish the internal Subsystem when available
 	anz      *AnalyzerService
-	dspS     *DispatcherService
 	srvDep   map[string]*sync.WaitGroup
 }
 
 // Start should handle the service start
-func (attrS *AttributeService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (attrS *AttributeService) Start() (err error) {
 	if attrS.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 
-	if err = attrS.cacheS.WaitToPrecache(ctx,
-		utils.CacheAttributeProfiles,
-		utils.CacheAttributeFilterIndexes); err != nil {
-		return
-	}
+	<-attrS.cacheS.GetPrecacheChannel(utils.CacheAttributeProfiles)
+	<-attrS.cacheS.GetPrecacheChannel(utils.CacheAttributeFilterIndexes)
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, attrS.filterSChan); err != nil {
-		return
-	}
-
-	var datadb *engine.DataManager
-	if datadb, err = attrS.dm.WaitForDM(ctx); err != nil {
-		return
-	}
+	filterS := <-attrS.filterSChan
+	attrS.filterSChan <- filterS
+	dbchan := attrS.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
 	attrS.Lock()
 	defer attrS.Unlock()
 	attrS.attrS = engine.NewAttributeService(datadb, filterS, attrS.cfg)
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem", utils.CoreS, utils.AttributeS))
-	attrS.rpc = apis.NewAttributeSv1(attrS.attrS)
-	srv, _ := engine.NewService(attrS.rpc)
-	// srv, _ := birpc.NewService(attrS.rpc, "", false)
+	attrS.rpc = v1.NewAttributeSv1(attrS.attrS)
 	if !attrS.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			attrS.server.RpcRegister(s)
-		}
+		attrS.server.RpcRegister(attrS.rpc)
 	}
-	dspShtdChan := attrS.dspS.RegisterShutdownChan(attrS.ServiceName())
-	go func() {
-		for {
-			if _, closed := <-dspShtdChan; closed {
-				return
-			}
-			if attrS.IsRunning() {
-				attrS.server.RpcRegister(srv)
-			}
-
-		}
-	}()
-	attrS.connChan <- attrS.anz.GetInternalCodec(srv, utils.AttributeS)
+	attrS.connChan <- attrS.anz.GetInternalCodec(attrS.rpc, utils.AttributeS)
 	return
 }
 
 // Reload handles the change of config
-func (attrS *AttributeService) Reload(*context.Context, context.CancelFunc) (err error) {
+func (attrS *AttributeService) Reload() (err error) {
 	return // for the moment nothing to reload
 }
 
 // Shutdown stops the service
 func (attrS *AttributeService) Shutdown() (err error) {
 	attrS.Lock()
+	defer attrS.Unlock()
 	attrS.attrS.Shutdown()
 	attrS.attrS = nil
 	attrS.rpc = nil
 	<-attrS.connChan
-	attrS.server.RpcUnregisterName(utils.AttributeSv1)
-	attrS.dspS.UnregisterShutdownChan(attrS.ServiceName())
-	attrS.Unlock()
 	return
 }
 
@@ -140,7 +112,7 @@ func (attrS *AttributeService) Shutdown() (err error) {
 func (attrS *AttributeService) IsRunning() bool {
 	attrS.RLock()
 	defer attrS.RUnlock()
-	return attrS.attrS != nil
+	return attrS != nil && attrS.attrS != nil
 }
 
 // ServiceName returns the service name

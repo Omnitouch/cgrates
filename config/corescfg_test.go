@@ -23,8 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestCoreSloadFromJsonCfg(t *testing.T) {
@@ -53,7 +52,9 @@ func TestCoreSloadFromJsonCfg(t *testing.T) {
 	}
 	if jsnCfg, err := NewCgrJsonCfgFromBytes([]byte(cfgJSONStr)); err != nil {
 		t.Error(err)
-	} else if err = alS.Load(context.Background(), jsnCfg, nil); err != nil {
+	} else if jsnalS, err := jsnCfg.CoreSCfgJson(); err != nil {
+		t.Error(err)
+	} else if err = alS.loadFromJSONCfg(jsnalS); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expected, alS) {
 		t.Errorf("Expected: %+v , received: %+v", expected, alS)
@@ -92,9 +93,11 @@ func TestCoreSAsMapInterface(t *testing.T) {
 	}
 	if jsnCfg, err := NewCgrJsonCfgFromBytes([]byte(cfgJSONStr)); err != nil {
 		t.Error(err)
-	} else if err = alS.Load(context.Background(), jsnCfg, nil); err != nil {
+	} else if jsnalS, err := jsnCfg.CoreSCfgJson(); err != nil {
 		t.Error(err)
-	} else if rcv := alS.AsMapInterface(""); !reflect.DeepEqual(eMap, rcv) {
+	} else if err = alS.loadFromJSONCfg(jsnalS); err != nil {
+		t.Error(err)
+	} else if rcv := alS.AsMapInterface(); !reflect.DeepEqual(eMap, rcv) {
 		t.Errorf("Expected: %+v\nReceived: %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 	eMap[utils.CapsStatsIntervalCfg] = "1s"
@@ -105,7 +108,7 @@ func TestCoreSAsMapInterface(t *testing.T) {
 		ShutdownTimeout:   time.Second,
 		CapsStrategy:      utils.MetaBusy,
 	}
-	if rcv := alS.AsMapInterface(""); !reflect.DeepEqual(eMap, rcv) {
+	if rcv := alS.AsMapInterface(); !reflect.DeepEqual(eMap, rcv) {
 		t.Errorf("Expected: %+v\nReceived: %+v", utils.ToJSON(eMap), utils.ToJSON(rcv))
 	}
 }
@@ -123,85 +126,5 @@ func TestCoreSCfgClone(t *testing.T) {
 	}
 	if rcv.Caps = 1; cS.Caps != 0 {
 		t.Errorf("Expected clone to not modify the cloned")
-	}
-}
-
-func TestDiffCoreSJsonCfg(t *testing.T) {
-	var d *CoreSJsonCfg
-
-	v1 := &CoreSCfg{
-		Caps:              2,
-		CapsStrategy:      utils.MetaTopUpReset,
-		CapsStatsInterval: 3 * time.Second,
-		ShutdownTimeout:   5 * time.Minute,
-	}
-
-	v2 := &CoreSCfg{
-		Caps:              3,
-		CapsStrategy:      utils.MetaMaxCostDisconnect,
-		CapsStatsInterval: 1 * time.Second,
-		ShutdownTimeout:   2 * time.Minute,
-	}
-
-	expected := &CoreSJsonCfg{
-		Caps:                utils.IntPointer(3),
-		Caps_strategy:       utils.StringPointer(utils.MetaMaxCostDisconnect),
-		Caps_stats_interval: utils.StringPointer("1s"),
-		Shutdown_timeout:    utils.StringPointer("2m0s"),
-	}
-
-	rcv := diffCoreSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
-	}
-
-	v2_2 := v1
-	expected2 := &CoreSJsonCfg{}
-
-	rcv = diffCoreSJsonCfg(d, v1, v2_2)
-	if !reflect.DeepEqual(rcv, expected2) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected2), utils.ToJSON(rcv))
-	}
-}
-
-func TestCoreSCloneSection(t *testing.T) {
-	coreSCfg := &CoreSCfg{
-		Caps:              2,
-		CapsStrategy:      utils.MetaTopUpReset,
-		CapsStatsInterval: 3 * time.Second,
-		ShutdownTimeout:   5 * time.Minute,
-	}
-
-	exp := &CoreSCfg{
-		Caps:              2,
-		CapsStrategy:      utils.MetaTopUpReset,
-		CapsStatsInterval: 3 * time.Second,
-		ShutdownTimeout:   5 * time.Minute,
-	}
-
-	rcv := coreSCfg.CloneSection()
-	if !reflect.DeepEqual(rcv, exp) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(exp), utils.ToJSON(rcv))
-	}
-}
-
-func TestDiffCoreSJsonCfgEEsConnsNotEqual(t *testing.T) {
-	var d *CoreSJsonCfg
-
-	v1 := &CoreSCfg{
-		EEsConns: []string{"sltest1", "sltest2"},
-	}
-
-	v2 := &CoreSCfg{
-		EEsConns: []string{"sltest3", "sltest4"},
-	}
-
-	expected := &CoreSJsonCfg{
-		Ees_conns: utils.SliceStringPointer([]string{"sltest3", "sltest4"}),
-	}
-
-	rcv := diffCoreSJsonCfg(d, v1, v2)
-	if !reflect.DeepEqual(rcv, expected) {
-		t.Errorf("Expected %v \n but received \n %v", utils.ToJSON(expected), utils.ToJSON(rcv))
 	}
 }

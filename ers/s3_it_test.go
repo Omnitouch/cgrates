@@ -33,9 +33,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -53,7 +53,7 @@ func TestS3ER(t *testing.T) {
 	"readers": [
 		{
 			"id": "s3",										// identifier of the EventReader profile
-			"type": "*s3JSONMap",							// reader type <*fileCSV>
+			"type": "*s3_json_map",							// reader type <*file_csv>
 			"run_delay":  "-1",									// sleep interval in seconds between consecutive runs, -1 to use automation via inotify or 0 to disable running all together
 			"concurrent_requests": 1024,						// maximum simultaneous requests/files to process, 0 for unlimited
 			"source_path": "s3.us-east-2.amazonaws.com",		// read data from this path
@@ -69,7 +69,7 @@ func TestS3ER(t *testing.T) {
 				// "awsToken": "".
 			},
 			"fields":[									// import fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
-				{"tag": "OriginID", "type": "*composed", "value": "~*req.OriginID", "path": "*cgreq.OriginID"},
+				{"tag": "CGRID", "type": "*composed", "value": "~*req.CGRID", "path": "*cgreq.CGRID"},
 			],
 		},
 	],
@@ -86,7 +86,7 @@ func TestS3ER(t *testing.T) {
 	rdrExit = make(chan struct{}, 1)
 
 	if rdr, err = NewS3ER(cfg, 1, rdrEvents, make(chan *erEvent, 1),
-		rdrErr, new(engine.FilterS), rdrExit, nil); err != nil {
+		rdrErr, new(engine.FilterS), rdrExit); err != nil {
 		t.Fatal(err)
 	}
 	s3Rdr := rdr.(*S3ER)
@@ -100,11 +100,11 @@ func TestS3ER(t *testing.T) {
 	}
 	scv := s3manager.NewUploader(sess)
 
-	randomOriginID := utils.UUIDSha1Prefix()
+	randomCGRID := utils.UUIDSha1Prefix()
 	scv.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(s3Rdr.bucket),
 		Key:    aws.String("home/test.json"),
-		Body:   bytes.NewReader([]byte(fmt.Sprintf(`{"OriginID": "%s"}`, randomOriginID))),
+		Body:   bytes.NewReader([]byte(fmt.Sprintf(`{"CGRID": "%s"}`, randomCGRID))),
 	})
 
 	if err = rdr.Serve(); err != nil {
@@ -121,8 +121,9 @@ func TestS3ER(t *testing.T) {
 		expected := &utils.CGREvent{
 			Tenant: "cgrates.org",
 			ID:     ev.cgrEvent.ID,
+			Time:   ev.cgrEvent.Time,
 			Event: map[string]interface{}{
-				"OriginID": randomOriginID,
+				"CGRID": randomCGRID,
 			},
 		}
 		if !reflect.DeepEqual(ev.cgrEvent, expected) {
@@ -176,10 +177,11 @@ func TestNewS3ER(t *testing.T) {
 	}
 
 	rdr, err := NewS3ER(cfg, 1, nil, nil,
-		nil, nil, nil, nil)
+		nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rdr.(*S3ER).poster = nil
 	if !reflect.DeepEqual(rdr, expected) {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, rdr)
 	}
@@ -190,11 +192,18 @@ func TestNewS3ERCase2(t *testing.T) {
 	expected := &S3ER{
 		cgrCfg:    cfg,
 		cfgIdx:    0,
+		fltrS:     nil,
+		rdrEvents: nil,
+		rdrExit:   nil,
+		rdrErr:    nil,
+		cap:       nil,
 		awsRegion: "",
 		awsID:     "",
 		awsKey:    "",
 		awsToken:  "",
 		bucket:    "cgrates_cdrs",
+		session:   nil,
+		poster:    nil,
 	}
 	cfg.ERsCfg().Readers = []*config.EventReaderCfg{
 		{
@@ -210,10 +219,11 @@ func TestNewS3ERCase2(t *testing.T) {
 	}
 
 	rdr, err := NewS3ER(cfg, 0, nil, nil,
-		nil, nil, nil, nil)
+		nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rdr.(*S3ER).poster = nil
 	expected.cap = rdr.(*S3ER).cap
 	if !reflect.DeepEqual(rdr, expected) {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", expected, rdr)

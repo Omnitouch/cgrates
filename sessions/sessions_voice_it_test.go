@@ -21,14 +21,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package sessions
 
 import (
+	"fmt"
 	"net/rpc"
 	"path"
 	"testing"
+	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 )
 
 var (
@@ -40,22 +41,19 @@ var (
 	sessionsVoiceTests = []func(t *testing.T){
 		testSessionsVoiceInitCfg,
 		testSessionsVoiceResetDataDb,
-
-		/*
-			testSessionsVoiceStartEngine,
-			testSessionsVoiceApierRpcConn,
-			testSessionsVoiceTPFromFolder,
-			testSessionsVoiceMonetaryRefund,
-			testSessionsVoiceVoiceRefund,
-			testSessionsVoiceMixedRefund,
-			testSessionsVoiceLastUsed,
-			testSessionsVoiceLastUsedEnd,
-			testSessionsVoiceLastUsedNotFixed,
-			testSessionsVoiceSessionTTL,
-			testSessionsVoiceSessionTTLWithRelocate,
-			testSessionsVoiceRelocateWithOriginIDPrefix,
-
-		*/
+		testSessionsVoiceResetStorDb,
+		testSessionsVoiceStartEngine,
+		testSessionsVoiceApierRpcConn,
+		testSessionsVoiceTPFromFolder,
+		testSessionsVoiceMonetaryRefund,
+		testSessionsVoiceVoiceRefund,
+		testSessionsVoiceMixedRefund,
+		testSessionsVoiceLastUsed,
+		testSessionsVoiceLastUsedEnd,
+		testSessionsVoiceLastUsedNotFixed,
+		testSessionsVoiceSessionTTL,
+		testSessionsVoiceSessionTTLWithRelocate,
+		testSessionsVoiceRelocateWithOriginIDPrefix,
 		testSessionsVoiceStopCgrEngine,
 	}
 )
@@ -82,7 +80,7 @@ func testSessionsVoiceInitCfg(t *testing.T) {
 	voiceCfgPath = path.Join(*dataDir, "conf", "samples", voiceCfgDIR)
 	// Init config first
 	var err error
-	voiceCfg, err = config.NewCGRConfigFromPath(context.Background(), voiceCfgPath)
+	voiceCfg, err = config.NewCGRConfigFromPath(voiceCfgPath)
 	if err != nil {
 		t.Error(err)
 	}
@@ -90,7 +88,14 @@ func testSessionsVoiceInitCfg(t *testing.T) {
 
 // Remove data in both rating and accounting db
 func testSessionsVoiceResetDataDb(t *testing.T) {
-	if err := engine.InitDataDB(voiceCfg); err != nil {
+	if err := engine.InitDataDb(voiceCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Wipe out the cdr database
+func testSessionsVoiceResetStorDb(t *testing.T) {
+	if err := engine.InitStorDb(voiceCfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,8 +115,6 @@ func testSessionsVoiceApierRpcConn(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-/*
 
 // Load the tariff plan, creating accounts and their balances
 func testSessionsVoiceTPFromFolder(t *testing.T) {
@@ -829,7 +832,7 @@ func testSessionsVoiceSessionTTL(t *testing.T) {
 			Filters: []string{
 				fmt.Sprintf("*string:~*req.%s:%s", utils.RunID, utils.MetaDefault),
 				fmt.Sprintf("*string:~*req.%s:%s", utils.OriginID, "12372-1"),
-				"*string:~no_field:10",
+				"*string:~*req.no_field:10",
 			},
 		}, &aSessions); err == nil ||
 		err.Error() != utils.ErrNotFound.Error() {
@@ -926,8 +929,8 @@ func testSessionsVoiceSessionTTL(t *testing.T) {
 		if cdrs[0].Usage != "2m30.05s" {
 			t.Errorf("Unexpected CDR Usage received, cdr: %v %+v ", cdrs[0].Usage, cdrs[0])
 		}
-		if cdrs[0].Cost != 1.5332 {
-			t.Errorf("Unexpected CDR Cost received, cdr: %v %+v ", cdrs[0].Cost, cdrs[0])
+		if cdrs[0].Cost != 1.5334 {
+			t.Errorf("Unexpected CDR Cost received, cdr: %v %+v ", cdrs[0].Cost, utils.ToJSON(cdrs[0]))
 		}
 	}
 }
@@ -1314,8 +1317,6 @@ func testSessionsVoiceRelocateWithOriginIDPrefix(t *testing.T) {
 		}
 	}
 }
-
-*/
 
 //This test was commented before
 /*

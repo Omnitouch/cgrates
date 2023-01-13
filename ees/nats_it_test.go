@@ -22,19 +22,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package ees
 
 import (
+	"os"
 	"os/exec"
 	"path"
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/nats-io/nats.go"
 )
 
-func TestNatsEE(t *testing.T) {
+func TestNatsEEJetStream(t *testing.T) {
 	testCreateDirectory(t)
 	var err error
 	cmd := exec.Command("nats-server", "-js") // Start the nats-server.
@@ -43,7 +43,7 @@ func TestNatsEE(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond)
 	defer cmd.Process.Kill()
-	cgrCfg, err := config.NewCGRConfigFromPath(context.Background(), path.Join(*dataDir, "conf", "samples", "ees"))
+	cgrCfg, err := config.NewCGRConfigFromPath(path.Join(*dataDir, "conf", "samples", "ees"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestNatsEE(t *testing.T) {
 			"Destination": "1002",
 		},
 	}
-	if err := exportEventWithExporter(context.Background(), evExp, nil, cgrEv, true, cgrCfg, new(engine.FilterS), "cgrates.org"); err != nil {
+	if err := exportEventWithExporter(evExp, cgrEv, true, cgrCfg, new(engine.FilterS)); err != nil {
 		t.Fatal(err)
 	}
 	testCleanDirectory(t)
@@ -122,7 +122,7 @@ func TestNatsEE(t *testing.T) {
 	}
 }
 
-func TestNatsEE2(t *testing.T) {
+func TestNatsEE(t *testing.T) {
 	testCreateDirectory(t)
 	exec.Command("pkill", "nats-server")
 
@@ -133,7 +133,7 @@ func TestNatsEE2(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	defer cmd.Process.Kill()
 
-	cgrCfg, err := config.NewCGRConfigFromPath(context.Background(), path.Join(*dataDir, "conf", "samples", "ees"))
+	cgrCfg, err := config.NewCGRConfigFromPath(path.Join(*dataDir, "conf", "samples", "ees"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestNatsEE2(t *testing.T) {
 			"Destination": "1002",
 		},
 	}
-	if err := exportEventWithExporter(context.Background(), evExp, nil, cgrEv, true, cgrCfg, new(engine.FilterS), "cgrates.org"); err != nil {
+	if err := exportEventWithExporter(evExp, cgrEv, true, cgrCfg, new(engine.FilterS)); err != nil {
 		t.Fatal(err)
 	}
 	testCleanDirectory(t)
@@ -185,5 +185,33 @@ func TestNatsEE2(t *testing.T) {
 		}
 	case <-time.After(50 * time.Millisecond):
 		t.Fatal("Time limit exceeded")
+	}
+}
+
+func TestGetNatsOptsSeedFile(t *testing.T) {
+	if _, err := os.Create("/tmp/nkey.txt"); err != nil {
+		t.Error(err)
+	}
+	defer os.Remove("/tmp/nkey.txt")
+	nkey := "SUACSSL3UAHUDXKFSNVUZRF5UHPMWZ6BFDTJ7M6USDXIEDNPPQYYYCU3VY"
+	os.WriteFile("/tmp/nkey.txt", []byte(nkey), 0777)
+
+	opts := &config.EventExporterOpts{
+		NATSSeedFile: utils.StringPointer("/tmp/nkey.txt"),
+	}
+
+	nodeID := "node_id1"
+	connTimeout := 2 * time.Second
+
+	_, err := GetNatsOpts(opts, nodeID, connTimeout)
+	if err != nil {
+		t.Error(err)
+	}
+
+	//test error
+	os.WriteFile("/tmp/nkey.txt", []byte(""), 0777)
+	_, err = GetNatsOpts(opts, nodeID, connTimeout)
+	if err.Error() != "no nkey seed found" {
+		t.Errorf("Expected %v \n but received \n %v", err.Error(), "no nkey seed found")
 	}
 }

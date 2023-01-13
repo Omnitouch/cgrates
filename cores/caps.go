@@ -20,12 +20,14 @@ package cores
 
 import (
 	"net"
+	"net/rpc"
+	"net/rpc/jsonrpc"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/jsonrpc"
-	"github.com/Omnitouch/cgrates/analyzers"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cenkalti/rpc2"
+	jsonrpc2 "github.com/cenkalti/rpc2/jsonrpc"
+	"github.com/cgrates/cgrates/analyzers"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
@@ -37,8 +39,8 @@ type conn interface {
 	RemoteAddr() net.Addr
 }
 
-func newCapsGOBCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS) (r birpc.ServerCodec) {
-	r = newCapsServerCodec(birpc.NewServerCodec(conn), caps)
+func newCapsGOBCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerService) (r rpc.ServerCodec) {
+	r = newCapsServerCodec(newGobServerCodec(conn), caps)
 	if anz != nil {
 		from := conn.RemoteAddr()
 		var fromstr string
@@ -55,7 +57,7 @@ func newCapsGOBCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS) (r 
 	return
 }
 
-func newCapsJSONCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS) (r birpc.ServerCodec) {
+func newCapsJSONCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerService) (r rpc.ServerCodec) {
 	r = newCapsServerCodec(jsonrpc.NewServerCodec(conn), caps)
 	if anz != nil {
 		from := conn.RemoteAddr()
@@ -73,7 +75,7 @@ func newCapsJSONCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS) (r
 	return
 }
 
-func newCapsServerCodec(sc birpc.ServerCodec, caps *engine.Caps) birpc.ServerCodec {
+func newCapsServerCodec(sc rpc.ServerCodec, caps *engine.Caps) rpc.ServerCodec {
 	if !caps.IsLimited() {
 		return sc
 	}
@@ -84,11 +86,11 @@ func newCapsServerCodec(sc birpc.ServerCodec, caps *engine.Caps) birpc.ServerCod
 }
 
 type capsServerCodec struct {
-	sc   birpc.ServerCodec
+	sc   rpc.ServerCodec
 	caps *engine.Caps
 }
 
-func (c *capsServerCodec) ReadRequestHeader(r *birpc.Request) error {
+func (c *capsServerCodec) ReadRequestHeader(r *rpc.Request) error {
 	return c.sc.ReadRequestHeader(r)
 }
 
@@ -98,7 +100,7 @@ func (c *capsServerCodec) ReadRequestBody(x interface{}) error {
 	}
 	return c.sc.ReadRequestBody(x)
 }
-func (c *capsServerCodec) WriteResponse(r *birpc.Response, x interface{}) error {
+func (c *capsServerCodec) WriteResponse(r *rpc.Response, x interface{}) error {
 	if r.Error == utils.ErrMaxConcurentRPCExceededNoCaps.Error() {
 		r.Error = utils.ErrMaxConcurentRPCExceeded.Error()
 	} else {
@@ -108,8 +110,8 @@ func (c *capsServerCodec) WriteResponse(r *birpc.Response, x interface{}) error 
 }
 func (c *capsServerCodec) Close() error { return c.sc.Close() }
 
-func newCapsBiRPCGOBCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS) (r birpc.BirpcCodec) {
-	r = newCapsBiRPCCodec(birpc.NewGobBirpcCodec(conn), caps)
+func newCapsBiRPCGOBCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerService) (r rpc2.Codec) {
+	r = newCapsBiRPCCodec(rpc2.NewGobCodec(conn), caps)
 	if anz != nil {
 		from := conn.RemoteAddr()
 		var fromstr string
@@ -126,8 +128,8 @@ func newCapsBiRPCGOBCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS
 	return
 }
 
-func newCapsBiRPCJSONCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerS) (r birpc.BirpcCodec) {
-	r = newCapsBiRPCCodec(jsonrpc.NewJSONBirpcCodec(conn), caps)
+func newCapsBiRPCJSONCodec(conn conn, caps *engine.Caps, anz *analyzers.AnalyzerService) (r rpc2.Codec) {
+	r = newCapsBiRPCCodec(jsonrpc2.NewJSONCodec(conn), caps)
 	if anz != nil {
 		from := conn.RemoteAddr()
 		var fromstr string
@@ -144,7 +146,7 @@ func newCapsBiRPCJSONCodec(conn conn, caps *engine.Caps, anz *analyzers.Analyzer
 	return
 }
 
-func newCapsBiRPCCodec(sc birpc.BirpcCodec, caps *engine.Caps) birpc.BirpcCodec {
+func newCapsBiRPCCodec(sc rpc2.Codec, caps *engine.Caps) rpc2.Codec {
 	if !caps.IsLimited() {
 		return sc
 	}
@@ -155,13 +157,13 @@ func newCapsBiRPCCodec(sc birpc.BirpcCodec, caps *engine.Caps) birpc.BirpcCodec 
 }
 
 type capsBiRPCCodec struct {
-	sc   birpc.BirpcCodec
+	sc   rpc2.Codec
 	caps *engine.Caps
 }
 
 // ReadHeader must read a message and populate either the request
 // or the response by inspecting the incoming message.
-func (c *capsBiRPCCodec) ReadHeader(req *birpc.Request, resp *birpc.Response) (err error) {
+func (c *capsBiRPCCodec) ReadHeader(req *rpc2.Request, resp *rpc2.Response) (err error) {
 	return c.sc.ReadHeader(req, resp)
 }
 
@@ -179,12 +181,12 @@ func (c *capsBiRPCCodec) ReadResponseBody(x interface{}) error {
 }
 
 // WriteRequest must be safe for concurrent use by multiple goroutines.
-func (c *capsBiRPCCodec) WriteRequest(req *birpc.Request, x interface{}) error {
+func (c *capsBiRPCCodec) WriteRequest(req *rpc2.Request, x interface{}) error {
 	return c.sc.WriteRequest(req, x)
 }
 
 // WriteResponse must be safe for concurrent use by multiple goroutines.
-func (c *capsBiRPCCodec) WriteResponse(r *birpc.Response, x interface{}) error {
+func (c *capsBiRPCCodec) WriteResponse(r *rpc2.Response, x interface{}) error {
 	if r.Error == utils.ErrMaxConcurentRPCExceededNoCaps.Error() {
 		r.Error = utils.ErrMaxConcurentRPCExceeded.Error()
 	} else {

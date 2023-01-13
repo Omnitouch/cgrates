@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/miekg/dns"
 )
 

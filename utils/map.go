@@ -23,15 +23,126 @@ import (
 	"strings"
 )
 
-func MapStringToInt64(in map[string]string) (mapout map[string]int64, err error) {
-	mapout = make(map[string]int64, len(in))
+type StringMap map[string]bool
+
+func NewStringMap(s ...string) StringMap {
+	result := make(StringMap)
+	for _, v := range s {
+		v = strings.TrimSpace(v)
+		if v != EmptyString {
+			if strings.HasPrefix(v, NegativePrefix) {
+				result[v[1:]] = false
+			} else {
+				result[v] = true
+			}
+		}
+	}
+	return result
+}
+
+func ParseStringMap(s string) StringMap {
+	if s == MetaZero {
+		return make(StringMap)
+	}
+	return StringMapFromSlice(strings.Split(s, InfieldSep))
+}
+
+func (sm StringMap) Equal(om StringMap) bool {
+	if sm == nil && om != nil {
+		return false
+	}
+	if len(sm) != len(om) {
+		return false
+	}
+	for key := range sm {
+		if !om[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func (sm StringMap) Includes(om StringMap) bool {
+	if len(sm) < len(om) {
+		return false
+	}
+	for key := range om {
+		if !sm[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func (sm StringMap) Slice() []string {
+	result := make([]string, len(sm))
+	i := 0
+	for k := range sm {
+		result[i] = k
+		i++
+	}
+	return result
+}
+
+func (sm StringMap) IsEmpty() bool {
+	return sm == nil ||
+		len(sm) == 0 ||
+		sm[MetaAny]
+}
+
+func StringMapFromSlice(s []string) StringMap {
+	result := make(StringMap, len(s))
+	for _, v := range s {
+		v = strings.TrimSpace(v)
+		if v != EmptyString {
+			if strings.HasPrefix(v, NegativePrefix) {
+				result[v[1:]] = false
+			} else {
+				result[v] = true
+			}
+		}
+	}
+	return result
+}
+
+func (sm StringMap) Copy(o StringMap) {
+	for k, v := range o {
+		sm[k] = v
+	}
+}
+
+func (sm StringMap) Clone() StringMap {
+	result := make(StringMap, len(sm))
+	result.Copy(sm)
+	return result
+}
+
+func (sm StringMap) String() string {
+	return strings.Join(sm.Slice(), InfieldSep)
+}
+
+func (sm StringMap) GetOne() string {
+	for key := range sm {
+		return key
+	}
+	return EmptyString
+}
+
+func (sm StringMap) HasKey(key string) (has bool) {
+	_, has = sm[key]
+	return
+}
+
+func MapStringToInt64(in map[string]string) (out map[string]int64, err error) {
+	mapout := make(map[string]int64, len(in))
 	for key, val := range in {
-		mapout[key], err = strconv.ParseInt(val, 10, 64)
+		x, err := strconv.Atoi(val)
 		if err != nil {
 			return nil, err
 		}
+		mapout[key] = int64(x)
 	}
-	return
+	return mapout, nil
 }
 
 // FlagsWithParamsFromSlice construct a  FlagsWithParams from the given slice
@@ -161,7 +272,7 @@ func (fWp FlagsWithParams) GetBool(key string) (b bool) {
 	if v, b = fWp[key]; !b {
 		return // not present means false
 	}
-	if len(v) == 0 {
+	if v == nil || len(v) == 0 {
 		return true // empty map
 	}
 	return v.Has(TrueStr) || !v.Has(FalseStr)
@@ -179,14 +290,22 @@ func (fWp FlagsWithParams) Clone() (cln FlagsWithParams) {
 	return
 }
 
-func MapStringStringEqual(v1, v2 map[string]string) bool {
-	if len(v1) != len(v2) {
-		return false
+func (sm StringMap) FieldAsInterface(fldPath []string) (val interface{}, err error) {
+	if sm == nil || len(fldPath) != 1 {
+		return nil, ErrNotFound
 	}
-	for k, val2 := range v2 {
-		if val1, has := v1[k]; !has || val1 != val2 {
-			return false
-		}
+	bl, has := sm[fldPath[0]]
+	if !has {
+		return nil, ErrNotFound
 	}
-	return true
+	return bl, nil
+}
+
+func (sm StringMap) FieldAsString(fldPath []string) (val string, err error) {
+	var iface interface{}
+	iface, err = sm.FieldAsInterface(fldPath)
+	if err != nil {
+		return
+	}
+	return IfaceAsString(iface), nil
 }

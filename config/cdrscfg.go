@@ -19,219 +19,212 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package config
 
 import (
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/utils"
 )
-
-const (
-	CDRsAccountsDftOpt   = false
-	CDRsAttributesDftOpt = false
-	CDRsChargersDftOpt   = false
-	CDRsExportDftOpt     = false
-	CDRsRatesDftOpt      = false
-	CDRsStatsDftOpt      = false
-	CDRsThresholdsDftOpt = false
-)
-
-type CdrsOpts struct {
-	Accounts   []*utils.DynamicBoolOpt
-	Attributes []*utils.DynamicBoolOpt
-	Chargers   []*utils.DynamicBoolOpt
-	Export     []*utils.DynamicBoolOpt
-	Rates      []*utils.DynamicBoolOpt
-	Stats      []*utils.DynamicBoolOpt
-	Thresholds []*utils.DynamicBoolOpt
-}
 
 // CdrsCfg is the CDR server
 type CdrsCfg struct {
 	Enabled          bool       // Enable CDR Server service
 	ExtraFields      RSRParsers // Extra fields to store in CDRs
+	StoreCdrs        bool       // store cdrs in storDb
 	SMCostRetries    int
 	ChargerSConns    []string
+	RaterConns       []string
 	AttributeSConns  []string
 	ThresholdSConns  []string
 	StatSConns       []string
 	OnlineCDRExports []string // list of CDRE templates to use for real-time CDR exports
-	ActionSConns     []string
+	SchedulerConns   []string
 	EEsConns         []string
-	RateSConns       []string
-	AccountSConns    []string
-	Opts             *CdrsOpts
-}
-
-// loadCdrsCfg loads the Cdrs section of the configuration
-func (cdrscfg *CdrsCfg) Load(ctx *context.Context, jsnCfg ConfigDB, _ *CGRConfig) (err error) {
-	jsnCdrsCfg := new(CdrsJsonCfg)
-	if err = jsnCfg.GetSection(ctx, CDRsJSON, jsnCdrsCfg); err != nil {
-		return
-	}
-	return cdrscfg.loadFromJSONCfg(jsnCdrsCfg)
-}
-
-func (cdrsOpts *CdrsOpts) loadFromJSONCfg(jsnCfg *CdrsOptsJson) {
-	if jsnCfg == nil {
-		return
-	}
-	if jsnCfg.Accounts != nil {
-		cdrsOpts.Accounts = append(cdrsOpts.Accounts, jsnCfg.Accounts...)
-	}
-	if jsnCfg.Attributes != nil {
-		cdrsOpts.Attributes = append(cdrsOpts.Attributes, jsnCfg.Attributes...)
-	}
-	if jsnCfg.Chargers != nil {
-		cdrsOpts.Chargers = append(cdrsOpts.Chargers, jsnCfg.Chargers...)
-	}
-	if jsnCfg.Export != nil {
-		cdrsOpts.Export = append(cdrsOpts.Export, jsnCfg.Export...)
-	}
-	if jsnCfg.Rates != nil {
-		cdrsOpts.Rates = append(cdrsOpts.Rates, jsnCfg.Rates...)
-	}
-	if jsnCfg.Stats != nil {
-		cdrsOpts.Stats = append(cdrsOpts.Stats, jsnCfg.Stats...)
-	}
-	if jsnCfg.Thresholds != nil {
-		cdrsOpts.Thresholds = append(cdrsOpts.Thresholds, jsnCfg.Thresholds...)
-	}
 }
 
 // loadFromJSONCfg loads Cdrs config from JsonCfg
 func (cdrscfg *CdrsCfg) loadFromJSONCfg(jsnCdrsCfg *CdrsJsonCfg) (err error) {
 	if jsnCdrsCfg == nil {
-		return
+		return nil
 	}
 	if jsnCdrsCfg.Enabled != nil {
 		cdrscfg.Enabled = *jsnCdrsCfg.Enabled
 	}
 	if jsnCdrsCfg.Extra_fields != nil {
 		if cdrscfg.ExtraFields, err = NewRSRParsersFromSlice(*jsnCdrsCfg.Extra_fields); err != nil {
-			return
+			return err
 		}
+	}
+	if jsnCdrsCfg.Store_cdrs != nil {
+		cdrscfg.StoreCdrs = *jsnCdrsCfg.Store_cdrs
 	}
 	if jsnCdrsCfg.Session_cost_retries != nil {
 		cdrscfg.SMCostRetries = *jsnCdrsCfg.Session_cost_retries
 	}
 	if jsnCdrsCfg.Chargers_conns != nil {
-		cdrscfg.ChargerSConns = updateInternalConns(*jsnCdrsCfg.Chargers_conns, utils.MetaChargers)
+		cdrscfg.ChargerSConns = make([]string, len(*jsnCdrsCfg.Chargers_conns))
+		for idx, connID := range *jsnCdrsCfg.Chargers_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.ChargerSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.ChargerSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers)
+			}
+		}
+	}
+	if jsnCdrsCfg.Rals_conns != nil {
+		cdrscfg.RaterConns = make([]string, len(*jsnCdrsCfg.Rals_conns))
+		for idx, connID := range *jsnCdrsCfg.Rals_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.RaterConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.RaterConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder)
+			}
+		}
 	}
 	if jsnCdrsCfg.Attributes_conns != nil {
-		cdrscfg.AttributeSConns = updateInternalConns(*jsnCdrsCfg.Attributes_conns, utils.MetaAttributes)
+		cdrscfg.AttributeSConns = make([]string, len(*jsnCdrsCfg.Attributes_conns))
+		for idx, connID := range *jsnCdrsCfg.Attributes_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.AttributeSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.AttributeSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes)
+			}
+		}
 	}
 	if jsnCdrsCfg.Thresholds_conns != nil {
-		cdrscfg.ThresholdSConns = updateInternalConns(*jsnCdrsCfg.Thresholds_conns, utils.MetaThresholds)
+		cdrscfg.ThresholdSConns = make([]string, len(*jsnCdrsCfg.Thresholds_conns))
+		for idx, connID := range *jsnCdrsCfg.Thresholds_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.ThresholdSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.ThresholdSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds)
+			}
+		}
 	}
 	if jsnCdrsCfg.Stats_conns != nil {
-		cdrscfg.StatSConns = updateInternalConns(*jsnCdrsCfg.Stats_conns, utils.MetaStats)
+		cdrscfg.StatSConns = make([]string, len(*jsnCdrsCfg.Stats_conns))
+		for idx, connID := range *jsnCdrsCfg.Stats_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.StatSConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.StatSConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats)
+			}
+		}
 	}
 	if jsnCdrsCfg.Online_cdr_exports != nil {
 		cdrscfg.OnlineCDRExports = append(cdrscfg.OnlineCDRExports, *jsnCdrsCfg.Online_cdr_exports...)
 	}
-	if jsnCdrsCfg.Actions_conns != nil {
-		cdrscfg.ActionSConns = updateInternalConns(*jsnCdrsCfg.Actions_conns, utils.MetaActions)
+	if jsnCdrsCfg.Scheduler_conns != nil {
+		cdrscfg.SchedulerConns = make([]string, len(*jsnCdrsCfg.Scheduler_conns))
+		for idx, connID := range *jsnCdrsCfg.Scheduler_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.SchedulerConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.SchedulerConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaScheduler)
+			}
+		}
 	}
+
 	if jsnCdrsCfg.Ees_conns != nil {
-		cdrscfg.EEsConns = updateInternalConns(*jsnCdrsCfg.Ees_conns, utils.MetaEEs)
+		cdrscfg.EEsConns = make([]string, len(*jsnCdrsCfg.Ees_conns))
+		for idx, connID := range *jsnCdrsCfg.Ees_conns {
+			// if we have the connection internal we change the name so we can have internal rpc for each subsystem
+			cdrscfg.EEsConns[idx] = connID
+			if connID == utils.MetaInternal {
+				cdrscfg.EEsConns[idx] = utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEEs)
+			}
+		}
 	}
-	if jsnCdrsCfg.Rates_conns != nil {
-		cdrscfg.RateSConns = updateInternalConns(*jsnCdrsCfg.Rates_conns, utils.MetaRates)
-	}
-	if jsnCdrsCfg.Accounts_conns != nil {
-		cdrscfg.AccountSConns = updateInternalConns(*jsnCdrsCfg.Accounts_conns, utils.MetaAccounts)
-	}
-	if jsnCdrsCfg.Opts != nil {
-		cdrscfg.Opts.loadFromJSONCfg(jsnCdrsCfg.Opts)
-	}
-	return
+	return nil
 }
 
 // AsMapInterface returns the config as a map[string]interface{}
-func (cdrscfg CdrsCfg) AsMapInterface(string) interface{} {
-	opts := map[string]interface{}{
-		utils.MetaAccounts:   cdrscfg.Opts.Accounts,
-		utils.MetaAttributes: cdrscfg.Opts.Attributes,
-		utils.MetaChargers:   cdrscfg.Opts.Chargers,
-		utils.MetaEEs:        cdrscfg.Opts.Export,
-		utils.MetaRates:      cdrscfg.Opts.Rates,
-		utils.MetaStats:      cdrscfg.Opts.Stats,
-		utils.MetaThresholds: cdrscfg.Opts.Thresholds,
+func (cdrscfg *CdrsCfg) AsMapInterface() (initialMP map[string]interface{}) {
+	initialMP = map[string]interface{}{
+		utils.EnabledCfg:       cdrscfg.Enabled,
+		utils.StoreCdrsCfg:     cdrscfg.StoreCdrs,
+		utils.SMCostRetriesCfg: cdrscfg.SMCostRetries,
 	}
-	mp := map[string]interface{}{
-		utils.EnabledCfg:          cdrscfg.Enabled,
-		utils.SMCostRetriesCfg:    cdrscfg.SMCostRetries,
-		utils.ExtraFieldsCfg:      cdrscfg.ExtraFields.AsStringSlice(),
-		utils.OnlineCDRExportsCfg: utils.CloneStringSlice(cdrscfg.OnlineCDRExports),
-		utils.OptsCfg:             opts,
+
+	extraFields := make([]string, len(cdrscfg.ExtraFields))
+	for i, item := range cdrscfg.ExtraFields {
+		extraFields[i] = item.Rules
 	}
+	initialMP[utils.ExtraFieldsCfg] = extraFields
+
+	onlineCDRExports := make([]string, len(cdrscfg.OnlineCDRExports))
+	for i, item := range cdrscfg.OnlineCDRExports {
+		onlineCDRExports[i] = item
+	}
+	initialMP[utils.OnlineCDRExportsCfg] = onlineCDRExports
 
 	if cdrscfg.ChargerSConns != nil {
-		mp[utils.ChargerSConnsCfg] = getInternalJSONConns(cdrscfg.ChargerSConns)
+		chargerSConns := make([]string, len(cdrscfg.ChargerSConns))
+		for i, item := range cdrscfg.ChargerSConns {
+			chargerSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaChargers) {
+				chargerSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ChargerSConnsCfg] = chargerSConns
+	}
+	if cdrscfg.RaterConns != nil {
+		raterConns := make([]string, len(cdrscfg.RaterConns))
+		for i, item := range cdrscfg.RaterConns {
+			raterConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaResponder) {
+				raterConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.RALsConnsCfg] = raterConns
 	}
 	if cdrscfg.AttributeSConns != nil {
-		mp[utils.AttributeSConnsCfg] = getInternalJSONConns(cdrscfg.AttributeSConns)
+		attributeSConns := make([]string, len(cdrscfg.AttributeSConns))
+		for i, item := range cdrscfg.AttributeSConns {
+			attributeSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaAttributes) {
+				attributeSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.AttributeSConnsCfg] = attributeSConns
 	}
 	if cdrscfg.ThresholdSConns != nil {
-		mp[utils.ThresholdSConnsCfg] = getInternalJSONConns(cdrscfg.ThresholdSConns)
+		thresholdSConns := make([]string, len(cdrscfg.ThresholdSConns))
+		for i, item := range cdrscfg.ThresholdSConns {
+			thresholdSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaThresholds) {
+				thresholdSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.ThresholdSConnsCfg] = thresholdSConns
 	}
 	if cdrscfg.StatSConns != nil {
-		mp[utils.StatSConnsCfg] = getInternalJSONConns(cdrscfg.StatSConns)
+		statSConns := make([]string, len(cdrscfg.StatSConns))
+		for i, item := range cdrscfg.StatSConns {
+			statSConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaStats) {
+				statSConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.StatSConnsCfg] = statSConns
 	}
-	if cdrscfg.ActionSConns != nil {
-		mp[utils.ActionSConnsCfg] = getInternalJSONConns(cdrscfg.ActionSConns)
+	if cdrscfg.SchedulerConns != nil {
+		schedulerConns := make([]string, len(cdrscfg.SchedulerConns))
+		for i, item := range cdrscfg.SchedulerConns {
+			schedulerConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaScheduler) {
+				schedulerConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.SchedulerConnsCfg] = schedulerConns
 	}
 	if cdrscfg.EEsConns != nil {
-		mp[utils.EEsConnsCfg] = getInternalJSONConns(cdrscfg.EEsConns)
+		eesConns := make([]string, len(cdrscfg.EEsConns))
+		for i, item := range cdrscfg.EEsConns {
+			eesConns[i] = item
+			if item == utils.ConcatenatedKey(utils.MetaInternal, utils.MetaEEs) {
+				eesConns[i] = utils.MetaInternal
+			}
+		}
+		initialMP[utils.EEsConnsCfg] = eesConns
 	}
-	if cdrscfg.RateSConns != nil {
-		mp[utils.RateSConnsCfg] = getInternalJSONConns(cdrscfg.RateSConns)
-	}
-	if cdrscfg.AccountSConns != nil {
-		mp[utils.AccountSConnsCfg] = getInternalJSONConns(cdrscfg.AccountSConns)
-	}
-	return mp
-}
-
-func (CdrsCfg) SName() string                 { return CDRsJSON }
-func (cdrscfg CdrsCfg) CloneSection() Section { return cdrscfg.Clone() }
-
-func (cdrsOpts *CdrsOpts) Clone() *CdrsOpts {
-	var accS []*utils.DynamicBoolOpt
-	if cdrsOpts.Accounts != nil {
-		accS = utils.CloneDynamicBoolOpt(cdrsOpts.Accounts)
-	}
-	var attrS []*utils.DynamicBoolOpt
-	if cdrsOpts.Attributes != nil {
-		attrS = utils.CloneDynamicBoolOpt(cdrsOpts.Attributes)
-	}
-	var chrgS []*utils.DynamicBoolOpt
-	if cdrsOpts.Chargers != nil {
-		chrgS = utils.CloneDynamicBoolOpt(cdrsOpts.Chargers)
-	}
-	var export []*utils.DynamicBoolOpt
-	if cdrsOpts.Export != nil {
-		export = utils.CloneDynamicBoolOpt(cdrsOpts.Export)
-	}
-	var rtS []*utils.DynamicBoolOpt
-	if cdrsOpts.Rates != nil {
-		rtS = utils.CloneDynamicBoolOpt(cdrsOpts.Rates)
-	}
-	var stS []*utils.DynamicBoolOpt
-	if cdrsOpts.Stats != nil {
-		stS = utils.CloneDynamicBoolOpt(cdrsOpts.Stats)
-	}
-	var thdS []*utils.DynamicBoolOpt
-	if cdrsOpts.Thresholds != nil {
-		thdS = utils.CloneDynamicBoolOpt(cdrsOpts.Thresholds)
-	}
-	return &CdrsOpts{
-		Accounts:   accS,
-		Attributes: attrS,
-		Chargers:   chrgS,
-		Export:     export,
-		Rates:      rtS,
-		Stats:      stS,
-		Thresholds: thdS,
-	}
+	return
 }
 
 // Clone returns a deep copy of CdrsCfg
@@ -239,137 +232,57 @@ func (cdrscfg CdrsCfg) Clone() (cln *CdrsCfg) {
 	cln = &CdrsCfg{
 		Enabled:       cdrscfg.Enabled,
 		ExtraFields:   cdrscfg.ExtraFields.Clone(),
+		StoreCdrs:     cdrscfg.StoreCdrs,
 		SMCostRetries: cdrscfg.SMCostRetries,
-		Opts:          cdrscfg.Opts.Clone(),
 	}
 	if cdrscfg.ChargerSConns != nil {
-		cln.ChargerSConns = utils.CloneStringSlice(cdrscfg.ChargerSConns)
+		cln.ChargerSConns = make([]string, len(cdrscfg.ChargerSConns))
+		for i, con := range cdrscfg.ChargerSConns {
+			cln.ChargerSConns[i] = con
+		}
+	}
+	if cdrscfg.RaterConns != nil {
+		cln.RaterConns = make([]string, len(cdrscfg.RaterConns))
+		for i, con := range cdrscfg.RaterConns {
+			cln.RaterConns[i] = con
+		}
 	}
 	if cdrscfg.AttributeSConns != nil {
-		cln.AttributeSConns = utils.CloneStringSlice(cdrscfg.AttributeSConns)
+		cln.AttributeSConns = make([]string, len(cdrscfg.AttributeSConns))
+		for i, con := range cdrscfg.AttributeSConns {
+			cln.AttributeSConns[i] = con
+		}
 	}
 	if cdrscfg.ThresholdSConns != nil {
-		cln.ThresholdSConns = utils.CloneStringSlice(cdrscfg.ThresholdSConns)
+		cln.ThresholdSConns = make([]string, len(cdrscfg.ThresholdSConns))
+		for i, con := range cdrscfg.ThresholdSConns {
+			cln.ThresholdSConns[i] = con
+		}
 	}
 	if cdrscfg.StatSConns != nil {
-		cln.StatSConns = utils.CloneStringSlice(cdrscfg.StatSConns)
+		cln.StatSConns = make([]string, len(cdrscfg.StatSConns))
+		for i, con := range cdrscfg.StatSConns {
+			cln.StatSConns[i] = con
+		}
 	}
 	if cdrscfg.OnlineCDRExports != nil {
-		cln.OnlineCDRExports = utils.CloneStringSlice(cdrscfg.OnlineCDRExports)
+		cln.OnlineCDRExports = make([]string, len(cdrscfg.OnlineCDRExports))
+		for i, con := range cdrscfg.OnlineCDRExports {
+			cln.OnlineCDRExports[i] = con
+		}
 	}
-	if cdrscfg.ActionSConns != nil {
-		cln.ActionSConns = utils.CloneStringSlice(cdrscfg.ActionSConns)
+	if cdrscfg.SchedulerConns != nil {
+		cln.SchedulerConns = make([]string, len(cdrscfg.SchedulerConns))
+		for i, con := range cdrscfg.SchedulerConns {
+			cln.SchedulerConns[i] = con
+		}
 	}
 	if cdrscfg.EEsConns != nil {
-		cln.EEsConns = utils.CloneStringSlice(cdrscfg.EEsConns)
-	}
-	if cdrscfg.RateSConns != nil {
-		cln.RateSConns = utils.CloneStringSlice(cdrscfg.RateSConns)
-	}
-	if cdrscfg.AccountSConns != nil {
-		cln.AccountSConns = utils.CloneStringSlice(cdrscfg.AccountSConns)
+		cln.EEsConns = make([]string, len(cdrscfg.EEsConns))
+		for i, con := range cdrscfg.EEsConns {
+			cln.EEsConns[i] = con
+		}
 	}
 
 	return
-}
-
-type CdrsOptsJson struct {
-	Accounts   []*utils.DynamicBoolOpt `json:"*accounts"`
-	Attributes []*utils.DynamicBoolOpt `json:"*attributes"`
-	Chargers   []*utils.DynamicBoolOpt `json:"*chargers"`
-	Export     []*utils.DynamicBoolOpt `json:"*ees"`
-	Rates      []*utils.DynamicBoolOpt `json:"*rates"`
-	Stats      []*utils.DynamicBoolOpt `json:"*stats"`
-	Thresholds []*utils.DynamicBoolOpt `json:"*thresholds"`
-}
-
-// Cdrs config section
-type CdrsJsonCfg struct {
-	Enabled              *bool
-	Extra_fields         *[]string
-	Session_cost_retries *int
-	Chargers_conns       *[]string
-	Attributes_conns     *[]string
-	Thresholds_conns     *[]string
-	Stats_conns          *[]string
-	Online_cdr_exports   *[]string
-	Actions_conns        *[]string
-	Ees_conns            *[]string
-	Rates_conns          *[]string
-	Accounts_conns       *[]string
-	Opts                 *CdrsOptsJson
-}
-
-func diffCdrsOptsJsonCfg(d *CdrsOptsJson, v1, v2 *CdrsOpts) *CdrsOptsJson {
-	if d == nil {
-		d = new(CdrsOptsJson)
-	}
-	if !utils.DynamicBoolOptEqual(v1.Accounts, v2.Accounts) {
-		d.Accounts = v2.Accounts
-	}
-	if !utils.DynamicBoolOptEqual(v1.Attributes, v2.Attributes) {
-		d.Attributes = v2.Attributes
-	}
-	if !utils.DynamicBoolOptEqual(v1.Chargers, v2.Chargers) {
-		d.Chargers = v2.Chargers
-	}
-	if !utils.DynamicBoolOptEqual(v1.Export, v2.Export) {
-		d.Export = v2.Export
-	}
-	if !utils.DynamicBoolOptEqual(v1.Rates, v2.Rates) {
-		d.Rates = v2.Rates
-	}
-	if !utils.DynamicBoolOptEqual(v1.Stats, v2.Stats) {
-		d.Stats = v2.Stats
-	}
-	if !utils.DynamicBoolOptEqual(v1.Thresholds, v2.Thresholds) {
-		d.Thresholds = v2.Thresholds
-	}
-	return d
-}
-
-func diffCdrsJsonCfg(d *CdrsJsonCfg, v1, v2 *CdrsCfg) *CdrsJsonCfg {
-	if d == nil {
-		d = new(CdrsJsonCfg)
-	}
-	if v1.Enabled != v2.Enabled {
-		d.Enabled = utils.BoolPointer(v2.Enabled)
-	}
-	extra1 := v1.ExtraFields.AsStringSlice()
-	extra2 := v2.ExtraFields.AsStringSlice()
-	if !utils.SliceStringEqual(extra1, extra2) {
-		d.Extra_fields = &extra2
-	}
-	if v1.SMCostRetries != v2.SMCostRetries {
-		d.Session_cost_retries = utils.IntPointer(v2.SMCostRetries)
-	}
-	if !utils.SliceStringEqual(v1.ChargerSConns, v2.ChargerSConns) {
-		d.Chargers_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ChargerSConns))
-	}
-	if !utils.SliceStringEqual(v1.AttributeSConns, v2.AttributeSConns) {
-		d.Attributes_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AttributeSConns))
-	}
-	if !utils.SliceStringEqual(v1.ThresholdSConns, v2.ThresholdSConns) {
-		d.Thresholds_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ThresholdSConns))
-	}
-	if !utils.SliceStringEqual(v1.StatSConns, v2.StatSConns) {
-		d.Stats_conns = utils.SliceStringPointer(getInternalJSONConns(v2.StatSConns))
-	}
-	if !utils.SliceStringEqual(v1.OnlineCDRExports, v2.OnlineCDRExports) {
-		d.Online_cdr_exports = &v2.OnlineCDRExports
-	}
-	if !utils.SliceStringEqual(v1.ActionSConns, v2.ActionSConns) {
-		d.Actions_conns = utils.SliceStringPointer(getInternalJSONConns(v2.ActionSConns))
-	}
-	if !utils.SliceStringEqual(v1.EEsConns, v2.EEsConns) {
-		d.Ees_conns = utils.SliceStringPointer(getInternalJSONConns(v2.EEsConns))
-	}
-	if !utils.SliceStringEqual(v1.RateSConns, v2.RateSConns) {
-		d.Rates_conns = utils.SliceStringPointer(getInternalJSONConns(v2.RateSConns))
-	}
-	if !utils.SliceStringEqual(v1.AccountSConns, v2.AccountSConns) {
-		d.Accounts_conns = utils.SliceStringPointer(getInternalJSONConns(v2.AccountSConns))
-	}
-	d.Opts = diffCdrsOptsJsonCfg(d.Opts, v1.Opts, v2.Opts)
-	return d
 }

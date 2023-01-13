@@ -19,6 +19,9 @@
 	"db_type": "*internal",
 },
 
+"stor_db": {
+	"db_type": "*internal"
+},
 
 
 "rpc_conns": {
@@ -32,15 +35,25 @@
 	"enabled": true
 },
 
+"rals": {
+	"enabled": true,
+},
+
+"schedulers": {
+	"enabled": true,				
+},
+
+
 "chargers": {
 	"enabled": true,
 	"attributes_conns": ["*internal"],
 },
 
 
-"admins": {
+"apiers": {
 	"enabled": true,
 	"caches_conns":["conn1"],
+	"scheduler_conns": ["*internal"],
 },
 
 }

@@ -25,6 +25,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha1"
+	"encoding/gob"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,12 +35,14 @@ import (
 	math_rand "math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cgrates/rpcclient"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -316,6 +319,16 @@ func monthlyEstimated(t1 time.Time) (time.Time, error) {
 	return tAfter, nil
 }
 
+// RoundDuration returns a number equal or larger than the amount that exactly
+// is divisible to whole
+func RoundDuration(whole, amount time.Duration) time.Duration {
+	a, w := float64(amount), float64(whole)
+	if math.Mod(a, w) == 0 {
+		return amount
+	}
+	return time.Duration((w - math.Mod(a, w)) + a)
+}
+
 func SplitPrefix(prefix string, minLength int) []string {
 	length := int(math.Max(float64(len(prefix)-(minLength-1)), 0))
 	subs := make([]string, length)
@@ -336,14 +349,20 @@ func SplitSuffix(suffix string) []string {
 	return subs
 }
 
+func CopyHour(src, dest time.Time) time.Time {
+	if src.Hour() == 0 && src.Minute() == 0 && src.Second() == 0 {
+		return src
+	}
+	return time.Date(dest.Year(), dest.Month(), dest.Day(), src.Hour(), src.Minute(), src.Second(), src.Nanosecond(), src.Location())
+}
+
 // Parses duration, considers s as time unit if not provided, seconds as float to specify subunits
 func ParseDurationWithSecs(durStr string) (d time.Duration, err error) {
 	if durStr == "" {
 		return
 	}
-	var sc float64
-	if sc, err = strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
-		return time.Duration(sc * float64(time.Second)), nil
+	if _, err = strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
+		durStr += "s"
 	}
 	return time.ParseDuration(durStr)
 }
@@ -354,11 +373,43 @@ func ParseDurationWithNanosecs(durStr string) (d time.Duration, err error) {
 		return
 	}
 	if durStr == MetaUnlimited {
-		return -1, nil
+		durStr = "-1"
 	}
-	var sc float64
-	if sc, err = strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
-		return time.Duration(sc), nil
+	if _, err = strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
+		durStr += "ns"
+	}
+	return time.ParseDuration(durStr)
+}
+
+// returns the minimum duration between the two
+func MinDuration(d1, d2 time.Duration) time.Duration {
+	if d1 < d2 {
+		return d1
+	}
+	return d2
+}
+
+// ParseZeroRatingSubject will parse the subject in the balance
+// returns duration if able to extract it from subject
+// returns error if not able to parse duration (ie: if ratingSubject is standard one)
+func ParseZeroRatingSubject(tor, rateSubj string, defaultRateSubj map[string]string, isUnitBal bool) (time.Duration, error) {
+	rateSubj = strings.TrimSpace(rateSubj)
+	if !isUnitBal && rateSubj == EmptyString {
+		return 0, errors.New("no rating subject for monetary")
+	}
+	if rateSubj == EmptyString ||
+		rateSubj == MetaAny {
+		var hasToR bool
+		if rateSubj, hasToR = defaultRateSubj[tor]; !hasToR {
+			rateSubj = defaultRateSubj[MetaAny]
+		}
+	}
+	if !strings.HasPrefix(rateSubj, MetaRatingSubjectPrefix) {
+		return 0, errors.New("malformed rating subject: " + rateSubj)
+	}
+	durStr := rateSubj[len(MetaRatingSubjectPrefix):]
+	if val, err := strconv.ParseFloat(durStr, 64); err == nil { // No time unit, postpend
+		return time.Duration(val), nil // just return the float value converted(this should be faster than reparsing the string)
 	}
 	return time.ParseDuration(durStr)
 }
@@ -369,6 +420,10 @@ func ConcatenatedKey(keyVals ...string) string {
 
 func SplitConcatenatedKey(key string) []string {
 	return strings.Split(key, ConcatenatedKeySep)
+}
+
+func InfieldJoin(vals ...string) string {
+	return strings.Join(vals, InfieldSep)
 }
 
 func InfieldSplit(val string) []string {
@@ -429,8 +484,8 @@ func copyFile(rc io.ReadCloser, path string, fm os.FileMode) (err error) {
 func Fib() func() int {
 	a, b := 0, 1
 	return func() int {
-		if b > 0 {
-			a, b = b, a+b // only increment Fibonacci numbers while b doesn't overflow
+		if b > 0 { // only increment Fibonacci numbers while b doesn't overflow
+			a, b = b, a+b
 		}
 		return a
 	}
@@ -456,6 +511,10 @@ func FibDuration(durationUnit, maxDuration time.Duration) func() time.Duration {
 
 // Utilities to provide pointers where we need to define ad-hoc
 func StringPointer(str string) *string {
+	if str == MetaZero {
+		str = EmptyString
+		return &str
+	}
 	return &str
 }
 
@@ -473,6 +532,10 @@ func Float64Pointer(f float64) *float64 {
 
 func BoolPointer(b bool) *bool {
 	return &b
+}
+
+func StringMapPointer(sm StringMap) *StringMap {
+	return &sm
 }
 
 func MapStringStringPointer(mp map[string]string) *map[string]string {
@@ -501,14 +564,15 @@ func ToJSON(v interface{}) string {
 	return string(b)
 }
 
-func ToUnescapedJSON(value interface{}) (bts []byte, err error) {
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	enc.SetEscapeHTML(false)
-	if err = enc.Encode(value); err != nil {
-		return
+// Simple object cloner, b should be a pointer towards a value into which we want to decode
+func Clone(a, b interface{}) error {
+	buff := new(bytes.Buffer)
+	enc := gob.NewEncoder(buff)
+	dec := gob.NewDecoder(buff)
+	if err := enc.Encode(a); err != nil {
+		return err
 	}
-	return buf.Bytes(), err
+	return dec.Decode(b)
 }
 
 // Used as generic function logic for various fields
@@ -593,6 +657,10 @@ func SizeFmt(num float64, suffix string) string {
 	return fmt.Sprintf("%.1f%s%s", num, "Yi", suffix)
 }
 
+func TimeIs0h(t time.Time) bool {
+	return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+}
+
 func ParseHierarchyPath(path string, sep string) HierarchyPath {
 	if sep == EmptyString {
 		for _, sep = range []string{"/", NestingSep} {
@@ -649,6 +717,19 @@ func MaskSuffix(dest string, maskLen int) string {
 	return dest
 }
 
+// Sortable Int64Slice
+type Int64Slice []int64
+
+func (slc Int64Slice) Len() int {
+	return len(slc)
+}
+func (slc Int64Slice) Swap(i, j int) {
+	slc[i], slc[j] = slc[j], slc[i]
+}
+func (slc Int64Slice) Less(i, j int) bool {
+	return slc[i] < slc[j]
+}
+
 func GetCGRVersion() (vers string, err error) {
 	vers = fmt.Sprintf("%s@%s", CGRateS, Version)
 	if GitLastLog == "" {
@@ -671,7 +752,7 @@ func GetCGRVersion() (vers string, err error) {
 			commitHash = commitSplt[1]
 			continue
 		}
-		if strings.HasPrefix(ln, "Date:") {
+		if strings.HasPrefix(ln, "CommitDate:") {
 			dateSplt := strings.Split(ln, ": ")
 			if len(dateSplt) != 2 {
 				return vers, fmt.Errorf("Building version - cannot split commit date")
@@ -698,6 +779,24 @@ func NewTenantID(tntID string) *TenantID {
 	return &TenantID{Tenant: tIDSplt[0], ID: tIDSplt[1]}
 }
 
+type PaginatorWithTenant struct {
+	Tenant string
+	Paginator
+}
+
+type TenantWithAPIOpts struct {
+	Tenant  string
+	APIOpts map[string]interface{}
+}
+
+type MemoryPrf struct {
+	Tenant   string
+	DirPath  string
+	Interval time.Duration
+	NrFiles  int
+	APIOpts  map[string]interface{}
+}
+
 type TenantID struct {
 	Tenant string
 	ID     string
@@ -711,16 +810,101 @@ type TenantIDWithAPIOpts struct {
 func (tID *TenantID) TenantID() string {
 	return ConcatenatedKey(tID.Tenant, tID.ID)
 }
-func (tID *TenantID) Equal(tID2 *TenantID) bool {
-	return (tID == nil && tID2 == nil) ||
-		(tID != nil && tID2 != nil &&
-			tID.Tenant == tID2.Tenant &&
-			tID.ID == tID2.ID)
+
+func (tID *TenantIDWithAPIOpts) TenantIDConcatenated() string {
+	return ConcatenatedKey(tID.Tenant, tID.ID)
 }
 
-type TenantWithAPIOpts struct {
-	Tenant  string
-	APIOpts map[string]interface{}
+// RPCCall is a generic method calling RPC on a struct instance
+// serviceMethod is assumed to be in the form InstanceV1.Method
+// where V1Method will become RPC method called on instance
+func RPCCall(inst interface{}, serviceMethod string, args interface{}, reply interface{}) error {
+	methodSplit := strings.Split(serviceMethod, ".")
+	if len(methodSplit) != 2 {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	method := reflect.ValueOf(inst).MethodByName(
+		strings.ToUpper(methodSplit[0][len(methodSplit[0])-2:]) + methodSplit[1])
+	if !method.IsValid() {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	params := []reflect.Value{reflect.ValueOf(args), reflect.ValueOf(reply)}
+	ret := method.Call(params)
+	if len(ret) != 1 {
+		return ErrServerError
+	}
+	if ret[0].Interface() == nil {
+		return nil
+	}
+	err, ok := ret[0].Interface().(error)
+	if !ok {
+		return ErrServerError
+	}
+	return err
+}
+
+// ApierRPCCall implements generic RPCCall for APIer instances
+func APIerRPCCall(inst interface{}, serviceMethod string, args interface{}, reply interface{}) error {
+	methodSplit := strings.Split(serviceMethod, ".")
+	if len(methodSplit) != 2 {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	method := reflect.ValueOf(inst).MethodByName(methodSplit[1])
+	if !method.IsValid() {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	params := []reflect.Value{reflect.ValueOf(args), reflect.ValueOf(reply)}
+	ret := method.Call(params)
+	if len(ret) != 1 {
+		return ErrServerError
+	}
+	if ret[0].Interface() == nil {
+		return nil
+	}
+	err, ok := ret[0].Interface().(error)
+	if !ok {
+		return ErrServerError
+	}
+	return err
+}
+
+// BiRPCCall is a generic method calling BiRPC on a struct instance
+// serviceMethod is assumed to be in the form InstanceV1.Method
+// where BiRPCV1Method will become RPC method called on instance
+// the subsystem is not checked
+func BiRPCCall(inst interface{}, clnt rpcclient.ClientConnector, serviceMethod string, args interface{}, reply interface{}) error {
+	parts := strings.Split(serviceMethod, ".")
+	if len(parts) != 2 {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	// get method BiRPCV1.Method
+	method := reflect.ValueOf(inst).MethodByName(
+		"BiRPC" + parts[0][len(parts[0])-2:] + parts[1]) // Inherit the version V1 in the method name and add prefix
+	if !method.IsValid() {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	// construct the params
+	var clntVal reflect.Value
+	if clnt == nil {
+		clntVal = reflect.New(
+			reflect.TypeOf(new(rpcclient.BiRPCInternalServer))).Elem() // Kinda cheat since we make up a type here
+	} else {
+		clntVal = reflect.ValueOf(clnt)
+	}
+	params := []reflect.Value{clntVal, reflect.ValueOf(args),
+		reflect.ValueOf(reply)}
+	ret := method.Call(params)
+	if len(ret) != 1 {
+		return ErrServerError
+	}
+	if ret[0].Interface() == nil {
+		return nil
+	}
+	err, ok := ret[0].Interface().(error)
+	if !ok {
+		return ErrServerError
+	}
+	return err
 }
 
 // CachedRPCResponse is used to cache a RPC response
@@ -758,6 +942,30 @@ func GetUrlRawArguments(dialURL string) (out map[string]string) {
 	return
 }
 
+// WarnExecTime is used when we need to meassure the execution of specific functions
+// and warn when the total duration is higher than expected
+// should be usually called with defer, ie: defer WarnExecTime(time.Now(), "MyTestFunc", 2*time.Second)
+func WarnExecTime(startTime time.Time, logID string, maxDur time.Duration) {
+	totalDur := time.Since(startTime)
+	if totalDur > maxDur {
+		Logger.Warning(fmt.Sprintf("<%s> execution took: <%s>", logID, totalDur))
+	}
+}
+
+// endchan := LongExecTimeDetector("mesaj", 5*time.Second)
+// defer func() { close(endchan) }()
+func LongExecTimeDetector(logID string, maxDur time.Duration) (endchan chan struct{}) {
+	endchan = make(chan struct{}, 1)
+	go func() {
+		select {
+		case <-time.After(maxDur):
+			Logger.Warning(fmt.Sprintf("<%s> execution more than: <%s>", logID, maxDur))
+		case <-endchan:
+		}
+	}()
+	return
+}
+
 type StringWithAPIOpts struct {
 	APIOpts map[string]interface{}
 	Tenant  string
@@ -773,6 +981,7 @@ func CastRPCErr(err error) error {
 	return err
 }
 
+// RandomInteger returns a random integer between min and max values
 func RandomInteger(min, max int) int {
 	return math_rand.Intn(max-min) + min
 }
@@ -789,23 +998,6 @@ func IsURL(path string) bool {
 		strings.HasPrefix(path, "http://")
 }
 
-type ArgsFailedPosts struct {
-	Tenant    string
-	Path      string                 // Path of the exported type
-	Event     interface{}            // Event that must be written in file
-	FailedDir string                 // Directory that contains the file with Failed post
-	Module    string                 // Type of efs <*ees|*kafkaLogger>
-	APIOpts   map[string]interface{} // Specially for the meta
-}
-
-type ArgsReplayFailedPosts struct {
-	Tenant               string
-	TypeProvider         string
-	FailedRequestsInDir  *string  // if defined it will be our source of requests to be replayed
-	FailedRequestsOutDir *string  // if defined it will become our destination for files failing to be replayed, *none to be discarded
-	Modules              []string // list of modules for which replay the requests, nil for all
-}
-
 // GetIndexesArg the API argumets to specify an index
 type GetIndexesArg struct {
 	IdxItmType string
@@ -813,20 +1005,6 @@ type GetIndexesArg struct {
 	IdxKey     string
 	Tenant     string
 	APIOpts    map[string]interface{}
-}
-
-type MemoryPrf struct {
-	Tenant   string
-	DirPath  string
-	Interval time.Duration
-	NrFiles  int
-	APIOpts  map[string]interface{}
-}
-
-type PanicMessageArgs struct {
-	Tenant  string
-	APIOpts map[string]interface{}
-	Message string
 }
 
 // SetIndexesArg the API arguments needed for seting an index
@@ -866,6 +1044,7 @@ func AESEncrypt(txt, encKey string) (encrypted string, err error) {
 
 // AESDecrypt will decrypt the provided encrypted txt using the encKey and AES algorithm
 func AESDecrypt(encrypted string, encKey string) (txt string, err error) {
+
 	key, _ := hex.DecodeString(encKey)
 	enc, _ := hex.DecodeString(encrypted)
 
@@ -933,7 +1112,7 @@ func GenerateDBItemOpts(apiKey, routeID, cache, rmtHost string) (mp map[string]i
 		mp[OptsRouteID] = routeID
 	}
 	if cache != EmptyString {
-		mp[MetaCache] = cache
+		mp[CacheOpt] = cache
 	}
 	if rmtHost != EmptyString {
 		mp[RemoteHostOpt] = rmtHost
@@ -972,88 +1151,8 @@ func SplitPath(rule string, sep byte, n int) (splt []string) {
 	return
 }
 
-type PaginatorWithSearch struct {
-	*Paginator
-	Search string // Global matching pattern in items returned, partially used in some APIs
-}
-
-// Paginate stuff around items returned
-type Paginator struct {
-	Limit    *int // Limit the number of items returned
-	Offset   *int // Offset of the first item returned (eg: use Limit*Page in case of PerPage items)
-	MaxItems *int
-}
-
-// Clone creates a clone of the object
-func (pgnt Paginator) Clone() Paginator {
-	var limit *int
-	if pgnt.Limit != nil {
-		limit = new(int)
-		*limit = *pgnt.Limit
-	}
-
-	var offset *int
-	if pgnt.Offset != nil {
-		offset = new(int)
-		*offset = *pgnt.Offset
-	}
-
-	var maxItems *int
-	if pgnt.MaxItems != nil {
-		maxItems = new(int)
-		*maxItems = *pgnt.MaxItems
-	}
-	return Paginator{
-		Limit:    limit,
-		Offset:   offset,
-		MaxItems: maxItems,
-	}
-}
-
-// GetPaginateOpts retrieves paginate options from the APIOpts map
-func GetPaginateOpts(opts map[string]interface{}) (limit, offset, maxItems int, err error) {
-	if limitIface, has := opts[PageLimitOpt]; has {
-		if limit, err = IfaceAsInt(limitIface); err != nil {
-			return
-		}
-	}
-	if offsetIface, has := opts[PageOffsetOpt]; has {
-		if offset, err = IfaceAsInt(offsetIface); err != nil {
-			return
-		}
-	}
-	if maxItemsIface, has := opts[PageMaxItemsOpt]; has {
-		if maxItems, err = IfaceAsInt(maxItemsIface); err != nil {
-			return
-		}
-	}
-	return
-}
-
-// Paginate returns a modified input sting based on the paginate options provided
-func Paginate(in []string, limit, offset, maxItems int) (out []string, err error) {
-	if len(in) == 0 {
-		return
-	}
-	if maxItems != 0 && maxItems < limit+offset {
-		return nil, fmt.Errorf("SERVER_ERROR: maximum number of items exceeded")
-	}
-	if offset > len(in) {
-		return
-	}
-	if limit == 0 && offset == 0 {
-		out = in
-	} else {
-		if offset != 0 && limit != 0 {
-			limit = limit + offset
-		}
-		if limit == 0 || limit > len(in) {
-			limit = len(in)
-		}
-		out = in[offset:limit]
-	}
-	if maxItems != 0 && maxItems < len(out)+offset {
-		return nil, fmt.Errorf("SERVER_ERROR: maximum number of items exceeded")
-	}
-	return
+type PanicMessageArgs struct {
+	Tenant  string
+	APIOpts map[string]interface{}
+	Message string
 }

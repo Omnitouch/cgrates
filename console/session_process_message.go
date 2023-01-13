@@ -19,15 +19,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	"github.com/Omnitouch/cgrates/sessions"
-	"github.com/Omnitouch/cgrates/utils"
+	"time"
+
+	"github.com/cgrates/cgrates/sessions"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
 	c := &CmdSessionsProcessEvent{
 		name:      "session_process_message",
 		rpcMethod: utils.SessionSv1ProcessMessage,
-		rpcParams: &utils.CGREvent{},
+		rpcParams: &sessions.V1ProcessMessageArgs{},
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
@@ -36,7 +38,7 @@ func init() {
 type CmdSessionsProcessEvent struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.CGREvent
+	rpcParams *sessions.V1ProcessMessageArgs
 	*CommandExecuter
 }
 
@@ -50,12 +52,18 @@ func (self *CmdSessionsProcessEvent) RpcMethod() string {
 
 func (self *CmdSessionsProcessEvent) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = new(utils.CGREvent)
+		self.rpcParams = &sessions.V1ProcessMessageArgs{
+			CGREvent: new(utils.CGREvent),
+		}
 	}
 	return self.rpcParams
 }
 
 func (self *CmdSessionsProcessEvent) PostprocessRpcParams() error {
+	if self.rpcParams != nil && self.rpcParams.CGREvent != nil &&
+		self.rpcParams.CGREvent.Time == nil {
+		self.rpcParams.CGREvent.Time = utils.TimePointer(time.Now())
+	}
 	return nil
 }
 

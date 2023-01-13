@@ -21,11 +21,10 @@ package analyzers
 import (
 	"time"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
+	"github.com/cgrates/rpcclient"
 )
 
-func (aS *AnalyzerS) NewAnalyzerConnector(sc birpc.ClientConnector, enc, from, to string) birpc.ClientConnector {
+func (aS *AnalyzerService) NewAnalyzerConnector(sc rpcclient.ClientConnector, enc, from, to string) rpcclient.ClientConnector {
 	return &AnalyzerConnector{
 		conn: sc,
 		aS:   aS,
@@ -36,17 +35,54 @@ func (aS *AnalyzerS) NewAnalyzerConnector(sc birpc.ClientConnector, enc, from, t
 }
 
 type AnalyzerConnector struct {
-	conn birpc.ClientConnector
+	conn rpcclient.ClientConnector
 
-	aS   *AnalyzerS
+	aS   *AnalyzerService
 	enc  string
 	from string
 	to   string
 }
 
-func (c *AnalyzerConnector) Call(ctx *context.Context, serviceMethod string, args, reply interface{}) (err error) {
+func (c *AnalyzerConnector) Call(serviceMethod string, args, reply interface{}) (err error) {
 	sTime := time.Now()
-	err = c.conn.Call(ctx, serviceMethod, args, reply)
+	err = c.conn.Call(serviceMethod, args, reply)
 	go c.aS.logTrafic(0, serviceMethod, args, reply, err, c.enc, c.from, c.to, sTime, time.Now())
 	return
+}
+
+func (aS *AnalyzerService) NewAnalyzerBiRPCConnector(sc rpcclient.BiRPCConector, enc, from, to string) rpcclient.BiRPCConector {
+	return &AnalyzerBiRPCConnector{
+		conn: sc,
+		aS:   aS,
+		enc:  enc,
+		from: from,
+		to:   to,
+	}
+}
+
+type AnalyzerBiRPCConnector struct {
+	conn rpcclient.BiRPCConector
+
+	aS   *AnalyzerService
+	enc  string
+	from string
+	to   string
+}
+
+func (c *AnalyzerBiRPCConnector) Call(serviceMethod string, args, reply interface{}) (err error) {
+	sTime := time.Now()
+	err = c.conn.Call(serviceMethod, args, reply)
+	go c.aS.logTrafic(0, serviceMethod, args, reply, err, c.enc, c.from, c.to, sTime, time.Now())
+	return
+}
+
+func (c *AnalyzerBiRPCConnector) CallBiRPC(cl rpcclient.ClientConnector, serviceMethod string, args, reply interface{}) (err error) {
+	sTime := time.Now()
+	err = c.conn.CallBiRPC(cl, serviceMethod, args, reply)
+	go c.aS.logTrafic(0, serviceMethod, args, reply, err, c.enc, c.from, c.to, sTime, time.Now())
+	return
+}
+
+func (c *AnalyzerBiRPCConnector) Handlers() map[string]interface{} {
+	return c.conn.Handlers()
 }

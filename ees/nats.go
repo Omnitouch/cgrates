@@ -26,9 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 	"github.com/nats-io/nats.go"
 )
 
@@ -94,7 +93,7 @@ func (pstr *NatsEE) Connect() (err error) {
 	return
 }
 
-func (pstr *NatsEE) ExportEvent(ctx *context.Context, content, _ interface{}) (err error) {
+func (pstr *NatsEE) ExportEvent(content interface{}, _ string) (err error) {
 	pstr.reqs.get()
 	pstr.RLock()
 	if pstr.poster == nil {
@@ -103,7 +102,7 @@ func (pstr *NatsEE) ExportEvent(ctx *context.Context, content, _ interface{}) (e
 		return utils.ErrDisconnected
 	}
 	if pstr.jetStream {
-		_, err = pstr.posterJS.Publish(pstr.subject, content.([]byte), nats.Context(ctx))
+		_, err = pstr.posterJS.Publish(pstr.subject, content.([]byte))
 	} else {
 		err = pstr.poster.Publish(pstr.subject, content.([]byte))
 	}
@@ -123,8 +122,6 @@ func (pstr *NatsEE) Close() (err error) {
 }
 
 func (pstr *NatsEE) GetMetrics() *utils.SafeMapStorage { return pstr.dc }
-
-func (pstr *NatsEE) ExtraData(ev *utils.CGREvent) interface{} { return nil }
 
 func GetNatsOpts(opts *config.EventExporterOpts, nodeID string, connTimeout time.Duration) (nop []nats.Option, err error) {
 	nop = make([]nats.Option, 0, 7)
@@ -155,6 +152,7 @@ func GetNatsOpts(opts *config.EventExporterOpts, nodeID string, connTimeout time
 		err = fmt.Errorf("has key but no certificate")
 		return
 	}
+
 	if opts.NATSCertificateAuthority != nil {
 		nop = append(nop,
 			func(o *nats.Options) error {

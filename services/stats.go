@@ -22,19 +22,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/cores"
-	"github.com/Omnitouch/cgrates/engine"
-	"github.com/Omnitouch/cgrates/servmanager"
-	"github.com/Omnitouch/cgrates/utils"
+	v1 "github.com/cgrates/cgrates/apier/v1"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/cores"
+	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/servmanager"
+	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
 // NewStatService returns the Stat Service
 func NewStatService(cfg *config.CGRConfig, dm *DataDBService,
-	cacheS *CacheService, filterSChan chan *engine.FilterS,
-	server *cores.Server, internalStatSChan chan birpc.ClientConnector,
+	cacheS *engine.CacheS, filterSChan chan *engine.FilterS,
+	server *cores.Server, internalStatSChan chan rpcclient.ClientConnector,
 	connMgr *engine.ConnManager, anz *AnalyzerService,
 	srvDep map[string]*sync.WaitGroup) servmanager.Service {
 	return &StatService{
@@ -55,39 +55,34 @@ type StatService struct {
 	sync.RWMutex
 	cfg         *config.CGRConfig
 	dm          *DataDBService
-	cacheS      *CacheService
+	cacheS      *engine.CacheS
 	filterSChan chan *engine.FilterS
 	server      *cores.Server
 	connMgr     *engine.ConnManager
 
-	sts      *engine.StatS
-	connChan chan birpc.ClientConnector
+	sts      *engine.StatService
+	rpc      *v1.StatSv1
+	connChan chan rpcclient.ClientConnector
 	anz      *AnalyzerService
 	srvDep   map[string]*sync.WaitGroup
 }
 
 // Start should handle the sercive start
-func (sts *StatService) Start(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (sts *StatService) Start() (err error) {
 	if sts.IsRunning() {
 		return utils.ErrServiceAlreadyRunning
 	}
 	sts.srvDep[utils.DataDB].Add(1)
-	if err = sts.cacheS.WaitToPrecache(ctx,
-		utils.CacheStatQueueProfiles,
-		utils.CacheStatQueues,
-		utils.CacheStatFilterIndexes); err != nil {
-		return
-	}
 
-	var filterS *engine.FilterS
-	if filterS, err = waitForFilterS(ctx, sts.filterSChan); err != nil {
-		return
-	}
+	<-sts.cacheS.GetPrecacheChannel(utils.CacheStatQueueProfiles)
+	<-sts.cacheS.GetPrecacheChannel(utils.CacheStatQueues)
+	<-sts.cacheS.GetPrecacheChannel(utils.CacheStatFilterIndexes)
 
-	var datadb *engine.DataManager
-	if datadb, err = sts.dm.WaitForDM(ctx); err != nil {
-		return
-	}
+	filterS := <-sts.filterSChan
+	sts.filterSChan <- filterS
+	dbchan := sts.dm.GetDMChan()
+	datadb := <-dbchan
+	dbchan <- datadb
 
 	sts.Lock()
 	defer sts.Unlock()
@@ -95,22 +90,19 @@ func (sts *StatService) Start(ctx *context.Context, _ context.CancelFunc) (err e
 
 	utils.Logger.Info(fmt.Sprintf("<%s> starting <%s> subsystem",
 		utils.CoreS, utils.StatS))
-	sts.sts.StartLoop(ctx)
-	srv, _ := engine.NewService(sts.sts)
-	// srv, _ := birpc.NewService(apis.NewStatSv1(sts.sts), "", false)
+	sts.sts.StartLoop()
+	sts.rpc = v1.NewStatSv1(sts.sts)
 	if !sts.cfg.DispatcherSCfg().Enabled {
-		for _, s := range srv {
-			sts.server.RpcRegister(s)
-		}
+		sts.server.RpcRegister(sts.rpc)
 	}
-	sts.connChan <- sts.anz.GetInternalCodec(srv, utils.StatS)
+	sts.connChan <- sts.anz.GetInternalCodec(sts.rpc, utils.StatS)
 	return
 }
 
 // Reload handles the change of config
-func (sts *StatService) Reload(ctx *context.Context, _ context.CancelFunc) (err error) {
+func (sts *StatService) Reload() (err error) {
 	sts.Lock()
-	sts.sts.Reload(ctx)
+	sts.sts.Reload()
 	sts.Unlock()
 	return
 }
@@ -120,10 +112,10 @@ func (sts *StatService) Shutdown() (err error) {
 	defer sts.srvDep[utils.DataDB].Done()
 	sts.Lock()
 	defer sts.Unlock()
-	sts.sts.Shutdown(context.TODO())
+	sts.sts.Shutdown()
 	sts.sts = nil
+	sts.rpc = nil
 	<-sts.connChan
-	sts.server.RpcUnregisterName(utils.StatSv1)
 	return
 }
 

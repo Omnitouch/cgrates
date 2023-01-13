@@ -22,6 +22,28 @@
 		"db_port": 27017,
 	},
 
+
+	"stor_db": {
+		"db_type": "mongo",
+		"db_name": "cgrates2",
+		"db_port": 27017,
+	},
+
+
+	"rals": {
+		"enabled": true,
+		"thresholds_conns": ["*internal"],
+		"max_increments":3000000,
+	},
+
+
+	"schedulers": {
+		"enabled": true,
+		"cdrs_conns": ["*localhost"],
+		"stats_conns": ["*localhost"],
+	},
+
+
 	"cdrs": {
 		"enabled": true,
 	},
@@ -57,7 +79,7 @@
 		"enabled": true,
 		"stats_conns": ["*localhost"],
 		"resources_conns": ["*localhost"],
-		"rates_conns": ["*internal"],
+		"rals_conns": ["*internal"],
 	},
 
 
@@ -65,13 +87,13 @@
 		"enabled": true,
 		"stats_conns": ["*localhost"],
 		"resources_conns": ["*localhost"],
-		"accounts_conns": ["*localhost"]
+		"apiers_conns": ["*localhost"]
 	},
 
 
 	"sessions": {
 		"enabled": true,
-		"rates_conns": ["*internal"],
+		"rals_conns": ["*internal"],
 		"cdrs_conns": ["*internal"],
 		"chargers_conns": ["*internal"],
 	},
@@ -81,33 +103,21 @@
 		"out_datadb_type": "mongo",
 		"out_datadb_port": "27017",
 		"out_datadb_name": "10",
-
+		"out_stordb_type": "mongo",
+		"out_stordb_port": "27017",
+		"out_stordb_name": "cgrates",
 		"users_filters":["Account"],
 	},
 
 
-	"admins": {
+	"apiers": {
 		"enabled": true,
-	},
-
-
-	"rates": {
-		"enabled": true
-	},
-
-
-	"actions": {
-		"enabled": true
-	},
-
-
-	"accounts": {
-		"enabled": true
+		"scheduler_conns": ["*internal"],
 	},
 
 
 	"filters": {
-		"accounts_conns": ["*internal"],
+		"apiers_conns": ["*internal"],
 	},
 
 

@@ -28,9 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/birpc/context"
-	"github.com/Omnitouch/cgrates/config"
-	"github.com/Omnitouch/cgrates/utils"
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func TestHttpPostGetMetrics(t *testing.T) {
@@ -62,7 +61,7 @@ func TestHttpPostExportEvent(t *testing.T) {
 		"Test1": 3,
 	}
 	errExpect := `Post "/var/spool/cgrates/ees": unsupported protocol scheme ""`
-	if err := httpPost.ExportEvent(context.Background(), &HTTPPosterRequest{Body: url.Values{}, Header: make(http.Header)}, ""); err == nil || err.Error() != errExpect {
+	if err := httpPost.ExportEvent(&HTTPPosterRequest{Body: url.Values{}, Header: make(http.Header)}, ""); err == nil || err.Error() != errExpect {
 		t.Errorf("Expected %q but received %q", errExpect, err)
 	}
 }
@@ -88,11 +87,15 @@ func TestHttpPostExportEvent2(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	vals, err := httpPost.PrepareMap(&utils.CGREvent{Event: map[string]interface{}{"2": "*req.field2"}})
+	vals, err := httpPost.PrepareMap(&utils.CGREvent{
+		Event: map[string]interface{}{
+			"2": "*req.field2",
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := httpPost.ExportEvent(context.Background(), vals, ""); err != nil {
+	if err := httpPost.ExportEvent(vals, ""); err != nil {
 		t.Error(err)
 	}
 }
@@ -127,20 +130,18 @@ func TestHttpPostSync(t *testing.T) {
 		t.Error(err)
 	}
 
-	mp := &utils.CGREvent{
+	vals, err := exp.PrepareMap(&utils.CGREvent{
 		Event: map[string]interface{}{
 			"Account":     "1001",
 			"Destination": "1002",
 		},
-	}
-
-	vals, err := exp.PrepareMap(mp)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 0; i < 3; i++ {
-		go exp.ExportEvent(context.Background(), vals, "")
+		go exp.ExportEvent(vals, "")
 	}
 
 	select {
@@ -183,19 +184,19 @@ func TestHttpPostSyncLimit(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	mp := &utils.CGREvent{
+
+	vals, err := exp.PrepareMap(&utils.CGREvent{
 		Event: map[string]interface{}{
 			"Account":     "1001",
 			"Destination": "1002",
 		},
-	}
-	vals, err := exp.PrepareMap(mp)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 0; i < 3; i++ {
-		go exp.ExportEvent(context.Background(), vals, "")
+		go exp.ExportEvent(vals, "")
 	}
 	select {
 	case <-test:
@@ -204,3 +205,70 @@ func TestHttpPostSyncLimit(t *testing.T) {
 		return
 	}
 }
+
+func TestHTTPPostPrepareOrderMap(t *testing.T) {
+	httpPost := new(HTTPPostEE)
+	onm := utils.NewOrderedNavigableMap()
+	fullPath := &utils.FullPath{
+		PathSlice: []string{utils.MetaReq, utils.MetaTenant},
+		Path:      utils.MetaTenant,
+	}
+	val := &utils.DataLeaf{
+		Data: "value1",
+	}
+	onm.Append(fullPath, val)
+	rcv, err := httpPost.PrepareOrderMap(onm)
+	if err != nil {
+		t.Error(err)
+	}
+	urlVals := url.Values{
+		"*req.*tenant": {"value1"},
+	}
+	exp := &HTTPPosterRequest{
+		Header: httpPost.hdr,
+		Body:   urlVals,
+	}
+	if !reflect.DeepEqual(rcv, exp) {
+		t.Errorf("Expected %v \n but received \n %v", exp, rcv)
+	}
+}
+
+// func TestComposeHeader(t *testing.T) {
+// 	// 	cfgJSONStr := `{
+// 	// "ees": {
+// 	// 	"enabled": true,
+// 	// 	"attributes_conns":["*internal", "*conn1"],
+// 	// 	"cache": {
+// 	// 		"*file_csv": {"limit": -2, "ttl": "3s", "static_ttl": true},
+// 	// 	},
+// 	// 	"exporters": [
+// 	// 		{
+// 	// 			"id": "cgrates",
+// 	// 			"type": "*none",
+// 	// 			"export_path": "/var/spool/cgrates/ees",
+// 	// 			"opts": {
+// 	// 			"*default": "randomVal"
+// 	// 			},
+// 	// 			"timezone": "local",
+// 	// 			"filters": ["randomFiletrs"],
+// 	// 			"flags": [],
+// 	// 			"attribute_ids": ["randomID"],
+// 	// 			"attribute_context": "",
+// 	// 			"synchronous": false,
+// 	// 			"attempts": 2,
+// 	// 			"field_separator": ",",
+// 	// 			"fields":[
+// 	// 				{"tag": "CGRID", "path": "*hdr.CGRID", "type": "*variable", "value": "~*req.CGRID"},
+// 	// 			],
+// 	// 		},
+// 	// 	],
+// 	// },
+// 	// }`
+// 	// 	if jsonCfg, err := config.NewCGRConfigFromJSONStringWithDefaults(cfgJSONStr); err != nil {
+// 	// 		t.Error(err)
+// 	// 	}
+// 	// 	httpPost := &HTTPPostEE{
+// 	// 		cfg:
+// 	// 	}
+
+// }
