@@ -32,7 +32,7 @@ require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elastic/go-elasticsearch v0.0.0
 	github.com/ericlagergren/decimal v0.0.0-20191206042408-88212e6cfca9
-	github.com/Omnitouch/go-diameter/v4 v4.0.5
+	github.com/Omnitouch/go-diameter/v4 v4.0.6
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/gorhill/cronexpr v0.0.0-20180427100037-88b0669f7d75
