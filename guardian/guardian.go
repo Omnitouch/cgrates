@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // Guardian is the global package variable

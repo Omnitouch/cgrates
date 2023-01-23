@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // SetTPDestination creates a new destination within a tariff plan

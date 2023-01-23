@@ -21,7 +21,7 @@ package v1
 // This file deals with tp_destination_rates management over APIs
 
 import (
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // SetTPDestinationRate creates a new DestinationRate profile within a tariff plan

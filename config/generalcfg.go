@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // GeneralCfg is the general config section

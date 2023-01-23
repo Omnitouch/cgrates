@@ -25,7 +25,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // ConfigSCfg config for listening over http

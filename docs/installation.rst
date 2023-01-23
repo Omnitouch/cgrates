@@ -141,8 +141,8 @@ Configure the project with the following commands:
 
 ::
 
-   go get github.com/cgrates/cgrates
-   cd $HOME/go/src/github.com/cgrates/cgrates
+   go get github.com/Omnitouch/cgrates
+   cd $HOME/go/src/github.com/Omnitouch/cgrates
    ./build.sh
 
 
@@ -161,7 +161,7 @@ sure that we delete the old one first.
 
 ::
 
-   cd $HOME/go/src/github.com/cgrates/cgrates/packages
+   cd $HOME/go/src/github.com/Omnitouch/cgrates/packages
    rm -rf $HOME/go/src/github.com/cgrates/*.deb
    make deb
 
@@ -199,12 +199,12 @@ Execute the following commands
 
 ::
 
-    cd $HOME/go/src/github.com/cgrates/cgrates
+    cd $HOME/go/src/github.com/Omnitouch/cgrates
     export gitLastCommit=$(git rev-parse HEAD)
     export rpmTag=$(git log -1 --format=%ci | date +%Y%m%d%H%M%S)+$(git rev-parse --short HEAD)
     mkdir -p $HOME/cgr_build/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-    wget -P $HOME/cgr_build/SOURCES https://github.com/cgrates/cgrates/archive/$gitLastCommit.tar.gz
-    cp $HOME/go/src/github.com/cgrates/cgrates/packages/redhat_fedora/cgrates.spec $HOME/cgr_build/SPECS
+    wget -P $HOME/cgr_build/SOURCES https://github.com/Omnitouch/cgrates/archive/$gitLastCommit.tar.gz
+    cp $HOME/go/src/github.com/Omnitouch/cgrates/packages/redhat_fedora/cgrates.spec $HOME/cgr_build/SPECS
     cd $HOME/cgr_build
     rpmbuild -bb --define "_topdir $HOME/cgr_build" SPECS/cgrates.spec
 

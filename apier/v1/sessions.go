@@ -19,9 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/dispatchers"
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/dispatchers"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewSessionSv1(sS *sessions.SessionS) *SessionSv1 {

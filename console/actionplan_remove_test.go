@@ -23,9 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	v2 "github.com/cgrates/cgrates/apier/v2"
+	v2 "github.com/Omnitouch/cgrates/apier/v2"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestCmdActionPlanRemove(t *testing.T) {

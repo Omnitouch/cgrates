@@ -21,8 +21,8 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) EeSv1Ping(args *utils.CGREvent, reply *string) (err error) {

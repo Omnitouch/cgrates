@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/console"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/console"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 	"github.com/peterh/liner"
 )

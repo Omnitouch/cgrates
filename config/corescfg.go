@@ -21,7 +21,7 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // CoreSCfg the config for the coreS

@@ -21,8 +21,8 @@ package v1
 import (
 	"errors"
 
-	"github.com/cgrates/cgrates/scheduler"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/scheduler"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 /*

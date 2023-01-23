@@ -21,11 +21,11 @@ package dispatchers
 import (
 	"strings"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/servmanager"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/servmanager"
 
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 type ArgsReplicateSessionsWithAPIOpts struct {

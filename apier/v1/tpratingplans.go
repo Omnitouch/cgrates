@@ -21,7 +21,7 @@ package v1
 // This file deals with tp_destrates_timing management over APIs
 
 import (
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // SetTPRatingPlan creates a new DestinationRateTiming profile within a tariff plan

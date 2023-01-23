@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package config
 
-import "github.com/cgrates/cgrates/utils"
+import "github.com/Omnitouch/cgrates/utils"
 
 // ListenCfg is the listen config section
 type ListenCfg struct {

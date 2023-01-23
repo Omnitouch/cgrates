@@ -21,8 +21,8 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // CDRsV1Ping interogates CDRsV1 server responsible to process the event

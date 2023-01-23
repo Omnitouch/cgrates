@@ -23,7 +23,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // HTTPCfg is the HTTP config section

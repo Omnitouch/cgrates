@@ -19,9 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/dispatchers"
-	"github.com/cgrates/cgrates/guardian"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/dispatchers"
+	"github.com/Omnitouch/cgrates/guardian"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewGuardianSv1() *GuardianSv1 {

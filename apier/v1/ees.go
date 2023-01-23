@@ -19,9 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/ees"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/ees"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewEeSv1(eeS *ees.EventExporterS) *EeSv1 {

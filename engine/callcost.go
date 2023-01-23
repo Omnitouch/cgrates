@@ -22,7 +22,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // The output structure that will be returned with the call cost information.

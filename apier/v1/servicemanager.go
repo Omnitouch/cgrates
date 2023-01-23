@@ -19,9 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/dispatchers"
-	"github.com/cgrates/cgrates/servmanager"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/dispatchers"
+	"github.com/Omnitouch/cgrates/servmanager"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewServiceManagerV1(sm *servmanager.ServiceManager) *ServiceManagerV1 {

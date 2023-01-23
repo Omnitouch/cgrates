@@ -21,7 +21,7 @@ package v1
 // This file deals with tp_rates management over APIs
 
 import (
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // SetTPRate creates a new rate within a tariff plan

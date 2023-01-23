@@ -36,9 +36,9 @@ import (
 	"time"
 
 	"github.com/cenkalti/rpc2"
-	"github.com/cgrates/cgrates/analyzers"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/analyzers"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 	"golang.org/x/net/websocket"
 )
 

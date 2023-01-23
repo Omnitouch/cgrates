@@ -21,7 +21,7 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // ServiceManagerV1Ping interogates ServiceManager server responsible to process the event

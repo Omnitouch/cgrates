@@ -21,7 +21,7 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) RALsV1Ping(args *utils.CGREvent, rpl *string) (err error) {

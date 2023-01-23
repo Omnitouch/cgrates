@@ -19,8 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package console
 
 import (
-	v2 "github.com/cgrates/cgrates/apier/v2"
-	"github.com/cgrates/cgrates/utils"
+	v2 "github.com/Omnitouch/cgrates/apier/v2"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func init() {

@@ -21,9 +21,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/engine"
 )
 
 func TestV1ActionsAsActions(t *testing.T) {

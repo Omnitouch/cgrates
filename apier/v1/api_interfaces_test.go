@@ -21,7 +21,7 @@ package v1
 import (
 	"testing"
 
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/engine"
 )
 
 func TestThresholdSv1Interface(t *testing.T) {

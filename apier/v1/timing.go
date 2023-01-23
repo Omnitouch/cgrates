@@ -21,7 +21,7 @@ package v1
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // GetTiming returns a TPTiming object

@@ -23,9 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 
-	v1 "github.com/cgrates/cgrates/apier/v1"
+	v1 "github.com/Omnitouch/cgrates/apier/v1"
 )
 
 func TestCmdGetAccountActionPlan(t *testing.T) {

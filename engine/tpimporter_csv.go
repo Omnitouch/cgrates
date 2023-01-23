@@ -23,7 +23,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // Import tariff plan from csv into storDb

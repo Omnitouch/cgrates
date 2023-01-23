@@ -23,8 +23,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/utils"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

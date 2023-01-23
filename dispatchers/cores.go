@@ -21,7 +21,7 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) CoreSv1Panic(args *utils.PanicMessageArgs, reply *string) (err error) {

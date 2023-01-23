@@ -19,9 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/guardian"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/guardian"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // MatchingItemIDsForEvent returns the list of item IDs matching fieldName/fieldValue for an event

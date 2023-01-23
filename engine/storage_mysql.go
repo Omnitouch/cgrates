@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )

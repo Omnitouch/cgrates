@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/cgrates/config"
+	"github.com/Omnitouch/cgrates/config"
 	"github.com/cgrates/ltcache"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // InternalDB is used as a DataDB and a StorDB

@@ -4,7 +4,7 @@
 .. _Kafka: https://kafka.apache.org/
 .. _redis: https://redis.io/
 .. _mongodb: https://www.mongodb.com/
-.. _api docs: https://godoc.org/github.com/cgrates/cgrates/apier
+.. _api docs: https://godoc.org/github.com/Omnitouch/cgrates/apier
 .. _SQS: https://aws.amazon.com/de/sqs/
 .. _AMQP: https://www.amqp.org/
 .. _Asterisk: https://www.asterisk.org/
@@ -187,8 +187,8 @@ Links
 
 - CGRateS home page `<http://www.cgrates.org>`_
 - Documentation `<http://cgrates.readthedocs.io>`_
-- API docs `<https://godoc.org/github.com/cgrates/cgrates/apier>`_
-- Source code `<https://github.com/cgrates/cgrates>`_
+- API docs `<https://godoc.org/github.com/Omnitouch/cgrates/apier>`_
+- Source code `<https://github.com/Omnitouch/cgrates>`_
 - Travis CI `<https://travis-ci.org/cgrates/cgrates>`_
 - Google group `<https://groups.google.com/forum/#!forum/cgrates>`_
 - IRC `irc.freenode.net #cgrates <http://webchat.freenode.net/?randomnick=1&channels=#cgrates>`_

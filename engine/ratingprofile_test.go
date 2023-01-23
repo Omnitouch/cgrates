@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestGetRatingProfileForPrefix(t *testing.T) {

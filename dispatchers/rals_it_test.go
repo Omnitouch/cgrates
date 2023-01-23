@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var sTestsDspRALs = []func(t *testing.T){

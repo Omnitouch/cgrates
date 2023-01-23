@@ -26,7 +26,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func main() {

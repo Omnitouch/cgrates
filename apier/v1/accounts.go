@@ -24,10 +24,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/guardian"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/guardian"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 type AccountActionTiming struct {

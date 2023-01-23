@@ -224,7 +224,7 @@ func TestNMAsXMLElements(t *testing.T) {
 /*
 goos: linux
 goarch: amd64
-pkg: github.com/cgrates/cgrates/config
+pkg: github.com/Omnitouch/cgrates/config
 BenchmarkOrderdNavigableMapSet2-16    	    1738	   6463443 ns/op
 BenchmarkOrderdNavigableMapSet2-16    	    1792	   6536313 ns/op
 BenchmarkOrderdNavigableMapSet2-16    	    1744	   6554331 ns/op
@@ -232,7 +232,7 @@ BenchmarkNavigableMapOld1Set-16       	    2980	   3831743 ns/op
 BenchmarkNavigableMapOld1Set-16       	    2758	   3789885 ns/op
 BenchmarkNavigableMapOld1Set-16       	    2916	   3741273 ns/op
 PASS
-ok  	github.com/cgrates/cgrates/config	71.065s
+ok  	github.com/Omnitouch/cgrates/config	71.065s
 */
 var generator = rand.New(rand.NewSource(42))
 var gen = generateRandomTemplate(10_000)

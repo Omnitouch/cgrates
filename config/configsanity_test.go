@@ -20,7 +20,7 @@ package config
 import (
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestConfigSanityRater(t *testing.T) {

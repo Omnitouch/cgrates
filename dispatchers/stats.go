@@ -21,7 +21,7 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) StatSv1Ping(args *utils.CGREvent, reply *string) (err error) {

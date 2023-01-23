@@ -35,9 +35,9 @@ import (
 
 	"github.com/cgrates/rpcclient"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestERsNewERService(t *testing.T) {

@@ -21,7 +21,7 @@ package v1
 import (
 	"fmt"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // SetTPActionPlan creates a new ActionTimings profile within a tariff plan

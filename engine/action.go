@@ -32,9 +32,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/guardian"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/guardian"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 	"github.com/mitchellh/mapstructure"
 )

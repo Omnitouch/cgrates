@@ -21,8 +21,8 @@ package console
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func init() {

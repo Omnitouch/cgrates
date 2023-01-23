@@ -21,7 +21,7 @@ package v1
 // This file deals with tp_rate_profiles management over APIs
 
 import (
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // SetTPRatingProfile creates a new RatingProfile within a tariff plan

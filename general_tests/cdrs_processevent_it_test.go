@@ -31,11 +31,11 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/cgrates/cgrates/apier/v2"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/ees"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	v2 "github.com/Omnitouch/cgrates/apier/v2"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/ees"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var (

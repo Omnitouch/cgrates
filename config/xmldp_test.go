@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/antchfx/xmlquery"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var cdrXMLBroadsoft = `<?xml version="1.0" encoding="ISO-8859-1"?>

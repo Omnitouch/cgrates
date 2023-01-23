@@ -21,8 +21,8 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func (dS *DispatcherService) SessionSv1Ping(args *utils.CGREvent, reply *string) (err error) {

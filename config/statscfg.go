@@ -21,7 +21,7 @@ package config
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 type StatsOpts struct {

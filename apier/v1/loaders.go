@@ -19,8 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/loaders"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/loaders"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewLoaderSv1(ldrS *loaders.LoaderService) *LoaderSv1 {

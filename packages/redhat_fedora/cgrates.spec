@@ -12,8 +12,8 @@ Version:        %{version}
 Release:        %{releaseTag}
 Summary:        Carrier Grade Real-time Charging System
 License:        GPLv3
-URL:            https://github.com/cgrates/cgrates
-Source0:        https://github.com/cgrates/cgrates/archive/%{git_commit}.tar.gz
+URL:            https://github.com/Omnitouch/cgrates
+Source0:        https://github.com/Omnitouch/cgrates/archive/%{git_commit}.tar.gz
 
 %if 0%{?fedora} > 16 || 0%{?rhel} > 6
 Requires(pre): shadow-utils
@@ -32,7 +32,7 @@ CGRateS is a very fast and easy scalable real-time charging system for Telecom e
 %prep
 %setup -q -n %{name}-%{version} -c
 mkdir -p src/github.com/cgrates
-ln -sf ../../../$(ls |grep %{name}-) src/github.com/cgrates/cgrates
+ln -sf ../../../$(ls |grep %{name}-) src/github.com/Omnitouch/cgrates
 
 %pre
 getent group %{name} >/dev/null || groupadd -r %{name}
@@ -70,23 +70,23 @@ fi
 
 %build
 export GOPATH=$RPM_BUILD_DIR/%{name}-%{version}
-cd $RPM_BUILD_DIR/%{name}-%{version}/src/github.com/cgrates/cgrates
+cd $RPM_BUILD_DIR/%{name}-%{version}/src/github.com/Omnitouch/cgrates
 ./build.sh
 
 %install
 rm -rf $RPM_BUILD_ROOT
 mkdir -p $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/conf/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/diameter/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/postman/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/radius/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/tariffplans/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/tutorial_tests/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/tutorials/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
-cp -rpf src/github.com/cgrates/cgrates/data/storage/mongo $RPM_BUILD_ROOT%{_datarootdir}/%{name}/storage
-cp -rpf src/github.com/cgrates/cgrates/data/storage/mysql $RPM_BUILD_ROOT%{_datarootdir}/%{name}/storage
-cp -rpf src/github.com/cgrates/cgrates/data/storage/postgres $RPM_BUILD_ROOT%{_datarootdir}/%{name}/storage
-install -D -m 0644 -p src/github.com/cgrates/cgrates/data/conf/%{name}/%{name}.json $RPM_BUILD_ROOT%{_sysconfdir}/%{name}/%{name}.json
+cp -rpf src/github.com/Omnitouch/cgrates/data/conf/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/diameter/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/postman/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/radius/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/tariffplans/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/tutorial_tests/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/tutorials/ $RPM_BUILD_ROOT%{_datarootdir}/%{name}
+cp -rpf src/github.com/Omnitouch/cgrates/data/storage/mongo $RPM_BUILD_ROOT%{_datarootdir}/%{name}/storage
+cp -rpf src/github.com/Omnitouch/cgrates/data/storage/mysql $RPM_BUILD_ROOT%{_datarootdir}/%{name}/storage
+cp -rpf src/github.com/Omnitouch/cgrates/data/storage/postgres $RPM_BUILD_ROOT%{_datarootdir}/%{name}/storage
+install -D -m 0644 -p src/github.com/Omnitouch/cgrates/data/conf/%{name}/%{name}.json $RPM_BUILD_ROOT%{_sysconfdir}/%{name}/%{name}.json
 install -D -m 0755 -p bin/cgr-console $RPM_BUILD_ROOT%{_bindir}/cgr-console
 install -D -m 0755 -p bin/cgr-engine $RPM_BUILD_ROOT%{_bindir}/cgr-engine
 install -D -m 0755 -p bin/cgr-loader $RPM_BUILD_ROOT%{_bindir}/cgr-loader
@@ -102,13 +102,13 @@ mkdir -p $RPM_BUILD_ROOT%{_spooldir}/analyzers
 mkdir -p $RPM_BUILD_ROOT%{_libdir}/cache_dump
 mkdir -p $RPM_BUILD_ROOT/etc/logrotate.d
 mkdir -p $RPM_BUILD_ROOT/etc/rsyslog.d
-install -m 755 src/github.com/cgrates/cgrates/data/conf/logging/logrotate.conf $RPM_BUILD_ROOT/etc/logrotate.d/%{name}
-install -m 755 src/github.com/cgrates/cgrates/data/conf/logging/rsyslog.conf $RPM_BUILD_ROOT/etc/rsyslog.d/%{name}.conf
-install -D -m 0644 -p src/github.com/cgrates/cgrates/packages/redhat_fedora/%{name}.options $RPM_BUILD_ROOT%{_sysconfdir}/sysconfig/%{name}
+install -m 755 src/github.com/Omnitouch/cgrates/data/conf/logging/logrotate.conf $RPM_BUILD_ROOT/etc/logrotate.d/%{name}
+install -m 755 src/github.com/Omnitouch/cgrates/data/conf/logging/rsyslog.conf $RPM_BUILD_ROOT/etc/rsyslog.d/%{name}.conf
+install -D -m 0644 -p src/github.com/Omnitouch/cgrates/packages/redhat_fedora/%{name}.options $RPM_BUILD_ROOT%{_sysconfdir}/sysconfig/%{name}
 %if 0%{?fedora} > 16 || 0%{?rhel} > 6
-	install -D -m 0644 -p src/github.com/cgrates/cgrates/packages/redhat_fedora/%{name}.service $RPM_BUILD_ROOT%{_unitdir}/%{name}.service
+	install -D -m 0644 -p src/github.com/Omnitouch/cgrates/packages/redhat_fedora/%{name}.service $RPM_BUILD_ROOT%{_unitdir}/%{name}.service
 %else
-	install -D -m 0755 -p src/github.com/cgrates/cgrates/packages/redhat_fedora/%{name}.init $RPM_BUILD_ROOT%{_initrddir}/%{name}
+	install -D -m 0755 -p src/github.com/Omnitouch/cgrates/packages/redhat_fedora/%{name}.init $RPM_BUILD_ROOT%{_initrddir}/%{name}
 %endif
 
 %files

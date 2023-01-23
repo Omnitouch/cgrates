@@ -1,8 +1,8 @@
-module github.com/cgrates/cgrates
+module github.com/Omnitouch/cgrates
 
 go 1.18
 
-replace github.com/cgrates/cgrates => /usr/src/cgrates
+replace github.com/Omnitouch/cgrates => /usr/src/cgrates
 // replace github.com/Omnitouch/go-diameter => github.com/Omnitouch/go-diameter/v4
 
 // replace github.com/cgrates/rpcclient => ../rpcclient

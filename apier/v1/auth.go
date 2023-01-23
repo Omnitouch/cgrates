@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // Returns MaxUsage (for calls in seconds), -1 for no limit

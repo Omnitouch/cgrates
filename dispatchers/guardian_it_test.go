@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var sTestsDspGrd = []func(t *testing.T){

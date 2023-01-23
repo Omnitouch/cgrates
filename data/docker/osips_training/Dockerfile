@@ -24,10 +24,10 @@ RUN chsh -s /usr/bin/zsh
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # get cgrates from github
-RUN mkdir -p /root/code/src/github.com/cgrates; cd /root/code/src/github.com/cgrates; git clone https://github.com/cgrates/cgrates.git
+RUN mkdir -p /root/code/src/github.com/cgrates; cd /root/code/src/github.com/cgrates; git clone https://github.com/Omnitouch/cgrates.git
 
 # create link to cgrates dir
-RUN ln -s /root/code/src/github.com/cgrates/cgrates /root/cgr
+RUN ln -s /root/code/src/github.com/Omnitouch/cgrates /root/cgr
 
 
 # build cgrates
@@ -36,10 +36,10 @@ RUN cd /root/cgr; GOROOT=/root/go GOPATH=/root/code PATH=$GOROOT/bin:$GOPATH/bin
 # create links
 RUN ln -s /root/code/bin/cgr-engine /usr/bin/
 RUN ln -s /root/code/bin/cgr-loader /usr/bin/
-RUN ln -s /root/code/src/github.com/cgrates/cgrates/data /usr/share/cgrates
+RUN ln -s /root/code/src/github.com/Omnitouch/cgrates/data /usr/share/cgrates
 
 # prepare zshrc
 RUN echo 'export GOROOT=/root/go; export GOPATH=/root/code; export PATH=$GOROOT/bin:$GOPATH/bin:$PATH'>>/root/.zshrc
 
 # set start command
-CMD /root/code/src/github.com/cgrates/cgrates/data/docker/osips_training/start.sh
+CMD /root/code/src/github.com/Omnitouch/cgrates/data/docker/osips_training/start.sh

@@ -24,7 +24,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // ChargingInterval represents one interval out of Usage providing charging info

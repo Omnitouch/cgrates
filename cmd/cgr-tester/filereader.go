@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func NewFileReaderTester(fPath, cgrAddr string, parallel, runs int, reqSep []byte) (frt *FileReaderTester, err error) {

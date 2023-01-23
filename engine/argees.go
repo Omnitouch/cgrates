@@ -21,7 +21,7 @@ package engine
 import (
 	"encoding/json"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // CGREventWithEeIDs struct is moved in engine due to importing ciclying packages in order to unmarshalling properly for our EventCost type. This is the API struct argument

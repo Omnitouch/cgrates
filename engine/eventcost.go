@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // NewBareEventCost will intialize the EventCost with minimum information

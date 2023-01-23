@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestLibSuppliersSortCost(t *testing.T) {

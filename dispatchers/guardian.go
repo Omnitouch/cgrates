@@ -21,7 +21,7 @@ package dispatchers
 import (
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // GuardianSv1Ping interogates GuardianSv1 server responsible to process the event

@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/ugocodec/codec"
 	"go.mongodb.org/mongo-driver/bson"
 )

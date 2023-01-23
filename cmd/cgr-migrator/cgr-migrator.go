@@ -25,9 +25,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/migrator"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/migrator"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var (

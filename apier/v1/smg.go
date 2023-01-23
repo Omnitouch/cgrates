@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/sessions"
 )
 
 func NewSMGenericV1(sS *sessions.SessionS) *SMGenericV1 {

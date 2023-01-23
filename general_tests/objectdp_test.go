@@ -20,8 +20,8 @@ package general_tests
 import (
 	"testing"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestAccountNewObjectDPFieldAsInterface(t *testing.T) {

@@ -21,12 +21,12 @@ package services
 import (
 	"sync"
 
-	"github.com/cgrates/cgrates/ees"
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/ees"
+	"github.com/Omnitouch/cgrates/engine"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/servmanager"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/servmanager"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // NewGlobalVarS .

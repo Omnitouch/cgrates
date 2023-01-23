@@ -21,7 +21,7 @@ package config
 import (
 	"strings"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // MigratorCgrCfg the migrator config section

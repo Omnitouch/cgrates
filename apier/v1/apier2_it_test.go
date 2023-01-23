@@ -30,12 +30,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/scheduler"
+	"github.com/Omnitouch/cgrates/scheduler"
 
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/dispatchers"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/dispatchers"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 var (

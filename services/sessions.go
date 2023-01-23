@@ -22,14 +22,14 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cgrates/cgrates/cores"
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/cores"
+	"github.com/Omnitouch/cgrates/engine"
 
-	v1 "github.com/cgrates/cgrates/apier/v1"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/servmanager"
-	"github.com/cgrates/cgrates/sessions"
-	"github.com/cgrates/cgrates/utils"
+	v1 "github.com/Omnitouch/cgrates/apier/v1"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/servmanager"
+	"github.com/Omnitouch/cgrates/sessions"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 

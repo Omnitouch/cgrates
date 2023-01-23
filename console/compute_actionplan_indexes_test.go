@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/cgrates/cgrates/apier/v1"
-	"github.com/cgrates/cgrates/utils"
+	v1 "github.com/Omnitouch/cgrates/apier/v1"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func TestCmdComputeActionPlanIndexes(t *testing.T) {

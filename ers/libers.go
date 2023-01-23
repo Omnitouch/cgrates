@@ -23,10 +23,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cgrates/cgrates/agents"
-	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/agents"
+	"github.com/Omnitouch/cgrates/config"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 func getProcessOptions(erOpts *config.EventReaderOpts) (eeOpts *config.EventExporterOpts) {

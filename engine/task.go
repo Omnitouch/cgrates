@@ -21,7 +21,7 @@ package engine
 import (
 	"strings"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // Task is a one time action executed by the scheduler

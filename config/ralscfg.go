@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // RalsCfg is rater config section

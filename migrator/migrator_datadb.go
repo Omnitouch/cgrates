@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package migrator
 
 import (
-	"github.com/cgrates/cgrates/engine"
+	"github.com/Omnitouch/cgrates/engine"
 )
 
 type MigratorDataDB interface {

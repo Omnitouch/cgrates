@@ -26,7 +26,7 @@ import (
 	"net/rpc"
 	"testing"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 type mockRWC struct{}

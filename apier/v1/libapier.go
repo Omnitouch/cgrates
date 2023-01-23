@@ -21,8 +21,8 @@ package v1
 import (
 	"strings"
 
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/engine"
+	"github.com/Omnitouch/cgrates/utils"
 )
 
 // CallCache caching the item based on cacheopt

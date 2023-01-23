@@ -33,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
+	"github.com/Omnitouch/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
