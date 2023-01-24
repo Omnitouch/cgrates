@@ -1,0 +1,74 @@
+{
+// CGRateS Configuration file
+//
+// Used for cgradmin
+// Starts rater, scheduler
+
+"general": {
+    "log_level": 7,
+	"poster_attempts": 1,
+	"failed_posts_ttl": "1",
+},
+
+"rpc_conns": {
+	"conn1": {
+		"strategy": "*first",
+		"conns": [{"address": "127.0.0.1:2013", "transport":"*gob"}],
+	},
+},
+
+"listen": {
+	"rpc_json": ":2012",			// RPC JSON listening address
+	"rpc_gob": ":2013",			// RPC GOB listening address
+	"http": ":2080",				// HTTP listening address
+},
+
+
+"data_db": {
+	"db_type": "*internal",	
+},
+
+
+"stor_db": {
+	"db_type": "*internal",	
+},
+
+"rals": {
+	"enabled": true,
+	"stats_conns": ["*internal"],
+},
+
+"schedulers": {
+	"enabled": true,
+	"cdrs_conns": ["conn1"],
+},
+
+"cdrs": {
+	"enabled": true,
+	"chargers_conns":["conn1"],
+},
+
+"chargers": {
+	"enabled": true,
+},
+
+
+"thresholds": {
+	"enabled": true,
+	"store_interval": "-1",
+},
+
+
+
+"stats": {
+	"enabled": true,
+	"store_interval": "-1",
+},
+
+
+"apiers": {
+	"enabled": true,
+	"scheduler_conns": ["*internal"],
+},
+
+}

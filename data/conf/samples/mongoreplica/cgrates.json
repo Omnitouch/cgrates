@@ -1,0 +1,117 @@
+{
+// CGRateS Configuration file
+
+
+"general": {
+	"log_level": 7,
+	"reply_timeout": "30s",
+},
+
+
+"listen": {
+	"rpc_json": ":2012",
+	"rpc_gob": ":2013",
+	"http": ":2080",
+},
+
+
+"data_db": {								// database used to store runtime data (eg: accounts, cdr stats)
+	"db_type": "mongo",						// data_db type: <redis|mongo>
+	"db_host": "192.168.56.202:27017,192.168.56.203:27017,192.168.56.204",					// data_db host address
+	"db_port": 27017, 						// data_db port to reach the database
+	"db_name": "teoOnline?replicaSet=rs0&authSource=admin", 
+	"db_user": "cgrates", 					// username to use when connecting to data_db
+	"db_password": "CGRateS.org", 						// password to use when connecting to data_db
+},
+
+
+"stor_db": {
+	"db_type": "mongo",						// data_db type: <redis|mongo>
+	"db_host": "192.168.56.202:27017,192.168.56.203:27017,192.168.56.204",					// data_db host address
+	"db_port": 27017, 						// data_db port to reach the database
+	"db_name": "teoOffline?replicaSet=rs0&authSource=admin",
+	"db_user": "cgrates", 					// username to use when connecting to data_db
+	"db_password": "CGRateS.org", 						// password to use when connecting to data_db
+},
+
+
+"rals": {
+	"enabled": true,
+	"thresholds_conns": ["*internal"],
+},
+
+
+"schedulers": {
+	"enabled": true,
+},
+
+
+"cdrs": {
+	"enabled": true,
+},
+
+
+"cdre": {
+	"TestTutITExportCDR": {
+		"fields": [
+			{"path": "*exp.CGRID", "type": "*composed", "value": "~*req.CGRID"},
+			{"path": "*exp.RunID", "type": "*composed", "value": "~*req.RunID"},
+			{"path": "*exp.OriginID", "type": "*composed", "value": "~*req.OriginID"},
+			{"path": "*exp.RequestType", "type": "*composed", "value": "~*req.RequestType"},
+			{"path": "*exp.Tenant", "type": "*composed", "value": "~*req.Tenant"},
+			{"path": "*exp.Category", "type": "*composed", "value": "~*req.Category"},
+			{"path": "*exp.Account", "type": "*composed", "value": "~*req.Account"},
+			{"path": "*exp.Destination", "type": "*composed", "value": "~*req.Destination"},
+			{"path": "*exp.AnswerTime", "type": "*composed", "value": "~*req.AnswerTime", "layout": "2006-01-02T15:04:05Z07:00"},
+			{"path": "*exp.Usage", "type": "*composed", "value": "~*req.Usage"},
+			{"path": "*exp.Cost", "type": "*composed", "value": "~*req.Cost", "rounding_decimals": 4},
+			{"path": "*exp.MatchedDestinationID", "type": "*composed", "value": "~*req.CostDetails:s/\"MatchedDestId\":.*_(\\w{4})/${1}/:s/\"MatchedDestId\":\"INTERNAL\"/ON010/"},
+		],
+	},
+},
+
+
+"resources": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": ["*internal"]
+},
+
+
+"stats": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": ["*internal"],
+},
+
+
+"thresholds": {
+	"enabled": true,
+	"store_interval": "1s",
+},
+
+
+"suppliers": {
+	"enabled": true,
+},
+
+
+"attributes": {							// Attribute service
+	"enabled": true,				// starts Attribute service: <true|false>.
+},
+
+"sessions": {
+	"enabled": true,
+	"rals_conns": ["*internal"],
+	"cdrs_conns": ["*internal"],
+	"chargers_conns": ["*internal"],
+},
+
+
+"apiers": {
+	"enabled": true,
+	"scheduler_conns": ["*internal"],
+},
+
+
+}

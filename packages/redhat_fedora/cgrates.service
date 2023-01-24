@@ -1,0 +1,20 @@
+# Stop dance for cgrates
+# =======================
+
+[Unit]
+Description=Control CGRateS - carrier grade real-time charging system
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/sysconfig/cgrates
+ExecStart=/usr/bin/cgr-engine $OPTIONS
+KillMode=mixed
+User=cgrates
+Group=cgrates
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

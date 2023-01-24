@@ -1,0 +1,78 @@
+{
+// CGRateS Configuration file
+//
+// Used in general_tests
+
+"general": {
+	"log_level": 7,
+    "poster_attempts": 1,
+	"failed_posts_ttl": "1",
+},
+
+"data_db":{
+	"db_type": "*internal"
+},
+
+
+"stor_db": {
+	"db_type": "*internal"
+},
+
+"attributes": {								
+	"enabled": true,
+},
+
+"chargers":{
+	"enabled": true,
+	"attributes_conns": ["*internal"],
+},
+
+"cdre":{
+	"aws_test_file": {
+		"export_format": "*amqp_json_map",
+		"export_path": "amqps://guest:guest@localhost:256733/",
+		"attempts": 1,									// export attempts
+		"synchronous": true,							// block processing until export has a result
+		"fields": [
+			{"path": "*exp.CGRID", "type": "*composed", "value": "~*req.CGRID"},
+		],
+	},
+},
+
+"stats": {									
+	"enabled": true,
+	"store_interval": "-1",
+},
+
+"thresholds": {
+	"enabled": true,
+	"store_interval": "-1",
+},
+
+"rals": {
+	"enabled": true
+},
+
+
+"schedulers": {
+	"enabled": true
+},
+
+
+"cdrs": {
+	"enabled": true,
+	"rals_conns": ["*internal"],
+	"attributes_conns": ["*internal"],
+	"chargers_conns": ["*internal"],
+	"stats_conns": ["*internal"],
+	"thresholds_conns": ["*internal"],
+	"online_cdr_exports": ["aws_test_file"],
+},
+
+
+"apiers": {
+	"enabled": true,
+	"scheduler_conns": ["*internal"],
+},
+
+}
