@@ -2,9 +2,7 @@ module github.com/Omnitouch/cgrates
 
 go 1.15
 
-
-replace github.com/Omnitouch/cgrates => /usr/src/cgrates
-
+// replace github.com/Omnitouch/cgrates => /usr/src/cgrates
 
 require (
 	cloud.google.com/go v0.41.1-0.20190715155837-570ba224802b // indirect
